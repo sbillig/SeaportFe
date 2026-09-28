@@ -8,9 +8,9 @@ the port and, for compiler defects, the fix branch.
 
 ## 1. Internal borrowck error on field access through a temporary pointer
 
-Status: compiler bug, fixed on branch `fix/temporary-pointer-field-projection-2`
-(see COMPILER_FIXES.md). Writes through a temporary (`f().field = x`) are
-still rejected by the type checker, see #2.
+Status: compiler bug, fixed on branch `fix/temporary-pointer-field-projection`
+(see COMPILER_FIXES.md), which also makes writes through a temporary
+pointer (`f().field = x`, `f().field += x`) assignable.
 
 ```fe
 use core::ptr::MemArray
@@ -35,7 +35,9 @@ Workaround: always bind `ptr_at(..)` results to locals.
 
 ## 2. Assignment to a field of an indexed element is rejected
 
-Status: language limitation / diagnostic
+Status: language limitation (open). Writes through temporary pointers are
+covered by the fix for #1; `IndexMut` element fields (`arr[i].field = x`)
+are still rejected.
 
 `arr[i].field = x` (with `arr: MemArray<S>`, which implements `IndexMut`)
 fails with `error[8-0017]: not assignable left-hand side of assignment`, even
