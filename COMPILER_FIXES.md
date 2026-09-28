@@ -48,3 +48,17 @@ Base: `feat/abi-structs` (PR #1606), since the fix completes that feature.
 - `cargo nextest run --release --workspace`: 3661 passed, 1 skipped.
   The expected diagnostics of `ty_check/abi_unsupported_field` gained one
   more "doesn't implement `SolCompat`" error for the invalid field type.
+
+### `fix/temporary-pointer-field-projection-2` (ISSUES.md #1)
+
+Base: `upstream/master` `5a298985b`; cherry-picked into `seaport-integration`.
+
+- `0e6216312` Project fields through pointer temporaries: a field read of a
+  call result of pointer type (`orders.ptr_at(0).n`) lowered to a value
+  projection on the pointer, which normalization rejected because raw
+  pointers are not capabilities. The projection now addresses the pointee
+  through a capability target place, like the deref of a pointer local.
+- Regression test: `crates/fe/tests/fixtures/fe_test/pointer_temporary_projection.fe`
+  (fails with error 16-0004 before the fix).
+- Newsfragment: `newsfragments/+pointer-temporary-projection.bugfix.md`.
+- `cargo nextest run --release --workspace`: 3653 passed, 1 skipped.

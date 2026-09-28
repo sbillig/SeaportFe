@@ -8,7 +8,9 @@ the port and, for compiler defects, the fix branch.
 
 ## 1. Internal borrowck error on field access through a temporary pointer
 
-Status: compiler bug (fix branch: TBD)
+Status: compiler bug, fixed on branch `fix/temporary-pointer-field-projection-2`
+(see COMPILER_FIXES.md). Writes through a temporary (`f().field = x`) are
+still rejected by the type checker, see #2.
 
 ```fe
 use core::ptr::MemArray
