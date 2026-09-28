@@ -42,7 +42,8 @@ work. Workaround: `let p = arr.ptr_at(i); p.field = x`.
 
 ## 3. `#[abi]` structs cannot be used in events or errors
 
-Status: gap in PR #1606 (`#[abi]` structs), compiler fix branch: TBD
+Status: gap in PR #1606 (`#[abi]` structs); fixed on branch
+`fix/abi-struct-sol-compat` (see COMPILER_FIXES.md)
 
 An `#[event]` field of type `DynArray<S>` (or `S`) with `#[abi] struct S` fails
 at MIR lowering:
@@ -57,7 +58,12 @@ structs do not implement `SolCompat`. The diagnostic does not mention the
 missing trait implementation. Seaport needs struct arrays in `OrderFulfilled`,
 a struct in `OrderValidated`, and `Side` in errors.
 
-Workaround: hand-written `impl SolCompat for S` with the tuple signature.
+Workaround (before the fix): hand-written `impl SolCompat for S` with the
+tuple signature. The fix also needed a CTFE shape check change: a child
+value from the generic `DynArray` impl kept the type `(Item::S, String<2>)`
+with an unnormalized projection, which the check compared against the
+normalized type ("constant child type differs from its aggregate field
+type").
 
 ## 4. `String<N>` constants silently accept shorter literals
 
@@ -109,3 +115,24 @@ Status: language limitation (ergonomics)
 holding `ops: RawOps` cannot call a function that `uses (storage:
 RawStorage)`: `error[8-0036]: missing effect RawStorage required by ...`.
 Workaround: storage helpers take `ops: RawOps` throughout.
+
+## 8. Aggregate constants through associated type projections
+
+Status: compiler limitation (found while fixing #3)
+
+A constant whose declared type is an associated type projection resolving
+to a tuple or struct is rejected when a runtime value is required:
+
+```fe
+impl SolCompat for One {
+    type S = (String<1>, String<5>, String<1>)
+    const SOL_TYPE: Self::S = ("(", "uint8", ")")
+}
+const X: <One as SolCompat>::S = <One as SolCompat>::SOL_TYPE
+// error[8-0064]: const value must be resolvable during type checking
+```
+
+`type S = String<7>` works, and CTFE evaluates the aggregate fine (event
+`TOPIC0`s built from it are correct). Generated impl consts are validated
+with this stricter policy, so the fix for #3 exempts the generated
+`SolCompat::SOL_TYPE` (a compile-time-only type name) instead.
