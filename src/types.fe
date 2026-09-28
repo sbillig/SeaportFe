@@ -145,13 +145,35 @@ pub struct Execution {
 }
 impl Copy for Execution {}
 
+/// `SpentItem` as decoded by zones (strict `uint8` item type).
+#[abi]
+pub struct ZoneSpentItem {
+    pub itemType: u8,
+    pub token: Address,
+    pub identifier: u256,
+    pub amount: u256,
+}
+impl Copy for ZoneSpentItem {}
+
+/// `ReceivedItem` as decoded by zones (strict `uint8` item type).
+#[abi]
+pub struct ZoneReceivedItem {
+    pub itemType: u8,
+    pub token: Address,
+    pub identifier: u256,
+    pub amount: u256,
+    pub recipient: Address,
+}
+impl Copy for ZoneReceivedItem {}
+
+/// Incoming `ZoneParameters`; Seaport itself encodes zone calls by hand.
 #[abi]
 pub struct ZoneParameters {
     pub orderHash: Bytes32,
     pub fulfiller: Address,
     pub offerer: Address,
-    pub offer: DynArray<SpentItem>,
-    pub consideration: DynArray<ReceivedItem>,
+    pub offer: DynArray<ZoneSpentItem>,
+    pub consideration: DynArray<ZoneReceivedItem>,
     pub extraData: Bytes,
     pub orderHashes: DynArray<Bytes32>,
     pub startTime: u256,
