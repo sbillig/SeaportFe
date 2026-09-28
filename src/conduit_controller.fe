@@ -1,0 +1,312 @@
+// SPDX-License-Identifier: MIT
+// ConduitController: deploys conduits with CREATE2 and manages their
+// owners and open channels.
+//
+// `_conduits` keeps Solidity's layout: `mapping(address => ConduitProperties)`
+// at slot 0 with key, owner, potentialOwner, `address[] channels` and
+// `mapping(address => uint256) channelIndexesPlusOne` at offsets 0 to 4.
+use core::ptr::MemBuffer
+use std::abi::{Bytes32, DynArray, MemVec, sol}
+use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, RawStorage, create2_address, keccak256, keccak_words, revert_error}
+use super::conduit::{Conduit, ConduitMsg}
+
+#[event]
+pub struct NewConduit {
+    pub conduit: Address,
+    pub conduitKey: Bytes32,
+}
+
+#[event]
+pub struct OwnershipTransferred {
+    #[indexed]
+    pub conduit: Address,
+    #[indexed]
+    pub previousOwner: Address,
+    #[indexed]
+    pub newOwner: Address,
+}
+
+#[event]
+pub struct PotentialOwnerUpdated {
+    #[indexed]
+    pub newPotentialOwner: Address,
+}
+
+#[error]
+pub struct InvalidCreator {}
+#[error]
+pub struct InvalidInitialOwner {}
+#[error]
+pub struct NewPotentialOwnerAlreadySet { pub conduit: Address, pub newPotentialOwner: Address }
+#[error]
+pub struct NoPotentialOwnerCurrentlySet { pub conduit: Address }
+#[error]
+pub struct NoConduit {}
+#[error]
+pub struct ConduitAlreadyExists { pub conduit: Address }
+#[error]
+pub struct CallerIsNotOwner { pub conduit: Address }
+#[error]
+pub struct NewPotentialOwnerIsZeroAddress { pub conduit: Address }
+#[error]
+pub struct CallerIsNotNewPotentialOwner { pub conduit: Address }
+#[error]
+pub struct ChannelOutOfRange { pub conduit: Address }
+
+pub msg ConduitControllerMsg {
+    #[selector = sol("createConduit(bytes32,address)")]
+    CreateConduit { conduitKey: Bytes32, initialOwner: Address } -> Address,
+    #[selector = sol("updateChannel(address,address,bool)")]
+    UpdateChannel { conduit: Address, channel: Address, isOpen: bool },
+    #[selector = sol("transferOwnership(address,address)")]
+    TransferOwnership { conduit: Address, newPotentialOwner: Address },
+    #[selector = sol("cancelOwnershipTransfer(address)")]
+    CancelOwnershipTransfer { conduit: Address },
+    #[selector = sol("acceptOwnership(address)")]
+    AcceptOwnership { conduit: Address },
+    #[selector = sol("ownerOf(address)")]
+    OwnerOf { conduit: Address } -> Address,
+    #[selector = sol("getKey(address)")]
+    GetKey { conduit: Address } -> Bytes32,
+    #[selector = sol("getConduit(bytes32)")]
+    GetConduit { conduitKey: Bytes32 } -> (Address, bool),
+    #[selector = sol("getPotentialOwner(address)")]
+    GetPotentialOwner { conduit: Address } -> Address,
+    #[selector = sol("getChannelStatus(address,address)")]
+    GetChannelStatus { conduit: Address, channel: Address } -> bool,
+    #[selector = sol("getTotalChannels(address)")]
+    GetTotalChannels { conduit: Address } -> u256,
+    #[selector = sol("getChannel(address,uint256)")]
+    GetChannel { conduit: Address, channelIndex: u256 } -> Address,
+    #[selector = sol("getChannels(address)")]
+    GetChannels { conduit: Address } -> DynArray<Address>,
+    #[selector = sol("getConduitCodeHashes()")]
+    GetConduitCodeHashes {} -> (Bytes32, Bytes32),
+}
+
+pub struct CodeHashes {
+    pub creation: u256,
+    pub runtime: u256,
+}
+
+impl Copy for CodeHashes {}
+
+fn base(_ conduit: Address) -> u256 {
+    keccak_words([conduit.inner, 0])
+}
+
+fn key_of(_ conduit: Address) -> u256 uses (storage: RawStorage) {
+    storage.sload(base(conduit))
+}
+
+fn owner_of(_ conduit: Address) -> Address uses (storage: RawStorage) {
+    Address { inner: storage.sload(base(conduit) + 1) }
+}
+
+fn potential_owner_of(_ conduit: Address) -> Address uses (storage: RawStorage) {
+    Address { inner: storage.sload(base(conduit) + 2) }
+}
+
+fn channels_slot(_ conduit: Address) -> u256 {
+    base(conduit) + 3
+}
+
+fn channel_element_slot(_ conduit: Address, _ index: u256) -> u256 {
+    keccak_words([channels_slot(conduit)]) + index
+}
+
+fn channel_index_slot(_ conduit: Address, _ channel: Address) -> u256 {
+    keccak_words([channel.inner, base(conduit) + 4])
+}
+
+fn assert_conduit_exists(_ conduit: Address) uses (storage: RawStorage) {
+    if key_of(conduit) == 0 {
+        revert_error(NoConduit {})
+    }
+}
+
+fn assert_caller_is_conduit_owner(_ conduit: Address) uses (ctx: Ctx, storage: RawStorage) {
+    assert_conduit_exists(conduit)
+    if ctx.caller() != owner_of(conduit) {
+        revert_error(CallerIsNotOwner { conduit })
+    }
+}
+
+fn derive_conduit(_ hashes: CodeHashes, conduit_key: u256) -> Address uses (ctx: Ctx) {
+    create2_address(deployer: ctx.address(), salt: conduit_key, init_code_hash: hashes.creation)
+}
+
+fn conduit_init_code_hash() -> u256 uses (ops: mut RawOps) {
+    let len = <Conduit as Contract>::init_code_len()
+    let mut code = MemBuffer::with_capacity(len)
+    ops.codecopy(dest: mut code, dest_offset: 0, src_offset: <Conduit as Contract>::init_code_offset(), len)
+    keccak256(code.span())
+}
+
+/// Constructor: hash the conduit creation code and deploy the conduit for
+/// the zero key to learn its runtime code hash.
+pub fn setup_code_hashes() -> CodeHashes uses (ctx: Ctx, create: mut Create, ops: mut RawOps) {
+    let creation = conduit_init_code_hash()
+    let zero_conduit = create.create2<Conduit>(value: 0, args: (), salt: 0)
+    CodeHashes { creation, runtime: ctx.extcodehash(zero_conduit) }
+}
+
+pub fn create_conduit(_ hashes: CodeHashes, conduit_key: u256, initial_owner: Address) -> Address
+uses (ctx: Ctx, create: mut Create, storage: mut RawStorage, log: mut Log)
+{
+    if initial_owner.inner == 0 {
+        revert_error(InvalidInitialOwner {})
+    }
+    if conduit_key >> 96 != ctx.caller().inner {
+        revert_error(InvalidCreator {})
+    }
+    let conduit = derive_conduit(hashes, conduit_key)
+    if ctx.extcodehash(conduit) == hashes.runtime {
+        revert_error(ConduitAlreadyExists { conduit })
+    }
+    create.create2<Conduit>(value: 0, args: (), salt: conduit_key)
+    let slot = base(conduit)
+    storage.sstore(slot: slot + 1, value: initial_owner.inner)
+    storage.sstore(slot, value: conduit_key)
+    log.emit(NewConduit { conduit, conduitKey: Bytes32 { val: conduit_key } })
+    log.emit(OwnershipTransferred { conduit, previousOwner: Address::zero(), newOwner: initial_owner })
+    conduit
+}
+
+pub fn update_channel(_ conduit: Address, channel: Address, is_open: bool)
+uses (ctx: Ctx, call: mut Call, storage: mut RawStorage)
+{
+    assert_caller_is_conduit_owner(conduit)
+    conduit.call(ConduitMsg::UpdateChannel { channel, isOpen: is_open })
+    let index_slot = channel_index_slot(conduit, channel)
+    let channel_index_plus_one = storage.sload(index_slot)
+    let previously_open = channel_index_plus_one != 0
+    let length_slot = channels_slot(conduit)
+    if is_open && !previously_open {
+        let length = storage.sload(length_slot)
+        storage.sstore(slot: channel_element_slot(conduit, length), value: channel.inner)
+        storage.sstore(slot: length_slot, value: length + 1)
+        storage.sstore(slot: index_slot, value: length + 1)
+    } else if !is_open && previously_open {
+        let removed_index = channel_index_plus_one - 1
+        let final_index = storage.sload(length_slot) - 1
+        if final_index != removed_index {
+            let final_channel = Address { inner: storage.sload(channel_element_slot(conduit, final_index)) }
+            storage.sstore(slot: channel_element_slot(conduit, removed_index), value: final_channel.inner)
+            storage.sstore(slot: channel_index_slot(conduit, final_channel), value: channel_index_plus_one)
+        }
+        storage.sstore(slot: channel_element_slot(conduit, final_index), value: 0)
+        storage.sstore(slot: length_slot, value: final_index)
+        storage.sstore(slot: index_slot, value: 0)
+    }
+}
+
+pub fn transfer_ownership(_ conduit: Address, new_potential_owner: Address) uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+    assert_caller_is_conduit_owner(conduit)
+    if new_potential_owner.inner == 0 {
+        revert_error(NewPotentialOwnerIsZeroAddress { conduit })
+    }
+    if new_potential_owner == potential_owner_of(conduit) {
+        revert_error(NewPotentialOwnerAlreadySet { conduit, newPotentialOwner: new_potential_owner })
+    }
+    log.emit(PotentialOwnerUpdated { newPotentialOwner: new_potential_owner })
+    storage.sstore(slot: base(conduit) + 2, value: new_potential_owner.inner)
+}
+
+pub fn cancel_ownership_transfer(_ conduit: Address) uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+    assert_caller_is_conduit_owner(conduit)
+    if potential_owner_of(conduit).inner == 0 {
+        revert_error(NoPotentialOwnerCurrentlySet { conduit })
+    }
+    log.emit(PotentialOwnerUpdated { newPotentialOwner: Address::zero() })
+    storage.sstore(slot: base(conduit) + 2, value: 0)
+}
+
+pub fn accept_ownership(_ conduit: Address) uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+    assert_conduit_exists(conduit)
+    if ctx.caller() != potential_owner_of(conduit) {
+        revert_error(CallerIsNotNewPotentialOwner { conduit })
+    }
+    log.emit(PotentialOwnerUpdated { newPotentialOwner: Address::zero() })
+    storage.sstore(slot: base(conduit) + 2, value: 0)
+    log.emit(OwnershipTransferred { conduit, previousOwner: owner_of(conduit), newOwner: ctx.caller() })
+    storage.sstore(slot: base(conduit) + 1, value: ctx.caller().inner)
+}
+
+pub fn get_channels(_ conduit: Address) -> DynArray<Address> uses (storage: RawStorage) {
+    assert_conduit_exists(conduit)
+    let length = storage.sload(channels_slot(conduit))
+    let mut channels = MemVec<Address>::zeroed(length)
+    let mut i: u256 = 0
+    while i < length {
+        channels.set(index: i, value: Address { inner: storage.sload(channel_element_slot(conduit, i)) })
+        i += 1
+    }
+    channels.to_dyn_array()
+}
+
+pub contract ConduitController {
+    hashes: CodeHashes,
+
+    init() uses (mut hashes, ctx: Ctx, create: mut Create, ops: mut RawOps) {
+        hashes = setup_code_hashes()
+    }
+
+    recv ConduitControllerMsg {
+        CreateConduit { conduitKey, initialOwner } -> Address uses (hashes, ctx: Ctx, create: mut Create, storage: mut RawStorage, log: mut Log) {
+            create_conduit(hashes, conduit_key: conduitKey.val, initial_owner: initialOwner)
+        }
+        UpdateChannel { conduit, channel, isOpen } uses (ctx: Ctx, call: mut Call, storage: mut RawStorage) {
+            update_channel(conduit, channel, is_open: isOpen)
+        }
+        TransferOwnership { conduit, newPotentialOwner } uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+            transfer_ownership(conduit, new_potential_owner: newPotentialOwner)
+        }
+        CancelOwnershipTransfer { conduit } uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+            cancel_ownership_transfer(conduit)
+        }
+        AcceptOwnership { conduit } uses (ctx: Ctx, storage: mut RawStorage, log: mut Log) {
+            accept_ownership(conduit)
+        }
+        OwnerOf { conduit } -> Address uses (storage: RawStorage) {
+            assert_conduit_exists(conduit)
+            owner_of(conduit)
+        }
+        GetKey { conduit } -> Bytes32 uses (storage: RawStorage) {
+            let key = key_of(conduit)
+            if key == 0 {
+                revert_error(NoConduit {})
+            }
+            Bytes32 { val: key }
+        }
+        GetConduit { conduitKey } -> (Address, bool) uses (hashes, ctx: Ctx) {
+            let conduit = derive_conduit(hashes, conduit_key: conduitKey.val)
+            (conduit, ctx.extcodehash(conduit) == hashes.runtime)
+        }
+        GetPotentialOwner { conduit } -> Address uses (storage: RawStorage) {
+            assert_conduit_exists(conduit)
+            potential_owner_of(conduit)
+        }
+        GetChannelStatus { conduit, channel } -> bool uses (storage: RawStorage) {
+            assert_conduit_exists(conduit)
+            storage.sload(channel_index_slot(conduit, channel)) != 0
+        }
+        GetTotalChannels { conduit } -> u256 uses (storage: RawStorage) {
+            assert_conduit_exists(conduit)
+            storage.sload(channels_slot(conduit))
+        }
+        GetChannel { conduit, channelIndex } -> Address uses (storage: RawStorage) {
+            assert_conduit_exists(conduit)
+            if channelIndex >= storage.sload(channels_slot(conduit)) {
+                revert_error(ChannelOutOfRange { conduit })
+            }
+            Address { inner: storage.sload(channel_element_slot(conduit, channelIndex)) }
+        }
+        GetChannels { conduit } -> DynArray<Address> uses (storage: RawStorage) {
+            get_channels(conduit)
+        }
+        GetConduitCodeHashes {} -> (Bytes32, Bytes32) uses (hashes) {
+            (Bytes32 { val: hashes.creation }, Bytes32 { val: hashes.runtime })
+        }
+    }
+}

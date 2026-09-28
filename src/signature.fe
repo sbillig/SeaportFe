@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: MIT
+// Verifiers._verifySignature, bulk order proofs and
+// SignatureVerification._assertValidSignature.
+use core::ptr::{self, MemBuffer, MemSpan}
+use core::result::Result
+use core::option::Option
+use std::abi::Bytes32
+use std::evm::{Address, Call, Ctx, RawOps, keccak_words, revert_error}
+use std::evm::crypto::ecrecover_raw
+use super::arr::ByteRef
+use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
+use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
+use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+
+const EIP1271_SELECTOR_WORD: u256 = 0x1626ba7e00000000000000000000000000000000000000000000000000000000
+const ALL_BUT_HIGHEST_BIT: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+/// `_domainSeparator`: the cached separator unless the chain id changed.
+pub fn domain_separator(_ env: Env) -> u256 uses (ctx: Ctx) {
+    if ctx.chainid() == env.chain_id {
+        env.domain_separator
+    } else {
+        derive_domain_separator(name_hash: env.name_hash, chain_id: ctx.chainid(), this: ctx.address())
+    }
+}
+
+/// `_verifySignature`: accept the order if the caller is the offerer or the
+/// signature (possibly carrying a bulk order proof) is valid for `offerer`.
+pub fn verify_signature(_ env: Env, offerer: Address, order_hash: u256, signature: ByteRef)
+uses (ctx: Ctx, call: Call, ops: RawOps)
+{
+    if offerer == ctx.caller() {
+        return
+    }
+    let domain = domain_separator(env)
+    let original_digest = derive_eip712_digest(domain_separator: domain, order_hash)
+    let original_length = signature.len
+    let mut digest = original_digest
+    let mut signature_length = original_length
+    if is_valid_bulk_order_size(original_length) {
+        let (bulk_hash, ecdsa_length) = compute_bulk_order_proof(signature, leaf: order_hash)
+        digest = derive_eip712_digest(domain_separator: domain, order_hash: bulk_hash)
+        signature_length = ecdsa_length
+    }
+    assert_valid_signature(
+        signer: offerer,
+        digest,
+        original_digest,
+        original_length,
+        signature_length,
+        signature,
+    )
+}
+
+/// 64 or 65 signature bytes, a 3-byte key and 1 to 24 proof elements.
+pub fn is_valid_bulk_order_size(_ length: u256) -> bool {
+    length.wrapping_sub(0x63) < 0x2e2 && ((length.wrapping_add(0x1d)) & 31) < 2
+}
+
+/// The bulk order hash proven by the proof appended to `signature`, and the
+/// length of the ECDSA signature in front of it.
+pub fn compute_bulk_order_proof(_ signature: ByteRef, leaf: u256) -> (u256, u256) {
+    let full_length = signature.len
+    let signature_length = 65 - (full_length & 1)
+    let height = (full_length - signature_length) >> 5
+    let key_ptr = ptr::offset_bytes(signature.payload(), signature_length)
+    let key = load_word(key_ptr) >> 0xe8
+    // Proof elements are addressed from the key pointer; advancing a pointer
+    // variable inside the loop hangs the compiler (ISSUES.md #6).
+    let first = load_word(ptr::offset_bytes(key_ptr, 3))
+    let mut node = if key & 1 == 1 {
+        keccak_words([first, leaf])
+    } else {
+        keccak_words([leaf, first])
+    }
+    let mut i: u256 = 1
+    while i < height {
+        let element = load_word(ptr::offset_bytes(key_ptr, 3 + i * 32))
+        node = if (key >> i) & 1 == 1 {
+            keccak_words([element, node])
+        } else {
+            keccak_words([node, element])
+        }
+        i += 1
+    }
+    (keccak_words([bulk_order_typehash(height), node]), signature_length)
+}
+
+/// `_assertValidSignature`: ECDSA (65 bytes, or 64-byte EIP-2098) recovery
+/// first, then EIP-1271 `isValidSignature` on the signer with the original
+/// digest and the complete original signature.
+pub fn assert_valid_signature(
+    signer: Address,
+    digest: u256,
+    original_digest: u256,
+    original_length: u256,
+    signature_length: u256,
+    _ signature: ByteRef,
+) uses (ctx: Ctx, call: Call, ops: RawOps) {
+    let payload = signature.payload()
+    let mut recovered: u256 = 0
+    let mut v: u256 = 0
+    if signature_length == 64 || signature_length == 65 {
+        let r = load_word(payload)
+        let mut s = load_word(ptr::offset_bytes(payload, 32))
+        if signature_length == 65 {
+            v = load_word(ptr::offset_bytes(payload, 64)) >> 248
+        } else {
+            v = (s >> 255) + 27
+            s = s & ALL_BUT_HIGHEST_BIT
+        }
+        recovered = match ecrecover_raw(hash: digest, v, r, s) {
+            Result::Ok(Option::Some(address)) => address
+            _ => 0
+        }
+    }
+    let mut success = signer.inner == recovered && signer.inner != 0
+    if !success {
+        // isValidSignature(bytes32,bytes) with the unpadded signature bytes.
+        let args = MemBuffer::alloc(original_length + 0x64)
+        store_word(args.ptr(), EIP1271_SELECTOR_WORD)
+        store_word(ptr::offset_bytes(args.ptr(), 4), original_digest)
+        store_word(ptr::offset_bytes(args.ptr(), 0x24), 0x40)
+        store_word(ptr::offset_bytes(args.ptr(), 0x44), original_length)
+        ptr::copy_raw(dest: ptr::offset_bytes(args.ptr(), 0x64), source: payload, len: original_length)
+        // Seaport reads the result from scratch space that still holds the
+        // recovered address; short returndata only overwrites its prefix.
+        let mut ret = MemBuffer::with_capacity(32)
+        store_word(ret.ptr(), recovered)
+        success = call.raw_staticcall(addr: signer, gas: ctx.gas(), args: args.span(), ret: mut ret).success()
+        if success && load_word(ret.ptr()) != EIP1271_SELECTOR_WORD {
+            if ctx.extcodesize(signer) != 0 {
+                revert_error(BadContractSignature {})
+            }
+            if (65 as u256).wrapping_sub(signature_length) > 1 {
+                revert_error(InvalidSignature {})
+            }
+            if signature_length == 65 && v != 27 && v != 28 {
+                revert_error(BadSignatureV { v: v.downcast_truncate() })
+            }
+            revert_error(InvalidSigner {})
+        }
+    }
+    if !success {
+        revert_with_reason_if_one_is_returned()
+        revert_error(BadContractSignature {})
+    }
+}

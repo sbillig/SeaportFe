@@ -1,0 +1,6 @@
+/toolchain/
+/reference/
+/build/
+/tests/out/
+/tests/cache/
+__pycache__/

@@ -1,0 +1,357 @@
+// SPDX-License-Identifier: MIT
+// Storage of CounterManager, OrderValidator and ReentrancyGuard.
+//
+// The mappings keep Solidity's layout (`_counters` at slot 0,
+// `_orderStatus` at slot 1, `_contractNonces` at slot 2) and
+// `OrderStatus` is packed like the Solidity struct:
+// isValidated (bits 0-7), isCancelled (8-15), numerator (16-135) and
+// denominator (136-255). Seaport's tests locate and overwrite these slots.
+use std::abi::Bytes32
+use std::evm::{Address, Create, Ctx, Call, Log, RawOps, RawStorage, keccak_words, revert_error}
+use core::ptr::{MemBuffer, MemSpan}
+use super::errors::{
+    CounterIncremented,
+    InvalidMsgValue,
+    NoReentrantCalls,
+    OrderAlreadyFilled,
+    OrderIsCancelled,
+    OrderPartiallyFilled,
+    TStoreAlreadyActivated,
+    TStoreNotSupported,
+}
+use super::hashing::Env
+
+pub const MAX_UINT120: u256 = 0xffffffffffffffffffffffffffffff
+
+pub fn counter_slot(_ offerer: Address) -> u256 {
+    keccak_words([offerer.inner, 0])
+}
+
+pub fn status_slot(_ order_hash: u256) -> u256 {
+    keccak_words([order_hash, 1])
+}
+
+pub fn nonce_slot(_ offerer: Address) -> u256 {
+    keccak_words([offerer.inner, 2])
+}
+
+pub fn get_counter(_ offerer: Address) -> u256 uses (ops: RawOps) {
+    ops.sload(counter_slot(offerer))
+}
+
+pub fn get_contract_nonce(_ offerer: Address) -> u256 uses (ops: RawOps) {
+    ops.sload(nonce_slot(offerer))
+}
+
+/// `contractNonce = _contractNonces[offerer]++`
+pub fn take_contract_nonce(_ offerer: Address) -> u256 uses (ops: mut RawOps) {
+    let slot = nonce_slot(offerer)
+    let nonce = ops.sload(slot)
+    ops.sstore(slot, value: nonce.wrapping_add(1))
+    nonce
+}
+
+pub struct OrderStatus {
+    pub is_validated: bool,
+    pub is_cancelled: bool,
+    pub numerator: u256,
+    pub denominator: u256,
+}
+
+impl Copy for OrderStatus {}
+
+pub fn unpack_status(_ raw: u256) -> OrderStatus {
+    OrderStatus {
+        is_validated: raw & 0xff != 0,
+        is_cancelled: (raw >> 8) & 0xff != 0,
+        numerator: (raw >> 16) & MAX_UINT120,
+        denominator: (raw >> 136) & MAX_UINT120,
+    }
+}
+
+pub fn read_status(_ order_hash: u256) -> OrderStatus uses (ops: RawOps) {
+    unpack_status(ops.sload(status_slot(order_hash)))
+}
+
+/// `_verifyOrderStatus`: whether the order can still be filled.
+pub fn verify_order_status(
+    _ order_hash: u256,
+    _ status: OrderStatus,
+    only_allow_unused: bool,
+    revert_on_invalid: bool,
+) -> bool {
+    if status.is_cancelled {
+        if revert_on_invalid {
+            revert_error(OrderIsCancelled { orderHash: Bytes32 { val: order_hash } })
+        }
+        return false
+    }
+    if status.numerator != 0 {
+        if only_allow_unused {
+            revert_error(OrderPartiallyFilled { orderHash: Bytes32 { val: order_hash } })
+        } else if status.numerator >= status.denominator {
+            if revert_on_invalid {
+                revert_error(OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } })
+            }
+            return false
+        }
+    }
+    true
+}
+
+pub fn set_validated(_ order_hash: u256) uses (ops: mut RawOps) {
+    let slot = status_slot(order_hash)
+    ops.sstore(slot, value: ops.sload(slot) | 1)
+}
+
+/// isValidated = false, isCancelled = true; the fill fraction is kept.
+pub fn set_cancelled(_ order_hash: u256) uses (ops: mut RawOps) {
+    let slot = status_slot(order_hash)
+    let raw = ops.sload(slot)
+    ops.sstore(slot, value: (raw & !(0xffff as u256)) | 0x100)
+}
+
+/// Basic orders are always filled completely: validated, 1/1.
+pub fn set_basic_order_filled(_ order_hash: u256) uses (ops: mut RawOps) {
+    ops.sstore(slot: status_slot(order_hash), value: 0x0000000000000000000000000000010000000000000000000000000000010001)
+}
+
+fn gcd(_ a: u256, _ b: u256) -> u256 {
+    let mut x = a
+    let mut y = b
+    while y != 0 {
+        let c = y
+        y = x % c
+        x = c
+    }
+    x
+}
+
+fn panic_arithmetic() -> ! {
+    revert_error(std::evm::Panic::from(std::evm::PANIC_OVERFLOW))
+}
+
+/// The fill fraction `_validateOrder` derives from the requested fraction and
+/// the stored status: the requested fraction is reduced so that the total
+/// never exceeds the whole order.
+pub fn adjust_fill_fraction(_ raw_status: u256, numerator: u256, denominator: u256) -> (u256, u256) {
+    let filled_denominator = raw_status >> 136
+    if filled_denominator == 0 {
+        return (numerator, denominator)
+    }
+    let mut filled_numerator = (raw_status >> 16) & MAX_UINT120
+    let mut num = numerator
+    let mut den = denominator
+    if den == 1 {
+        return (filled_denominator - filled_numerator, filled_denominator)
+    }
+    if den == filled_denominator {
+        filled_numerator = num + filled_numerator
+        if filled_numerator > den {
+            num = num - (filled_numerator - den)
+        }
+        return (num, den)
+    }
+    filled_numerator = filled_numerator * den
+    num = num * filled_denominator
+    den = den * filled_denominator
+    filled_numerator = num + filled_numerator
+    if filled_numerator > den {
+        let carry = filled_numerator - den
+        num = num - carry
+        filled_numerator = filled_numerator - carry
+    }
+    if den > MAX_UINT120 {
+        let scale_down = gcd(num, gcd(filled_numerator, den))
+        let safe_scale_down = if scale_down == 0 { 1 } else { scale_down }
+        num = num / safe_scale_down
+        den = den / safe_scale_down
+        if den > MAX_UINT120 {
+            panic_arithmetic()
+        }
+    }
+    (num, den)
+}
+
+/// `_updateStatus`: add `numerator / denominator` to the filled fraction.
+/// Returns false (or reverts with `OrderAlreadyFilled`) if the total would
+/// exceed the whole order.
+pub fn update_status(
+    _ order_hash: u256,
+    numerator: u256,
+    denominator: u256,
+    revert_on_invalid: bool,
+) -> bool uses (ops: mut RawOps) {
+    let slot = status_slot(order_hash)
+    let raw = ops.sload(slot)
+    let filled_denominator = raw >> 136
+    let mut has_carry = false
+    let mut filled_numerator = numerator
+    let mut den = denominator
+    if filled_denominator != 0 {
+        filled_numerator = (raw >> 16) & MAX_UINT120
+        if den == filled_denominator {
+            filled_numerator = numerator + filled_numerator
+            has_carry = filled_numerator > den
+        } else {
+            filled_numerator = filled_numerator * den
+            let num = numerator * filled_denominator
+            den = den * filled_denominator
+            filled_numerator = num + filled_numerator
+            has_carry = filled_numerator > den
+            if filled_numerator > MAX_UINT120 || den > MAX_UINT120 {
+                let scale_down = gcd(filled_numerator, den)
+                let safe_scale_down = if scale_down == 0 { 1 } else { scale_down }
+                filled_numerator = filled_numerator / safe_scale_down
+                den = den / safe_scale_down
+                if filled_numerator > MAX_UINT120 || den > MAX_UINT120 {
+                    panic_arithmetic()
+                }
+            }
+        }
+    }
+    if has_carry {
+        if revert_on_invalid {
+            revert_error(OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } })
+        }
+        return false
+    }
+    ops.sstore(slot, value: 1 | (filled_numerator << 16) | (den << 136))
+    true
+}
+
+/// `_incrementCounter`.
+pub fn increment_counter() -> u256 uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
+    let quasi_random = ctx.blockhash(ctx.block_number().wrapping_sub(1)) >> 128
+    let slot = counter_slot(ctx.caller())
+    let new_counter = quasi_random.wrapping_add(ops.sload(slot))
+    ops.sstore(slot, value: new_counter)
+    log.emit(CounterIncremented { newCounter: new_counter, offerer: ctx.caller() })
+    new_counter
+}
+
+// ReentrancyGuard -------------------------------------------------------------
+
+/// uint256(uint32(bytes4(keccak256("_REENTRANCY_GUARD_SLOT"))))
+pub const REENTRANCY_GUARD_SLOT: u256 = 0x929eee14
+const NOT_ENTERED_TSTORE: u256 = 0
+const ENTERED_TSTORE: u256 = 1
+const ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE: u256 = 2
+const TSTORE_ENABLED_SSTORE: u256 = 0
+pub const NOT_ENTERED_SSTORE: u256 = 1
+const ENTERED_SSTORE: u256 = 2
+const ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE: u256 = 3
+
+fn tload_guard() -> u256 uses (ops: RawOps) {
+    ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT).read()
+}
+
+fn tstore_guard(_ value: u256) uses (ops: mut RawOps) {
+    ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT).write(value)
+}
+
+fn revert_reentrant() -> ! {
+    revert_error(NoReentrantCalls {})
+}
+
+pub fn set_reentrancy_guard(_ env: Env, accept_native_tokens: bool) uses (ops: mut RawOps) {
+    let accept: u256 = if accept_native_tokens { 1 } else { 0 }
+    if env.tstore_initial_support {
+        if tload_guard() != 0 {
+            revert_reentrant()
+        }
+        tstore_guard(ENTERED_TSTORE + accept)
+        return
+    }
+    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    if guard == TSTORE_ENABLED_SSTORE {
+        if tload_guard() != 0 {
+            revert_reentrant()
+        }
+        tstore_guard(ENTERED_TSTORE + accept)
+        return
+    }
+    if guard != NOT_ENTERED_SSTORE {
+        revert_reentrant()
+    }
+    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: ENTERED_SSTORE + accept)
+}
+
+pub fn clear_reentrancy_guard(_ env: Env) uses (ops: mut RawOps) {
+    if env.tstore_initial_support {
+        tstore_guard(NOT_ENTERED_TSTORE)
+        return
+    }
+    if ops.sload(REENTRANCY_GUARD_SLOT) == TSTORE_ENABLED_SSTORE {
+        tstore_guard(NOT_ENTERED_TSTORE)
+        return
+    }
+    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
+}
+
+pub fn assert_non_reentrant(_ env: Env) uses (ops: RawOps) {
+    if env.tstore_initial_support {
+        if tload_guard() != 0 {
+            revert_reentrant()
+        }
+        return
+    }
+    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    if guard == TSTORE_ENABLED_SSTORE {
+        if tload_guard() != 0 {
+            revert_reentrant()
+        }
+    }
+    if guard > NOT_ENTERED_SSTORE {
+        revert_reentrant()
+    }
+}
+
+pub fn assert_accepting_native_tokens(_ env: Env) uses (ctx: Ctx, ops: RawOps) {
+    if env.tstore_initial_support {
+        if tload_guard() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
+            revert_error(InvalidMsgValue { value: ctx.value() })
+        }
+        return
+    }
+    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    if guard == TSTORE_ENABLED_SSTORE {
+        if tload_guard() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
+            revert_error(InvalidMsgValue { value: ctx.value() })
+        }
+    }
+    if guard != 0 && guard != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE {
+        revert_error(InvalidMsgValue { value: ctx.value() })
+    }
+}
+
+/// Initcode of the contract used to probe TLOAD support:
+/// `PUSH1 0x02 PUSH1 0x1e PUSH2 0x3d5c RETURNDATASIZE MSTORE RETURN`, which
+/// deploys the runtime `RETURNDATASIZE TLOAD` (reverts before Cancun).
+const TLOAD_TEST_PAYLOAD: u256 = 0x6002601e613d5c3d52f3
+
+pub fn prepare_tload_test() -> Address uses (create: mut Create) {
+    let code = MemBuffer::alloc(32)
+    let word = core::ptr::cast<u8, u256>(code.ptr())
+    *word = TLOAD_TEST_PAYLOAD
+    create.create_raw(value: 0, init_code: code.span().slice(offset: 22, len: 10))
+}
+
+/// Whether TLOAD works, by calling the probe contract with a tenth of the
+/// remaining gas.
+pub fn test_tload(_ probe: Address) -> bool uses (ctx: Ctx, call: Call) {
+    let mut ret = MemBuffer::empty()
+    call.raw_staticcall(addr: probe, gas: ctx.gas() / 10, args: MemSpan::empty(), ret: mut ret).success()
+}
+
+/// `__activateTstore`: switch to transient storage after a hard fork.
+pub fn activate_tstore(_ env: Env) uses (ctx: Ctx, call: Call, ops: mut RawOps) {
+    let activatable = ops.sload(REENTRANCY_GUARD_SLOT) == NOT_ENTERED_SSTORE
+    if env.tstore_initial_support || !activatable {
+        revert_error(TStoreAlreadyActivated {})
+    }
+    if !test_tload(env.tload_test_contract) {
+        revert_error(TStoreNotSupported {})
+    }
+    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: TSTORE_ENABLED_SSTORE)
+}

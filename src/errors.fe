@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: MIT
+// Custom errors and events of the seaport-types interfaces
+// (ConsiderationEventsAndErrors, AmountDerivationErrors,
+// CriteriaResolutionErrors, FulfillmentApplicationErrors, ReentrancyErrors,
+// SignatureVerificationErrors, TokenTransferrerErrors, ZoneInteractionErrors).
+use std::abi::{Bytes32, DynArray}
+use std::evm::Address
+use super::types::{OrderParameters, ReceivedItem, SpentItem}
+
+#[event]
+pub struct OrderFulfilled {
+    pub orderHash: Bytes32,
+    #[indexed]
+    pub offerer: Address,
+    #[indexed]
+    pub zone: Address,
+    pub recipient: Address,
+    pub offer: DynArray<SpentItem>,
+    pub consideration: DynArray<ReceivedItem>,
+}
+
+#[event]
+pub struct OrderCancelled {
+    pub orderHash: Bytes32,
+    #[indexed]
+    pub offerer: Address,
+    #[indexed]
+    pub zone: Address,
+}
+
+#[event]
+pub struct OrderValidated {
+    pub orderHash: Bytes32,
+    pub orderParameters: OrderParameters,
+}
+
+#[event]
+pub struct OrdersMatched {
+    pub orderHashes: DynArray<Bytes32>,
+}
+
+#[event]
+pub struct CounterIncremented {
+    pub newCounter: u256,
+    #[indexed]
+    pub offerer: Address,
+}
+
+#[error]
+pub struct OrderAlreadyFilled { pub orderHash: Bytes32 }
+#[error]
+pub struct InvalidTime { pub startTime: u256, pub endTime: u256 }
+#[error]
+pub struct InvalidConduit { pub conduitKey: Bytes32, pub conduit: Address }
+#[error]
+pub struct MissingOriginalConsiderationItems {}
+#[error]
+pub struct ConsiderationLengthNotEqualToTotalOriginal {}
+#[error]
+pub struct InvalidCallToConduit { pub conduit: Address }
+#[error]
+pub struct ConsiderationNotMet { pub orderIndex: u256, pub considerationIndex: u256, pub shortfallAmount: u256 }
+#[error]
+pub struct InsufficientNativeTokensSupplied {}
+#[error]
+pub struct NativeTokenTransferGenericFailure { pub account: Address, pub amount: u256 }
+#[error]
+pub struct PartialFillsNotEnabledForOrder {}
+#[error]
+pub struct OrderIsCancelled { pub orderHash: Bytes32 }
+#[error]
+pub struct OrderPartiallyFilled { pub orderHash: Bytes32 }
+#[error]
+pub struct CannotCancelOrder {}
+#[error]
+pub struct BadFraction {}
+#[error]
+pub struct InvalidMsgValue { pub value: u256 }
+#[error]
+pub struct InvalidBasicOrderParameterEncoding {}
+#[error]
+pub struct NoSpecifiedOrdersAvailable {}
+#[error]
+pub struct InvalidNativeOfferItem {}
+
+// AmountDerivationErrors
+#[error]
+pub struct InexactFraction {}
+
+// CriteriaResolutionErrors
+#[error]
+pub struct OrderCriteriaResolverOutOfRange { pub side: u8 }
+#[error]
+pub struct UnresolvedOfferCriteria { pub orderIndex: u256, pub offerIndex: u256 }
+#[error]
+pub struct UnresolvedConsiderationCriteria { pub orderIndex: u256, pub considerationIndex: u256 }
+#[error]
+pub struct OfferCriteriaResolverOutOfRange {}
+#[error]
+pub struct ConsiderationCriteriaResolverOutOfRange {}
+#[error]
+pub struct CriteriaNotEnabledForItem {}
+#[error]
+pub struct InvalidProof {}
+
+// FulfillmentApplicationErrors
+#[error]
+pub struct MissingFulfillmentComponentOnAggregation { pub side: u8 }
+#[error]
+pub struct OfferAndConsiderationRequiredOnFulfillment {}
+#[error]
+pub struct MismatchedFulfillmentOfferAndConsiderationComponents { pub fulfillmentIndex: u256 }
+#[error]
+pub struct InvalidFulfillmentComponentData {}
+
+// ReentrancyErrors
+#[error]
+pub struct NoReentrantCalls {}
+#[error]
+pub struct TStoreAlreadyActivated {}
+#[error]
+pub struct TStoreNotSupported {}
+#[error]
+pub struct TloadTestContractDeploymentFailed {}
+
+// SignatureVerificationErrors
+#[error]
+pub struct BadSignatureV { pub v: u8 }
+#[error]
+pub struct InvalidSigner {}
+#[error]
+pub struct InvalidSignature {}
+#[error]
+pub struct BadContractSignature {}
+
+// TokenTransferrerErrors
+#[error]
+pub struct InvalidERC721TransferAmount { pub amount: u256 }
+#[error]
+pub struct MissingItemAmount {}
+#[error]
+pub struct UnusedItemParameters {}
+#[error]
+pub struct TokenTransferGenericFailure {
+    pub token: Address,
+    pub from: Address,
+    pub to: Address,
+    pub identifier: u256,
+    pub amount: u256,
+}
+#[error]
+pub struct ERC1155BatchTransferGenericFailure {
+    pub token: Address,
+    pub from: Address,
+    pub to: Address,
+    pub identifiers: DynArray<u256>,
+    pub amounts: DynArray<u256>,
+}
+#[error]
+pub struct BadReturnValueFromERC20OnTransfer {
+    pub token: Address,
+    pub from: Address,
+    pub to: Address,
+    pub amount: u256,
+}
+#[error]
+pub struct NoContract { pub account: Address }
+#[error]
+pub struct Invalid1155BatchTransferEncoding {}
+
+// ZoneInteractionErrors
+#[error]
+pub struct InvalidRestrictedOrder { pub orderHash: Bytes32 }
+#[error]
+pub struct InvalidContractOrder { pub orderHash: Bytes32 }

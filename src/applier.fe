@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: MIT
+// FulfillmentApplier: aggregate fulfillment components into executions.
+use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
+use std::evm::keccak_words
+use super::arr::Arr
+use super::errors::{
+    InvalidFulfillmentComponentData,
+    MismatchedFulfillmentOfferAndConsiderationComponents,
+    MissingFulfillmentComponentOnAggregation,
+    MissingItemAmount,
+    OfferAndConsiderationRequiredOnFulfillment,
+}
+use super::model::{Component, Item, OrderState}
+use super::types::OFFER
+
+/// An `Execution`: a `ReceivedItem` plus the source and conduit key.
+pub struct ExecutionState {
+    pub item_type: u256,
+    pub token: Address,
+    pub identifier: u256,
+    pub amount: u256,
+    pub recipient: Address,
+    pub offerer: Address,
+    pub conduit_key: u256,
+}
+
+impl Copy for ExecutionState {}
+
+pub fn empty_execution() -> ExecutionState {
+    ExecutionState {
+        item_type: 0,
+        token: Address::zero(),
+        identifier: 0,
+        amount: 0,
+        recipient: Address::zero(),
+        offerer: Address::zero(),
+        conduit_key: 0,
+    }
+}
+
+fn raise_aggregation_errors(_ error_buffer: u256) {
+    if error_buffer != 0 {
+        if error_buffer == 1 {
+            revert_error(MissingItemAmount {})
+        }
+        revert_error(Panic::from(PANIC_OVERFLOW))
+    }
+}
+
+/// `_aggregateValidFulfillmentOfferItems`: sum the referenced offer items of
+/// available orders, zeroing them. All of them must share type, token,
+/// identifier, offerer and conduit key. The first used component is moved to
+/// index 0.
+pub fn aggregate_offer_items(_ orders: Arr<OrderState>, components: Arr<Component>, recipient: Address) -> ExecutionState {
+    let mut execution = empty_execution()
+    let mut amount: u256 = 0
+    let mut error_buffer: u256 = 0
+    let mut data_hash: u256 = 0
+    let mut k: u256 = 0
+    while k < components.len() {
+        let component = *components.at(k)
+        if component.order_index >= orders.len() {
+            revert_error(InvalidFulfillmentComponentData {})
+        }
+        let order = orders.at(component.order_index)
+        let offer = order.offer
+        if component.item_index < offer.len() && order.numerator != 0 {
+            let item = offer.at(component.item_index)
+            let new_amount = amount.wrapping_add(item.amount)
+            if new_amount < amount {
+                error_buffer = error_buffer | 2
+            }
+            if item.amount == 0 {
+                error_buffer = error_buffer | 1
+            }
+            amount = new_amount
+            item.amount = 0
+            if data_hash == 0 {
+                execution.item_type = item.item_type
+                execution.token = item.token
+                execution.identifier = item.identifier
+                execution.recipient = recipient
+                execution.offerer = order.offerer
+                execution.conduit_key = order.conduit_key
+                data_hash = keccak_words([item.item_type, item.token.inner, item.identifier])
+                if k != 0 {
+                    let first = components.at(0)
+                    *first = component
+                }
+            } else if order.offerer != execution.offerer
+                || order.conduit_key != execution.conduit_key
+                || data_hash != keccak_words([item.item_type, item.token.inner, item.identifier])
+            {
+                revert_error(InvalidFulfillmentComponentData {})
+            }
+        }
+        k += 1
+    }
+    execution.amount = amount
+    raise_aggregation_errors(error_buffer)
+    execution
+}
+
+/// `_aggregateValidFulfillmentConsiderationItems`: like the offer side, but
+/// items must also share the recipient; offerer and conduit key are given.
+pub fn aggregate_consideration_items(
+    _ orders: Arr<OrderState>,
+    components: Arr<Component>,
+    offerer: Address,
+    conduit_key: u256,
+) -> ExecutionState {
+    let mut execution = empty_execution()
+    let mut amount: u256 = 0
+    let mut error_buffer: u256 = 0
+    let mut data_hash: u256 = 0
+    let mut k: u256 = 0
+    while k < components.len() {
+        let component = *components.at(k)
+        if component.order_index >= orders.len() {
+            revert_error(InvalidFulfillmentComponentData {})
+        }
+        let order = orders.at(component.order_index)
+        let consideration = order.consideration
+        if component.item_index < consideration.len() && order.numerator != 0 {
+            let item = consideration.at(component.item_index)
+            let new_amount = amount.wrapping_add(item.amount)
+            if new_amount < amount {
+                error_buffer = error_buffer | 2
+            }
+            if item.amount == 0 {
+                error_buffer = error_buffer | 1
+            }
+            amount = new_amount
+            item.amount = 0
+            let item_hash = keccak_words([item.item_type, item.token.inner, item.identifier, 0, item.receiver.inner])
+            if data_hash == 0 {
+                execution.item_type = item.item_type
+                execution.token = item.token
+                execution.identifier = item.identifier
+                execution.recipient = item.receiver
+                execution.offerer = offerer
+                execution.conduit_key = conduit_key
+                data_hash = item_hash
+                if k != 0 {
+                    let first = components.at(0)
+                    *first = component
+                }
+            } else if data_hash != item_hash {
+                revert_error(InvalidFulfillmentComponentData {})
+            }
+        }
+        k += 1
+    }
+    execution.amount = amount
+    raise_aggregation_errors(error_buffer)
+    execution
+}
+
+/// `_applyFulfillment`: match aggregated offer items against aggregated
+/// consideration items; the unmatched rest stays on the first component.
+pub fn apply_fulfillment(
+    _ orders: Arr<OrderState>,
+    offer_components: Arr<Component>,
+    consideration_components: Arr<Component>,
+    fulfillment_index: u256,
+) -> ExecutionState {
+    if offer_components.len() == 0 || consideration_components.len() == 0 {
+        revert_error(OfferAndConsiderationRequiredOnFulfillment {})
+    }
+    let consideration = aggregate_consideration_items(orders, components: consideration_components, offerer: Address::zero(), conduit_key: 0)
+    if consideration.amount == 0 {
+        return consideration
+    }
+    let mut execution = aggregate_offer_items(orders, components: offer_components, recipient: consideration.recipient)
+    if execution.item_type != consideration.item_type
+        || execution.token != consideration.token
+        || execution.identifier != consideration.identifier
+    {
+        revert_error(MismatchedFulfillmentOfferAndConsiderationComponents { fulfillmentIndex: fulfillment_index })
+    }
+    if consideration.amount > execution.amount {
+        let target = *consideration_components.at(0)
+        let order = orders.at(target.order_index)
+        let item = order.consideration.at(target.item_index)
+        item.amount = consideration.amount - execution.amount
+    } else {
+        let target = *offer_components.at(0)
+        let order = orders.at(target.order_index)
+        let item = order.offer.at(target.item_index)
+        item.amount = execution.amount - consideration.amount
+        execution.amount = consideration.amount
+    }
+    execution
+}
+
+/// `_aggregateAvailable`
+pub fn aggregate_available(
+    _ orders: Arr<OrderState>,
+    side: u8,
+    components: Arr<Component>,
+    fulfiller_conduit_key: u256,
+    recipient: Address,
+) -> ExecutionState uses (ctx: Ctx) {
+    if components.len() == 0 {
+        revert_error(MissingFulfillmentComponentOnAggregation { side })
+    }
+    if side == OFFER {
+        aggregate_offer_items(orders, components, recipient)
+    } else {
+        aggregate_consideration_items(orders, components, offerer: ctx.caller(), conduit_key: fulfiller_conduit_key)
+    }
+}

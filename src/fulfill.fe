@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: MIT
+// OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
+use core::ptr
+use std::abi::{Bytes32, DynArray, MemVec}
+use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
+use super::amount::apply_fraction
+use super::arr::Arr
+use super::criteria::apply_criteria_resolvers
+use super::errors::{
+    BadFraction,
+    InsufficientNativeTokensSupplied,
+    InvalidNativeOfferItem,
+    InvalidTime,
+    MissingOriginalConsiderationItems,
+    OrderFulfilled,
+    PartialFillsNotEnabledForOrder,
+}
+use super::executor::{Transfer, new_accumulator, transfer, transfer_native_tokens, trigger_if_armed}
+use super::hashing::{Env, derive_order_hash}
+use super::model::{Item, OrderState, Resolver}
+use super::signature::verify_signature
+use super::status::{
+    adjust_fill_fraction,
+    clear_reentrancy_guard,
+    get_counter,
+    set_reentrancy_guard,
+    status_slot,
+    unpack_status,
+    update_status,
+    verify_order_status,
+}
+use super::types::{CONTRACT, NATIVE, ReceivedItem, SpentItem}
+use super::zone::{
+    assert_restricted_advanced_order_authorization,
+    assert_restricted_advanced_order_validity,
+    get_generated_order,
+}
+
+/// `_verifyTime`: `start_time <= now < end_time`.
+pub fn verify_time(start_time: u256, end_time: u256, revert_on_invalid: bool) -> bool uses (ctx: Ctx) {
+    let valid = start_time <= ctx.timestamp() && end_time > ctx.timestamp()
+    if revert_on_invalid && !valid {
+        revert_error(InvalidTime { startTime: start_time, endTime: end_time })
+    }
+    valid
+}
+
+/// `_assertConsiderationLengthAndGetOrderHash`
+pub fn consideration_length_checked_order_hash(_ order: *OrderState) -> u256 uses (ops: RawOps) {
+    if order.consideration.len() < order.total_original {
+        revert_error(MissingOriginalConsiderationItems {})
+    }
+    derive_order_hash(*order, counter: get_counter(order.offerer))
+}
+
+/// `_validateOrder`: the order hash and the fraction that can be filled now,
+/// or a zero fraction for an order that is not fillable (only when
+/// `revert_on_invalid` is false). Contract orders yield `(1, 1, 1)`.
+pub fn validate_order(_ env: Env, order: *OrderState, revert_on_invalid: bool) -> (u256, u256, u256)
+uses (ctx: Ctx, call: Call, ops: RawOps)
+{
+    if !verify_time(start_time: order.start_time, end_time: order.end_time, revert_on_invalid) {
+        return (0, 0, 0)
+    }
+    let numerator = order.numerator
+    let denominator = order.denominator
+    if order.order_type == CONTRACT as u256 {
+        if numerator * denominator != 1 {
+            revert_error(BadFraction {})
+        }
+        return (1, 1, 1)
+    }
+    if numerator > denominator || numerator == 0 {
+        revert_error(BadFraction {})
+    }
+    if numerator < denominator && order.order_type & 1 == 0 {
+        revert_error(PartialFillsNotEnabledForOrder {})
+    }
+    let order_hash = consideration_length_checked_order_hash(order)
+    let raw_status = ops.sload(status_slot(order_hash))
+    let status = unpack_status(raw_status)
+    if !verify_order_status(order_hash, status, only_allow_unused: false, revert_on_invalid) {
+        return (order_hash, 0, 0)
+    }
+    if !status.is_validated {
+        verify_signature(env, offerer: order.offerer, order_hash, signature: order.signature)
+    }
+    let (fill_numerator, fill_denominator) = adjust_fill_fraction(raw_status, numerator, denominator)
+    (order_hash, fill_numerator, fill_denominator)
+}
+
+/// `_applyFractions`: current amounts of the partial fill; offer items go to
+/// `recipient`.
+fn apply_fractions(_ order: *OrderState, numerator: u256, denominator: u256, recipient: Address) uses (ctx: Ctx) {
+    let offer = order.offer
+    let mut any_native = false
+    let mut i: u256 = 0
+    while i < offer.len() {
+        let item = offer.at(i)
+        if item.item_type == NATIVE as u256 {
+            any_native = true
+        }
+        item.amount = apply_fraction(
+            start_amount: item.start_amount,
+            end_amount: item.end_amount,
+            numerator,
+            denominator,
+            start_time: order.start_time,
+            end_time: order.end_time,
+            round_up: false,
+        )
+        item.receiver = recipient
+        i += 1
+    }
+    if order.order_type < 4 && any_native {
+        revert_error(InvalidNativeOfferItem {})
+    }
+    let consideration = order.consideration
+    i = 0
+    while i < consideration.len() {
+        let item = consideration.at(i)
+        item.amount = apply_fraction(
+            start_amount: item.start_amount,
+            end_amount: item.end_amount,
+            numerator,
+            denominator,
+            start_time: order.start_time,
+            end_time: order.end_time,
+            round_up: true,
+        )
+        item.receiver = item.recipient
+        i += 1
+    }
+}
+
+pub fn item_transfer(_ item: *Item) -> Transfer {
+    Transfer { item_type: item.item_type, token: item.token, identifier: item.identifier, amount: item.amount, recipient: item.receiver }
+}
+
+/// `_transferEach`: offer items from the offerer, consideration items from
+/// the caller, then refund any native tokens left in the contract.
+fn transfer_each(_ env: Env, order: *OrderState, fulfiller_conduit_key: u256, recipient: Address)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    let acc = new_accumulator()
+    let offer = order.offer
+    let mut i: u256 = 0
+    while i < offer.len() {
+        let item = offer.at(i)
+        item.receiver = recipient
+        transfer(item_transfer(item), from: order.offerer, conduit_key: order.conduit_key, acc, env)
+        i += 1
+    }
+    let consideration = order.consideration
+    i = 0
+    while i < consideration.len() {
+        let item = consideration.at(i)
+        if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
+            revert_error(InsufficientNativeTokensSupplied {})
+        }
+        transfer(item_transfer(item), from: ctx.caller(), conduit_key: fulfiller_conduit_key, acc, env)
+        i += 1
+    }
+    trigger_if_armed(acc, env)
+    let balance = ctx.selfbalance()
+    if balance != 0 {
+        transfer_native_tokens(to: ctx.caller(), amount: balance)
+    }
+}
+
+pub fn spent_items(_ items: Arr<Item>) -> DynArray<SpentItem> {
+    let mut out = MemVec<SpentItem>::zeroed(items.len())
+    let mut i: u256 = 0
+    while i < items.len() {
+        let item = items.at(i)
+        out.set(index: i, value: SpentItem { itemType: item.item_type, token: item.token, identifier: item.identifier, amount: item.amount })
+        i += 1
+    }
+    out.to_dyn_array()
+}
+
+pub fn received_items(_ items: Arr<Item>) -> DynArray<ReceivedItem> {
+    let mut out = MemVec<ReceivedItem>::zeroed(items.len())
+    let mut i: u256 = 0
+    while i < items.len() {
+        let item = items.at(i)
+        out.set(index: i, value: ReceivedItem { itemType: item.item_type, token: item.token, identifier: item.identifier, amount: item.amount, recipient: item.receiver })
+        i += 1
+    }
+    out.to_dyn_array()
+}
+
+pub fn emit_order_fulfilled(_ order_hash: u256, order: *OrderState, recipient: Address) uses (log: mut Log) {
+    log.emit(OrderFulfilled {
+        orderHash: Bytes32 { val: order_hash },
+        offerer: order.offerer,
+        zone: order.zone,
+        recipient,
+        offer: spent_items(order.offer),
+        consideration: received_items(order.consideration),
+    })
+}
+
+/// `_validateAndFulfillAdvancedOrder`
+pub fn validate_and_fulfill_advanced_order(
+    _ env: Env,
+    orders: Arr<OrderState>,
+    resolvers: Arr<Resolver>,
+    fulfiller_conduit_key: u256,
+    recipient: Address,
+) -> bool uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
+    let order = orders.at(0)
+    let order_type = order.order_type
+    set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
+    let (validated_hash, fill_numerator, fill_denominator) = validate_order(env, order, revert_on_invalid: true)
+    let mut order_hash = validated_hash
+    apply_criteria_resolvers(orders, resolvers)
+    apply_fractions(order, numerator: fill_numerator, denominator: fill_denominator, recipient)
+    let order_hashes = Arr<u256>::alloc(1)
+    *order_hashes.at(0) = 0
+    if order_type != CONTRACT as u256 {
+        assert_restricted_advanced_order_authorization(order, order_hashes, order_hash, order_index: 0)
+        let _ = update_status(order_hash, numerator: fill_numerator, denominator: fill_denominator, revert_on_invalid: true)
+    } else {
+        order_hash = get_generated_order(order, revert_on_invalid: true)
+    }
+    transfer_each(env, order, fulfiller_conduit_key, recipient)
+    *order_hashes.at(0) = order_hash
+    assert_restricted_advanced_order_validity(order, order_hashes, order_hash)
+    emit_order_fulfilled(order_hash, order, recipient)
+    clear_reentrancy_guard(env)
+    true
+}

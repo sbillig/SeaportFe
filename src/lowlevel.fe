@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: MIT
+// LowLevelHelpers and raw word access.
+use core::ptr
+use std::evm::{Ctx, RawOps, bubble_last_revert}
+
+pub fn load_word(_ at: *u8) -> u256 {
+    *ptr::cast<u8, u256>(at)
+}
+
+pub fn store_word(_ at: *u8, _ value: u256) {
+    let word = ptr::cast<u8, u256>(at)
+    *word = value
+}
+
+/// `_revertWithReasonIfOneIsReturned`: bubble returndata when there is some
+/// and copying it into memory leaves at least 32 gas.
+pub fn revert_with_reason_if_one_is_returned() uses (ctx: Ctx, ops: RawOps) {
+    let size = ops.returndatasize()
+    if size == 0 {
+        return
+    }
+    let return_data_words = (size + 31) >> 5
+    // Fe exposes neither msize nor pointer addresses (ISSUES.md #5), so the
+    // expansion cost is computed from an empty memory, which overestimates it.
+    let msize_words: u256 = 0
+    let mut cost = 3 * return_data_words
+    if return_data_words > msize_words {
+        cost = cost
+            + (return_data_words - msize_words) * 3
+            + ((return_data_words * return_data_words - msize_words * msize_words) >> 9)
+    }
+    if cost + 0x20 < ctx.gas() {
+        bubble_last_revert()
+    }
+}

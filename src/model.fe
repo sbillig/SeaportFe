@@ -1,0 +1,313 @@
+// SPDX-License-Identifier: MIT
+// Mutable in-memory order model.
+//
+// Seaport (seaport-core 1.6) decodes calldata into memory structs and then
+// reuses struct slots for derived values: after fractions are applied an
+// item's `startAmount` slot holds the current amount, its `endAmount` slot the
+// recipient, and a consideration item's `recipient` slot the original amount.
+// The port gives each of those meanings its own field instead:
+//
+// - `amount`:   the `startAmount` slot after fraction application (the
+//               current, and later the remaining unspent/unmet amount).
+// - `receiver`: the `endAmount` slot read as `ReceivedItem.recipient`.
+// - `original`: the current amount saved before fulfillment aggregation.
+use std::abi::{Bytes32, DynArray, sol::Uint120}
+use std::evm::Address
+use super::arr::{Arr, ByteRef}
+use super::types::{
+    AdvancedOrder,
+    ConsiderationItem,
+    OfferItem,
+    Order,
+    OrderComponents,
+    OrderParameters,
+    CriteriaResolver,
+    FulfillmentComponent,
+    Fulfillment,
+}
+
+pub struct Item {
+    /// Raw ItemType word (contract offerers can return any word).
+    pub item_type: u256,
+    pub token: Address,
+    pub identifier: u256,
+    pub start_amount: u256,
+    pub end_amount: u256,
+    /// `ConsiderationItem.recipient` (zero for offer items).
+    pub recipient: Address,
+    pub amount: u256,
+    pub receiver: Address,
+    pub original: u256,
+}
+
+impl Copy for Item {}
+
+pub struct OrderState {
+    pub offerer: Address,
+    pub zone: Address,
+    pub offer: Arr<Item>,
+    pub consideration: Arr<Item>,
+    pub order_type: u256,
+    pub start_time: u256,
+    pub end_time: u256,
+    pub zone_hash: u256,
+    pub salt: u256,
+    pub conduit_key: u256,
+    pub total_original: u256,
+    pub numerator: u256,
+    pub denominator: u256,
+    pub signature: ByteRef,
+    pub extra_data: ByteRef,
+    /// Encoded `authorizeOrder` calldata, reused for `validateOrder`
+    /// (seaport-core stores its pointer in the `salt` slot).
+    pub zone_call: *u8,
+    /// Size of the complete `validateOrder` calldata in `zone_call`.
+    pub zone_call_size: u256,
+    /// Byte offset of the `orderHashes` length word inside `zone_call`.
+    pub zone_call_hashes: u256,
+}
+
+impl Copy for OrderState {}
+
+pub struct Resolver {
+    pub order_index: u256,
+    pub side: u256,
+    pub index: u256,
+    pub identifier: u256,
+    pub proof: Arr<u256>,
+}
+
+impl Copy for Resolver {}
+
+pub struct Component {
+    pub order_index: u256,
+    pub item_index: u256,
+}
+
+impl Copy for Component {}
+
+fn offer_items(_ items: DynArray<OfferItem>) -> Arr<Item> {
+    let n = items.len()
+    let out = Arr<Item>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let item = items.get(i)
+        let dst = out.at(i)
+        *dst = Item {
+            item_type: item.itemType as u256,
+            token: item.token,
+            identifier: item.identifierOrCriteria,
+            start_amount: item.startAmount,
+            end_amount: item.endAmount,
+            recipient: Address::zero(),
+            amount: item.startAmount,
+            receiver: Address::zero(),
+            original: 0,
+        }
+        i += 1
+    }
+    out
+}
+
+fn consideration_items(_ items: DynArray<ConsiderationItem>) -> Arr<Item> {
+    let n = items.len()
+    let out = Arr<Item>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let item = items.get(i)
+        let dst = out.at(i)
+        *dst = Item {
+            item_type: item.itemType as u256,
+            token: item.token,
+            identifier: item.identifierOrCriteria,
+            start_amount: item.startAmount,
+            end_amount: item.endAmount,
+            recipient: item.recipient,
+            amount: item.startAmount,
+            receiver: item.recipient,
+            original: 0,
+        }
+        i += 1
+    }
+    out
+}
+
+fn from_parameters(
+    _ p: OrderParameters,
+    numerator: u256,
+    denominator: u256,
+    signature: ByteRef,
+    extra_data: ByteRef,
+) -> OrderState {
+    OrderState {
+        offerer: p.offerer,
+        zone: p.zone,
+        offer: offer_items(p.offer),
+        consideration: consideration_items(p.consideration),
+        order_type: p.orderType as u256,
+        start_time: p.startTime,
+        end_time: p.endTime,
+        zone_hash: p.zoneHash.val,
+        salt: p.salt,
+        conduit_key: p.conduitKey.val,
+        total_original: p.totalOriginalConsiderationItems,
+        numerator,
+        denominator,
+        signature,
+        extra_data,
+        zone_call: core::ptr::alloc_bytes(0),
+        zone_call_size: 0,
+        zone_call_hashes: 0,
+    }
+}
+
+pub fn from_advanced(_ order: AdvancedOrder) -> OrderState {
+    from_parameters(
+        order.parameters,
+        numerator: order.numerator.val as u256,
+        denominator: order.denominator.val as u256,
+        signature: ByteRef::of(order.signature),
+        extra_data: ByteRef::of(order.extraData),
+    )
+}
+
+pub fn from_order(_ order: Order) -> OrderState {
+    from_parameters(
+        order.parameters,
+        numerator: 1,
+        denominator: 1,
+        signature: ByteRef::of(order.signature),
+        extra_data: ByteRef::empty(),
+    )
+}
+
+/// `OrderComponents` as parameters: `totalOriginalConsiderationItems` is the
+/// supplied consideration length, and the counter is returned separately.
+pub fn from_components(_ c: OrderComponents) -> (OrderState, u256) {
+    let consideration = consideration_items(c.consideration)
+    let state = OrderState {
+        offerer: c.offerer,
+        zone: c.zone,
+        offer: offer_items(c.offer),
+        consideration,
+        order_type: c.orderType as u256,
+        start_time: c.startTime,
+        end_time: c.endTime,
+        zone_hash: c.zoneHash.val,
+        salt: c.salt,
+        conduit_key: c.conduitKey.val,
+        total_original: consideration.len(),
+        numerator: 1,
+        denominator: 1,
+        signature: ByteRef::empty(),
+        extra_data: ByteRef::empty(),
+        zone_call: core::ptr::alloc_bytes(0),
+        zone_call_size: 0,
+        zone_call_hashes: 0,
+    }
+    (state, c.counter)
+}
+
+pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Arr<OrderState> {
+    let n = orders.len()
+    let out = Arr<OrderState>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let dst = out.at(i)
+        *dst = from_advanced(orders.get(i))
+        i += 1
+    }
+    out
+}
+
+pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Arr<OrderState> {
+    let n = orders.len()
+    let out = Arr<OrderState>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let dst = out.at(i)
+        *dst = from_order(orders.get(i))
+        i += 1
+    }
+    out
+}
+
+pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Arr<Resolver> {
+    let n = resolvers.len()
+    let out = Arr<Resolver>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let r = resolvers.get(i)
+        let proof_in = r.criteriaProof
+        let proof = Arr<u256>::alloc(proof_in.len())
+        let mut j: u256 = 0
+        while j < proof_in.len() {
+            let dst = proof.at(j)
+            *dst = proof_in.get(j).val
+            j += 1
+        }
+        let dst = out.at(i)
+        *dst = Resolver { order_index: r.orderIndex, side: r.side as u256, index: r.index, identifier: r.identifier, proof }
+        i += 1
+    }
+    out
+}
+
+pub fn components(_ items: DynArray<FulfillmentComponent>) -> Arr<Component> {
+    let n = items.len()
+    let out = Arr<Component>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let c = items.get(i)
+        let dst = out.at(i)
+        *dst = Component { order_index: c.orderIndex, item_index: c.itemIndex }
+        i += 1
+    }
+    out
+}
+
+pub fn nested_components(_ groups: DynArray<DynArray<FulfillmentComponent>>) -> Arr<Arr<Component>> {
+    let n = groups.len()
+    let out = Arr<Arr<Component>>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let dst = out.at(i)
+        *dst = components(groups.get(i))
+        i += 1
+    }
+    out
+}
+
+pub struct FulfillmentState {
+    pub offer: Arr<Component>,
+    pub consideration: Arr<Component>,
+}
+
+impl Copy for FulfillmentState {}
+
+pub fn fulfillments(_ items: DynArray<Fulfillment>) -> Arr<FulfillmentState> {
+    let n = items.len()
+    let out = Arr<FulfillmentState>::alloc(n)
+    let mut i: u256 = 0
+    while i < n {
+        let f = items.get(i)
+        let dst = out.at(i)
+        *dst = FulfillmentState { offer: components(f.offerComponents), consideration: components(f.considerationComponents) }
+        i += 1
+    }
+    out
+}
+
+/// A single order in memory, for functions that take `*OrderState`.
+pub fn boxed(_ order: OrderState) -> *OrderState {
+    let at = core::ptr::alloc<OrderState>()
+    *at = order
+    at
+}
+
+/// A one-element order array (the single-order entry points).
+pub fn single(_ order: OrderState) -> Arr<OrderState> {
+    let orders = Arr<OrderState>::alloc(1)
+    *orders.at(0) = order
+    orders
+}

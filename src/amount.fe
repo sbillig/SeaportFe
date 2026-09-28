@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: MIT
+// AmountDeriver: linear interpolation of item amounts over the order's
+// lifetime and application of fill fractions.
+use std::evm::{Ctx, revert_error}
+use std::evm::crypto::mulmod
+use super::errors::InexactFraction
+
+/// `_locateCurrentAmount`: interpolate between `start_amount` and
+/// `end_amount`, rounding up for consideration and down for offer items.
+pub fn locate_current_amount(
+    start_amount: u256,
+    end_amount: u256,
+    start_time: u256,
+    end_time: u256,
+    round_up: bool,
+) -> u256 uses (ctx: Ctx) {
+    if start_amount == end_amount {
+        return end_amount
+    }
+    // The order is valid at this point: start_time <= now < end_time.
+    let duration = end_time.wrapping_sub(start_time)
+    let elapsed = ctx.timestamp().wrapping_sub(start_time)
+    let remaining = duration.wrapping_sub(elapsed)
+    let total_before_division = start_amount * remaining + end_amount * elapsed
+    if total_before_division == 0 {
+        return 0
+    }
+    let extra: u256 = if round_up { 1 } else { 0 }
+    (total_before_division - extra) / duration + extra
+}
+
+/// `_getFraction`: `value * numerator / denominator`, which must be exact.
+pub fn get_fraction(numerator: u256, denominator: u256, value: u256) -> u256 {
+    if numerator == denominator {
+        return value
+    }
+    if mulmod(value, numerator, denominator) != 0 {
+        revert_error(InexactFraction {})
+    }
+    value * numerator / denominator
+}
+
+/// `_applyFraction`
+pub fn apply_fraction(
+    start_amount: u256,
+    end_amount: u256,
+    numerator: u256,
+    denominator: u256,
+    start_time: u256,
+    end_time: u256,
+    round_up: bool,
+) -> u256 uses (ctx: Ctx) {
+    if start_amount == end_amount {
+        return get_fraction(numerator, denominator, value: end_amount)
+    }
+    locate_current_amount(
+        start_amount: get_fraction(numerator, denominator, value: start_amount),
+        end_amount: get_fraction(numerator, denominator, value: end_amount),
+        start_time,
+        end_time,
+        round_up,
+    )
+}

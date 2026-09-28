@@ -1,0 +1,391 @@
+// SPDX-License-Identifier: MIT
+// ZoneInteraction, the contract order parts of OrderValidator and the zone
+// and contract offerer calldata encodings of ConsiderationEncoder and
+// ConsiderationDecoder.
+use core::ptr::{self, MemBuffer, MemSpan}
+use std::abi::Bytes32
+use std::evm::{Address, Call, Ctx, RawOps, RawStorage, revert_error}
+use super::arr::{Arr, ByteRef}
+use super::errors::{ConsiderationLengthNotEqualToTotalOriginal, InvalidContractOrder, InvalidRestrictedOrder}
+use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+use super::model::{Item, OrderState}
+use super::status::take_contract_nonce
+use super::types::CONTRACT
+
+/// authorizeOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))
+pub const AUTHORIZE_ORDER_SELECTOR: u256 = 0x01e4d72a
+/// validateOrder(...) with the same ZoneParameters argument.
+pub const VALIDATE_ORDER_SELECTOR: u256 = 0x17b1f942
+/// generateOrder(address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256)[],bytes)
+pub const GENERATE_ORDER_SELECTOR: u256 = 0x98919765
+/// ratifyOrder((uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256)
+pub const RATIFY_ORDER_SELECTOR: u256 = 0xf4dd92ce
+
+const MAX_RETURNED_ARRAY_LENGTH: u256 = 0xffff
+
+/// Restricted orders (types 2 and 3) consult the zone unless it is the caller.
+pub fn is_restricted_and_caller_not_zone(_ order_type: u256, _ zone: Address) -> bool uses (ctx: Ctx) {
+    order_type < 4 && order_type > 1 && ctx.caller() != zone
+}
+
+fn at(_ base: *u8, _ offset: u256) -> *u8 {
+    ptr::offset_bytes(base, offset)
+}
+
+fn write_spent_items(_ dst: *u8, _ items: Arr<Item>) -> u256 {
+    let n = items.len()
+    store_word(dst, n)
+    let mut i: u256 = 0
+    while i < n {
+        let item = items.at(i)
+        let out = at(dst, 32 + i * 128)
+        store_word(out, item.item_type)
+        store_word(at(out, 32), item.token.inner)
+        store_word(at(out, 64), item.identifier)
+        store_word(at(out, 96), item.amount)
+        i += 1
+    }
+    32 + n * 128
+}
+
+fn write_received_items(_ dst: *u8, _ items: Arr<Item>) -> u256 {
+    let n = items.len()
+    store_word(dst, n)
+    let mut i: u256 = 0
+    while i < n {
+        let item = items.at(i)
+        let out = at(dst, 32 + i * 160)
+        store_word(out, item.item_type)
+        store_word(at(out, 32), item.token.inner)
+        store_word(at(out, 64), item.identifier)
+        store_word(at(out, 96), item.amount)
+        store_word(at(out, 128), item.receiver.inner)
+        i += 1
+    }
+    32 + n * 160
+}
+
+fn padded(_ len: u256) -> u256 {
+    (len + 31) & !(31 as u256)
+}
+
+fn write_bytes(_ dst: *u8, _ bytes: ByteRef) -> u256 {
+    let size = 32 + padded(bytes.len)
+    ptr::zero_bytes(dst, size)
+    store_word(dst, bytes.len)
+    ptr::copy_raw(dest: at(dst, 32), source: bytes.payload(), len: bytes.len)
+    size
+}
+
+fn write_hashes(_ dst: *u8, _ hashes: Arr<u256>) -> u256 {
+    let n = hashes.len()
+    store_word(dst, n)
+    let mut i: u256 = 0
+    while i < n {
+        store_word(at(dst, 32 + i * 32), *hashes.at(i))
+        i += 1
+    }
+    32 + n * 32
+}
+
+fn items_size(_ items: Arr<Item>, _ element: u256) -> u256 {
+    32 + items.len() * element
+}
+
+/// `_encodeAuthorizeOrder`: encode `authorizeOrder(ZoneParameters)` into
+/// `order.zone_call`. The buffer holds all `order_hashes`; the authorization
+/// call only sends the first `order_index` of them, and `validateOrder`
+/// later reuses the buffer with the final hashes.
+fn encode_authorize_order(_ order: *OrderState, order_hash: u256, order_hashes: Arr<u256>, order_index: u256) -> u256
+uses (ctx: Ctx)
+{
+    let offer_size = items_size(order.offer, 128)
+    let consideration_size = items_size(order.consideration, 160)
+    let extra_data_size = 32 + padded(order.extra_data.len)
+    let hashes_size = 32 + order_hashes.len() * 32
+    let params_size = 0x140 + offer_size + consideration_size + extra_data_size + hashes_size
+    let size = 0x24 + params_size
+    let data = ptr::alloc_bytes(size + 28)
+    store_word(data, AUTHORIZE_ORDER_SELECTOR << 224)
+    store_word(at(data, 4), 0x20)
+    let head = at(data, 0x24)
+    store_word(head, order_hash)
+    store_word(at(head, 0x20), ctx.caller().inner)
+    store_word(at(head, 0x40), order.offerer.inner)
+    let mut tail: u256 = 0x140
+    store_word(at(head, 0x60), tail)
+    tail = tail + write_spent_items(at(head, tail), order.offer)
+    store_word(at(head, 0x80), tail)
+    tail = tail + write_received_items(at(head, tail), order.consideration)
+    store_word(at(head, 0xa0), tail)
+    tail = tail + write_bytes(at(head, tail), order.extra_data)
+    store_word(at(head, 0xc0), tail)
+    let hashes_location = 0x24 + tail
+    write_hashes(at(head, tail), order_hashes)
+    store_word(at(head, 0xe0), order.start_time)
+    store_word(at(head, 0x100), order.end_time)
+    store_word(at(head, 0x120), order.zone_hash)
+    order.zone_call = data
+    order.zone_call_size = size
+    order.zone_call_hashes = hashes_location
+    store_word(at(data, hashes_location), order_index)
+    size - (order_hashes.len() - order_index) * 32
+}
+
+/// `_callAndCheckStatus`: call and require the selector as return value,
+/// reverting with `InvalidRestrictedOrder` or `InvalidContractOrder`.
+fn call_and_check_status(_ target: Address, order_hash: u256, data: *u8, size: u256, contract_order: bool)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    if !call_and_check_status_with_skip(target, order_hash, data, size, contract_order, revert_on_invalid: true) {
+        revert_invalid_order(order_hash, contract_order)
+    }
+}
+
+fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
+    if contract_order {
+        revert_error(InvalidContractOrder { orderHash: Bytes32 { val: order_hash } })
+    }
+    revert_error(InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } })
+}
+
+/// `_callAndCheckStatusWithSkip`: a failed call returns false unless
+/// `revert_on_invalid`; a wrong magic value always reverts.
+fn call_and_check_status_with_skip(
+    _ target: Address,
+    order_hash: u256,
+    data: *u8,
+    size: u256,
+    contract_order: bool,
+    revert_on_invalid: bool,
+) -> bool uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+    let magic = load_word(data) & 0xffffffff00000000000000000000000000000000000000000000000000000000
+    let mut ret = MemBuffer::with_capacity(32)
+    store_word(ret.ptr(), 0)
+    let outcome = call.raw_call(addr: target, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: data, len: size), ret: mut ret)
+    if !outcome.success() {
+        if !revert_on_invalid {
+            return false
+        }
+        revert_with_reason_if_one_is_returned()
+        revert_invalid_order(order_hash, contract_order)
+    }
+    if load_word(ret.ptr()) != magic {
+        revert_invalid_order(order_hash, contract_order)
+    }
+    true
+}
+
+/// `_assertRestrictedAdvancedOrderAuthorization`
+pub fn assert_restricted_advanced_order_authorization(
+    _ order: *OrderState,
+    order_hashes: Arr<u256>,
+    order_hash: u256,
+    order_index: u256,
+) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
+        let size = encode_authorize_order(order, order_hash, order_hashes, order_index)
+        call_and_check_status(order.zone, order_hash, data: order.zone_call, size, contract_order: false)
+    }
+}
+
+/// `_checkRestrictedAdvancedOrderAuthorization`
+pub fn check_restricted_advanced_order_authorization(
+    _ order: *OrderState,
+    order_hashes: Arr<u256>,
+    order_hash: u256,
+    order_index: u256,
+    revert_on_invalid: bool,
+) -> bool uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
+        let size = encode_authorize_order(order, order_hash, order_hashes, order_index)
+        return call_and_check_status_with_skip(order.zone, order_hash, data: order.zone_call, size, contract_order: false, revert_on_invalid)
+    }
+    true
+}
+
+/// `_assertRestrictedAdvancedOrderValidity`: `validateOrder` for restricted
+/// orders and `ratifyOrder` for contract orders.
+pub fn assert_restricted_advanced_order_validity(_ order: *OrderState, order_hashes: Arr<u256>, order_hash: u256)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
+        let data = order.zone_call
+        store_word(data, (load_word(data) & ((1 << 224) - 1)) | (VALIDATE_ORDER_SELECTOR << 224))
+        write_hashes(at(data, order.zone_call_hashes), order_hashes)
+        call_and_check_status(order.zone, order_hash, data, size: order.zone_call_size, contract_order: false)
+    } else if order.order_type == CONTRACT as u256 {
+        let (data, size) = encode_ratify_order(order, order_hash, order_hashes)
+        call_and_check_status(order.offerer, order_hash, data, size, contract_order: true)
+    }
+}
+
+/// `_encodeRatifyOrder`
+fn encode_ratify_order(_ order: *OrderState, order_hash: u256, order_hashes: Arr<u256>) -> (*u8, u256) {
+    let size = 4 + 0xa0 + items_size(order.offer, 128) + items_size(order.consideration, 160)
+        + 32 + padded(order.extra_data.len) + 32 + order_hashes.len() * 32
+    let data = ptr::alloc_bytes(size + 28)
+    store_word(data, RATIFY_ORDER_SELECTOR << 224)
+    let head = at(data, 4)
+    store_word(at(head, 0x80), order_hash ^ (order.offerer.inner << 96))
+    let mut tail: u256 = 0xa0
+    store_word(head, tail)
+    tail = tail + write_spent_items(at(head, tail), order.offer)
+    store_word(at(head, 0x20), tail)
+    tail = tail + write_received_items(at(head, tail), order.consideration)
+    store_word(at(head, 0x40), tail)
+    tail = tail + write_bytes(at(head, tail), order.extra_data)
+    store_word(at(head, 0x60), tail)
+    write_hashes(at(head, tail), order_hashes)
+    (data, size)
+}
+
+/// `_encodeGenerateOrder`: offer and consideration both as `SpentItem[]`.
+fn encode_generate_order(_ order: *OrderState) -> (*u8, u256) uses (ctx: Ctx) {
+    let size = 4 + 0x80 + items_size(order.offer, 128) + items_size(order.consideration, 128)
+        + 32 + padded(order.extra_data.len)
+    let data = ptr::alloc_bytes(size + 28)
+    store_word(data, GENERATE_ORDER_SELECTOR << 224)
+    let head = at(data, 4)
+    store_word(head, ctx.caller().inner)
+    let mut tail: u256 = 0x80
+    store_word(at(head, 0x20), tail)
+    tail = tail + write_spent_items(at(head, tail), order.offer)
+    store_word(at(head, 0x40), tail)
+    tail = tail + write_spent_items(at(head, tail), order.consideration)
+    store_word(at(head, 0x60), tail)
+    write_bytes(at(head, tail), order.extra_data)
+    (data, size)
+}
+
+/// One word of returndata at `offset`.
+fn returndata_word(_ offset: u256) -> u256 uses (ops: mut RawOps) {
+    let mut buf = MemBuffer::with_capacity(32)
+    ops.returndatacopy(dest: mut buf, dest_offset: 0, src_offset: offset, len: 32)
+    load_word(buf.ptr())
+}
+
+/// `_getGeneratedOrder`: ask the contract offerer for the order and replace
+/// the offer and consideration with the result. Returns the contract order
+/// hash, or zero if the call failed and `revert_on_invalid` is false.
+pub fn get_generated_order(_ order: *OrderState, revert_on_invalid: bool) -> u256
+uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+{
+    if order.consideration.len() != order.total_original {
+        revert_error(ConsiderationLengthNotEqualToTotalOriginal {})
+    }
+    let offerer = order.offerer
+    let (data, size) = encode_generate_order(order)
+    let mut ret = MemBuffer::empty()
+    let success = call.raw_call(addr: offerer, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: data, len: size), ret: mut ret).success()
+    let contract_nonce = take_contract_nonce(offerer)
+    let order_hash = contract_nonce ^ (offerer.inner << 96)
+    if !success {
+        if revert_on_invalid {
+            revert_with_reason_if_one_is_returned()
+            revert_error(InvalidContractOrder { orderHash: Bytes32 { val: order_hash } })
+        }
+        return 0
+    }
+    if !decode_generate_order_returndata(order) {
+        revert_error(InvalidContractOrder { orderHash: Bytes32 { val: order_hash } })
+    }
+    order_hash
+}
+
+/// `_decodeGenerateOrderReturndata`: validate the returned
+/// `(SpentItem[], ReceivedItem[])` against the requested items and install
+/// it. Returns false for invalid returndata.
+fn decode_generate_order_returndata(_ order: *OrderState) -> bool uses (ops: mut RawOps) {
+    let size = ops.returndatasize()
+    if size < 0x60 {
+        return false
+    }
+    // seaport-core adds these without overflow checks; out of range offsets
+    // then fault in RETURNDATACOPY exactly as there.
+    let offer_offset = returndata_word(0)
+    let consideration_offset = returndata_word(32)
+    if offer_offset.wrapping_add(32) > size || consideration_offset.wrapping_add(32) > size {
+        return false
+    }
+    let offer_length = returndata_word(offer_offset)
+    let consideration_length = returndata_word(consideration_offset)
+    let offer_end = offer_offset.wrapping_add(32).wrapping_add(offer_length << 7)
+    let consideration_end = consideration_offset.wrapping_add(32).wrapping_add(consideration_length.wrapping_mul(160))
+    if (offer_length | consideration_length) > MAX_RETURNED_ARRAY_LENGTH || size < offer_end || size < consideration_end {
+        return false
+    }
+
+    let original_offer = order.offer
+    let mut invalid = original_offer.len() > offer_length
+    let offer = Arr<Item>::alloc(offer_length)
+    let mut i: u256 = 0
+    while i < offer_length {
+        let base = offer_offset + 32 + i * 128
+        let amount = returndata_word(base + 96)
+        let item = offer.at(i)
+        *item = Item {
+            item_type: returndata_word(base),
+            token: Address { inner: returndata_word(base + 32) },
+            identifier: returndata_word(base + 64),
+            start_amount: amount,
+            end_amount: amount,
+            recipient: Address::zero(),
+            amount,
+            receiver: Address::zero(),
+            original: amount,
+        }
+        if i < original_offer.len() {
+            let original = original_offer.at(i)
+            invalid = invalid || items_differ(original, item) || original.amount > amount
+        }
+        i += 1
+    }
+
+    let original_consideration = order.consideration
+    if consideration_length > original_consideration.len() {
+        invalid = true
+    }
+    let new_length = if consideration_length < original_consideration.len() { consideration_length } else { original_consideration.len() }
+    let consideration = Arr<Item>::alloc(new_length)
+    i = 0
+    while i < new_length {
+        let base = consideration_offset + 32 + i * 160
+        let amount = returndata_word(base + 96)
+        let recipient = Address { inner: returndata_word(base + 128) }
+        let item = consideration.at(i)
+        *item = Item {
+            item_type: returndata_word(base),
+            token: Address { inner: returndata_word(base + 32) },
+            identifier: returndata_word(base + 64),
+            start_amount: amount,
+            end_amount: amount,
+            recipient,
+            amount,
+            receiver: recipient,
+            original: amount,
+        }
+        let original = original_consideration.at(i)
+        let recipient_mismatch = original.receiver.inner != 0 && recipient != original.receiver
+        invalid = invalid || items_differ(original, item) || amount > original.amount || recipient_mismatch
+        i += 1
+    }
+    if invalid {
+        return false
+    }
+    order.offer = offer
+    order.consideration = consideration
+    true
+}
+
+/// `compareItems`: a wildcard criteria item matches any identifier of the
+/// corresponding non-criteria type.
+fn items_differ(_ original: *Item, _ item: *Item) -> bool {
+    let mut item_type = original.item_type
+    let mut identifier = original.identifier
+    if item_type > 3 && identifier == 0 {
+        item_type = item_type - 2
+        identifier = item.identifier
+    }
+    !(original.token == item.token && item_type == item.item_type && identifier == item.identifier)
+}
