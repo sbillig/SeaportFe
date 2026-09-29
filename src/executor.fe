@@ -11,7 +11,6 @@ use super::errors::{
     InvalidConduit,
     InvalidERC721TransferAmount,
     MissingItemAmount,
-    NativeTokenTransferGenericFailure,
     NoContract,
     TokenTransferGenericFailure,
     UnusedItemParameters,
@@ -107,13 +106,24 @@ pub fn assert_non_zero_amount(_ amount: u256) {
 /// `_transferNativeTokens`
 pub fn transfer_native_tokens(to: Address, amount: u256) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
     assert_non_zero_amount(amount)
+    // The failure payload is written before the call: a recipient may burn
+    // all forwarded gas, and seaport-core still reverts with the custom error
+    // from the remaining 1/64. Encoding it after the call does not fit into
+    // that budget.
+    let failure = ptr::alloc_bytes(0x44)
+    store_word(failure, NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224)
+    store_word(ptr::offset_bytes(failure, 0x04), to.inner)
+    store_word(ptr::offset_bytes(failure, 0x24), amount)
     let mut ret = MemBuffer::empty()
     let outcome = call.raw_call(addr: to, gas: ctx.gas(), value: amount, args: MemSpan::empty(), ret: mut ret)
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(NativeTokenTransferGenericFailure { account: to, amount })
+        ops.revert(data: MemSpan::from_raw_parts(ptr: failure, len: 0x44))
     }
 }
+
+/// NativeTokenTransferGenericFailure(address,uint256)
+const NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR: u256 = 0xbc806b96
 
 pub fn transfer_erc20(
     token: Address,

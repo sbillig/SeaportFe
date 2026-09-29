@@ -233,3 +233,29 @@ string; only JSON ABI emission failed later ("unbalanced selector argument
 list"). A check at declaration time would have caught the wrong selector.
 All `sol()` signatures in the port are now verified against the Solidity
 artifacts' `methodIdentifiers`.
+
+## 15. Embedded child contract code differs from its standalone artifact
+
+Status: under investigation (`fix/embedded-contract-bytecode-consistency`)
+
+`ConduitController` deploys conduits with `create.create2<Conduit>`. The
+init code it embeds (creation code hash `0x4b4e…71bc`, deployed runtime
+5838 bytes) is not the `Conduit.bin` that `fe build` writes (hash
+`0x0a39…083c`, runtime 5809 bytes), although builds are deterministic.
+Anything that derives conduit addresses off-chain from the artifact gets
+the wrong address; the Hardhat suite does exactly that
+(`getCreate2Address(controller, key, keccak256(Conduit.bytecode))`), which
+accounts for 13 of its 14 failures. A minimal factory/child pair does not
+reproduce it.
+
+## 16. Error encoding after a gas-burning call does not fit in 1/64
+
+Status: worked around in the port
+
+seaport-core reverts with `NativeTokenTransferGenericFailure` even when the
+recipient burns all forwarded gas and returns more revert data than can be
+copied: the remaining 1/64 of the gas suffices for its hand-written
+assembly. Fe's `revert_error` (allocation plus ABI encoding) after the call
+ran out of gas in the Hardhat test "Reverts when ether transfer fails
+(returndata)". The port now writes the failure payload before the call and
+only reverts with it afterwards.
