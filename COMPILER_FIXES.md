@@ -112,3 +112,45 @@ cherry-picked as `aa4758dd3`.
   (`fe test` 2m08s before, 2.8s after).
 - Newsfragment: `newsfragments/+pointer-parameter-overwrite-blowup.performance.md`.
 - Effect on the port: `fe check` from about 28 minutes to about 6 minutes.
+
+### `fix/zero-field-event-emit` (ISSUES.md #11)
+
+Base: `upstream/master` `342048ea5`; cherry-picked as `7b1960ac3`.
+
+- `45b536623` Fix MIR lowering of zero-field `#[event]` emits: the desugared
+  `emit` body always created a `self` path expression that only field
+  accesses use. With no fields it stayed untyped, and the MIR readiness check
+  reported it as `InvalidExpr`, blocking the recv arm. `fe check` had
+  nothing to report because no diagnostic is emitted for an unused
+  expression.
+- Regression tests: `crates/fe/tests/fixtures/fe_test/event_zero_fields.fe`,
+  `zero_field_event_emits_log1_with_empty_data` in
+  `crates/fe/tests/event_dynamic.rs`, desugar snapshot `event_zero_fields`.
+- Newsfragment: `newsfragments/+zero-field-event-emit.bugfix.md`.
+
+### `fix/sol-selector-signature-validation` (ISSUES.md #14)
+
+Base: `upstream/master` `342048ea5`; cherry-picked as `5de6c41d6`.
+
+- `584c81e29` Report malformed `sol()` selector signatures at check time: the
+  selector/field check returned silently when the signature did not parse.
+  It now reports 9-0009 using the parser the JSON ABI emitter uses, which
+  also rejects non-identifier names and whitespace.
+- Regression test: uitest `ty_check/msg_selector_malformed_signature.fe`.
+- Newsfragment: `newsfragments/+sol-selector-signature-validation.bugfix.md`.
+
+### `fix/tuple-return-abi-params` (ISSUES.md #12)
+
+Base: `upstream/master` `342048ea5`; cherry-picked as `9264f7bd7` (IR
+snapshots regenerated in `782082291`).
+
+- `1b65ca8b1` Encode dynamic tuple returns as a Solidity parameter list:
+  `AbiSize` gains `IS_PARAM_LIST` (true for tuples); `return_value` encodes
+  such types without the leading offset word, `decode_output_at` decodes
+  them like arguments, and the JSON ABI lists one output per element.
+  Semantic change: a Fe contract that relied on a tuple return being one
+  `tuple` output must return an `#[abi]` struct instead.
+- Regression tests: `crates/fe/tests/fixtures/fe_test/tuple_return_abi_params.fe`,
+  `tuple_return_emits_one_output_per_element` in `crates/fe/src/abi.rs`,
+  updated harness tests.
+- Newsfragment: `newsfragments/+tuple-return-abi-params.bugfix.md`.

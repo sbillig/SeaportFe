@@ -205,7 +205,7 @@ pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem
     let mut i: u256 = 0
     while i < count {
         let item = book.items.at(start + i)
-        out.set(index: i, value: SpentItem { itemType: item.item_type, token: item.token, identifier: item.identifier, amount: item.amount })
+        out.set(index: i, value: SpentItem { itemType: item.item_type.downcast_truncate(), token: item.token, identifier: item.identifier, amount: item.amount })
         i += 1
     }
     out.to_dyn_array()
@@ -216,7 +216,7 @@ pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<Receiv
     let mut i: u256 = 0
     while i < count {
         let item = book.items.at(start + i)
-        out.set(index: i, value: ReceivedItem { itemType: item.item_type, token: item.token, identifier: item.identifier, amount: item.amount, recipient: item.receiver })
+        out.set(index: i, value: ReceivedItem { itemType: item.item_type.downcast_truncate(), token: item.token, identifier: item.identifier, amount: item.amount, recipient: item.receiver })
         i += 1
     }
     out.to_dyn_array()

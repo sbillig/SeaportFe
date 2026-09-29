@@ -501,7 +501,7 @@ fn execution_array(_ executions: Arr<ExecutionState>) -> DynArray<Execution> {
     while i < executions.len() {
         let e = *executions.at(i)
         out.set(index: i, value: Execution {
-            item: ReceivedItem { itemType: e.item_type, token: e.token, identifier: e.identifier, amount: e.amount, recipient: e.recipient },
+            item: ReceivedItem { itemType: e.item_type.downcast_truncate(), token: e.token, identifier: e.identifier, amount: e.amount, recipient: e.recipient },
             offerer: e.offerer,
             conduitKey: Bytes32 { val: e.conduit_key },
         })

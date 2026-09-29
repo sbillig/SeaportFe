@@ -46,11 +46,12 @@ pub struct ConsiderationItem {
 }
 impl Copy for ConsiderationItem {}
 
-/// Output-only (events, zone and offerer calls, return values): `itemType`
-/// is the raw word, since contract offerers may return any value.
+/// Output-only (events, zone and offerer calls, return values). `itemType`
+/// is `uint8` in the event signatures; an invalid type always reverts later
+/// in the transfer, so truncating the stored word is not observable.
 #[abi]
 pub struct SpentItem {
-    pub itemType: u256,
+    pub itemType: u8,
     pub token: Address,
     pub identifier: u256,
     pub amount: u256,
@@ -60,7 +61,7 @@ impl Copy for SpentItem {}
 /// Output-only, see `SpentItem`.
 #[abi]
 pub struct ReceivedItem {
-    pub itemType: u256,
+    pub itemType: u8,
     pub token: Address,
     pub identifier: u256,
     pub amount: u256,

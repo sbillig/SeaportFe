@@ -206,7 +206,7 @@ fn prepare_basic_fulfillment_from_calldata(
     ]))
     let mut received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
     received.set(index: 0, value: ReceivedItem {
-        itemType: received_item_type,
+        itemType: received_item_type.downcast_truncate(),
         token: cd_address(CONSIDERATION_TOKEN),
         identifier: cd(CONSIDERATION_IDENTIFIER),
         amount: cd(CONSIDERATION_AMOUNT),
@@ -230,7 +230,7 @@ fn prepare_basic_fulfillment_from_calldata(
         }
         combined_recipients = combined_recipients | recipient
         received.set(index: i + 1, value: ReceivedItem {
-            itemType: additional_recipients_item_type,
+            itemType: additional_recipients_item_type.downcast_truncate(),
             token: additional_recipients_token,
             identifier: 0,
             amount,
@@ -268,7 +268,7 @@ fn prepare_basic_fulfillment_from_calldata(
 
     let mut spent = MemVec<SpentItem>::zeroed(1)
     spent.set(index: 0, value: SpentItem {
-        itemType: offered_item_type,
+        itemType: offered_item_type.downcast_truncate(),
         token: cd_address(OFFER_TOKEN),
         identifier: cd(OFFER_IDENTIFIER),
         amount: cd(OFFER_AMOUNT),

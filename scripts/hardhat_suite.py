@@ -24,6 +24,18 @@ REFERENCE = ROOT / "reference" / "seaport"
 ARTIFACTS = REFERENCE / "artifacts"
 PRISTINE = ROOT / "build" / "hardhat-artifacts"
 FE_BUILD = ROOT / "build" / "fe"
+# The Fe runtime code exceeds EIP-170 and its deployment exceeds the 30M
+# block gas limit of the upstream config (ISSUES.md #13).
+FE_CONFIG = REFERENCE / "hardhat.fe.config.ts"
+FE_CONFIG_SOURCE = """import config from "./hardhat.config";
+
+const hardhat = (config.networks ??= {}).hardhat ?? {};
+hardhat.allowUnlimitedContractSize = true;
+hardhat.blockGasLimit = 1_000_000_000;
+config.networks.hardhat = hardhat;
+
+export default config;
+"""
 
 # contract name in the artifacts -> Fe contract name
 PORTED = {
@@ -69,9 +81,11 @@ def main():
                 path.write_text(json.dumps(data))
                 print(f"{path.relative_to(REFERENCE)}: Fe {fe_name}", file=sys.stderr)
         specs = sys.argv[1:]
-        cmd = ["npx", "hardhat", "test", "--no-compile", "--config", "./hardhat.config.ts", *specs]
+        FE_CONFIG.write_text(FE_CONFIG_SOURCE)
+        cmd = ["npx", "hardhat", "test", "--no-compile", "--config", "./hardhat.fe.config.ts", *specs]
         return subprocess.call(cmd, cwd=REFERENCE, env=dict(os.environ))
     finally:
+        FE_CONFIG.unlink(missing_ok=True)
         shutil.rmtree(ARTIFACTS)
         shutil.copytree(PRISTINE, ARTIFACTS)
 

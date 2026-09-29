@@ -190,7 +190,7 @@ a `Bytes32` twice, was a move conflict (16-0002).
 
 ## 11. Emitting a field-less `#[event]` fails in MIR lowering
 
-Status: reported to a fix branch (`fix/zero-field-event-emit`); worked around
+Status: fixed on `fix/zero-field-event-emit`; the port keeps the raw log workaround
 
 `log.emit(Paused {})` for `#[event] pub struct Paused {}` passes `fe check`
 but `fe build` stops with "semantic body is blocked by upstream causes:
@@ -200,7 +200,7 @@ but `fe build` stops with "semantic body is blocked by upstream causes:
 
 ## 12. Dynamic tuple returns are not encoded like Solidity multiple returns
 
-Status: compiler/std fix in progress (`fix/tuple-return-abi-params`)
+Status: fixed on `fix/tuple-return-abi-params`
 
 `Information {} -> (DynString, Bytes32, Address)` returns
 `0x20, 0x60, <bytes32>, <address>, 3, "1.6"`: `ContractHost::return_value`
@@ -225,7 +225,7 @@ be deployed on mainnet as is. The test scripts disable the size limit
 
 ## 14. Unbalanced `sol("...")` selector signatures are accepted
 
-Status: open (diagnostic gap)
+Status: fixed on `fix/sol-selector-signature-validation`
 
 The router's `fulfillAvailableAdvancedOrders` signature had one `(` too
 many. `fe check` accepted it and computed a selector from the malformed

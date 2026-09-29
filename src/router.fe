@@ -13,6 +13,7 @@ use super::seaport::SeaportMsg
 use super::status::{
     NOT_ENTERED_SSTORE,
     REENTRANCY_GUARD_SLOT,
+    activate_tstore,
     clear_reentrancy_guard,
     prepare_tload_test,
     set_reentrancy_guard,
@@ -49,6 +50,8 @@ pub msg SeaportRouterMsg {
     FulfillAvailableAdvancedOrders { params: FulfillAvailableAdvancedOrdersParams } -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>),
     #[selector = sol("getAllowedSeaportContracts()")]
     GetAllowedSeaportContracts {} -> DynArray<Address>,
+    #[selector = sol("__activateTstore()")]
+    ActivateTstore {},
 }
 
 /// NoSpecifiedOrdersAvailable()
@@ -232,6 +235,9 @@ pub contract SeaportRouter {
         }
         SeaportRouterMsg::GetAllowedSeaportContracts {} -> DynArray<Address> uses (env) {
             get_allowed_seaport_contracts(env)
+        }
+        SeaportRouterMsg::ActivateTstore {} uses (env, ctx: Ctx, call: Call, ops: mut RawOps) {
+            activate_tstore(env.guard)
         }
         #[payable]
         _ uses (env, ctx: Ctx, ops: RawOps) {
