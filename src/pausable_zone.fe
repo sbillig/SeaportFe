@@ -4,17 +4,22 @@
 // Storage keeps Solidity's layout: PausableZone packs `operator` and
 // `isPaused` into slot 0; the controller keeps `_owner`, `_potentialOwner`
 // and `_pauser` in slots 0 to 2.
-use core::ptr::MemBuffer
+use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, create2_address, keccak256, revert_error}
 use super::lowlevel::store_word
 use super::seaport::SeaportMsg
 use super::types::{AdvancedOrder, CriteriaResolver, Execution, Fulfillment, Order, OrderComponents, ZoneParameters}
 
-#[event]
-pub struct Paused {}
-#[event]
-pub struct Unpaused {}
+/// `Paused()` and `Unpaused()` carry no fields; emitting a field-less
+/// `#[event]` struct fails in MIR lowering (ISSUES.md #11), so they are raw
+/// LOG1s with the event topic.
+const PAUSED_TOPIC: u256 = 0x9e87fac88ff661f02d44f95383c817fece4bce600a3dab7a54406878b965e752
+const UNPAUSED_TOPIC: u256 = 0xa45f47fdea8a1efdd9029a5691c7f759c32b7c698632b563573e155625d16933
+
+fn emit_topic_only(_ topic: u256) uses (log: mut Log) {
+    log.log1(data: MemSpan::from_raw_parts(ptr: ptr::alloc_bytes(0), len: 0), topic0: topic)
+}
 #[event]
 pub struct PotentialOwnerUpdated { pub newPotentialOwner: Address }
 #[event]
@@ -121,7 +126,7 @@ pub contract PausableZone {
 
     init() uses (mut controller, ctx: Ctx, log: mut Log) {
         controller = ctx.caller()
-        log.emit(Unpaused {})
+        emit_topic_only(UNPAUSED_TOPIC)
     }
 
     recv PausableZoneMsg {
@@ -131,7 +136,7 @@ pub contract PausableZone {
         }
         Pause {} uses (controller, ctx: Ctx, ops: mut RawOps, log: mut Log) {
             assert_controller(controller)
-            log.emit(Paused {})
+            emit_topic_only(PAUSED_TOPIC)
             ops.sstore(slot: 0, value: ops.sload(0) | (1 << 160))
         }
         AssignOperator { operatorToAssign } uses (controller, ctx: Ctx, ops: mut RawOps, log: mut Log) {

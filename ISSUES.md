@@ -187,3 +187,49 @@ Status: fixed on `fix/fixed-bytes-copy`
 `Bytes32` wraps one `u256` like `Address`, but lacked `impl Copy`. Reading
 `params.fulfillerConduitKey` from a view parameter in the router, or using
 a `Bytes32` twice, was a move conflict (16-0002).
+
+## 11. Emitting a field-less `#[event]` fails in MIR lowering
+
+Status: reported to a fix branch (`fix/zero-field-event-emit`); worked around
+
+`log.emit(Paused {})` for `#[event] pub struct Paused {}` passes `fe check`
+but `fe build` stops with "semantic body is blocked by upstream causes:
+[InvalidExpr(ExprId(0))]" while lowering the recv arm. Reproduces on
+`upstream/master`. `PausableZone` emits `Paused()` and `Unpaused()` as raw
+`log1` calls with the event topic instead.
+
+## 12. Dynamic tuple returns are not encoded like Solidity multiple returns
+
+Status: compiler/std fix in progress (`fix/tuple-return-abi-params`)
+
+`Information {} -> (DynString, Bytes32, Address)` returns
+`0x20, 0x60, <bytes32>, <address>, 3, "1.6"`: `ContractHost::return_value`
+encodes every dynamic return type as a single root with a leading offset,
+like `abi.encode((string,bytes32,address))`. Solidity's
+`returns (string, bytes32, address)` is encoded as a parameter list without
+that word, and Fe itself decodes arguments that way. The JSON ABI likewise
+reports one `tuple` output. Every test that signs an order reads the domain
+separator through `information()`, so this alone fails most of the upstream
+suite; `fulfillAvailable*`, `getSeaportMetadata` and the router are
+affected too.
+
+## 13. Runtime code is far above EIP-170
+
+Status: open
+
+With `-O 1` the Fe `Seaport` runtime is about 154 KB (Solidity: just under
+24 KB), `Consideration` 144 KB, `ConduitController` 9.4 KB. The port cannot
+be deployed on mainnet as is. The test scripts disable the size limit
+(Foundry `FOUNDRY_DISABLE_CODE_SIZE_LIMIT`, Hardhat
+`allowUnlimitedContractSize`).
+
+## 14. Unbalanced `sol("...")` selector signatures are accepted
+
+Status: open (diagnostic gap)
+
+The router's `fulfillAvailableAdvancedOrders` signature had one `(` too
+many. `fe check` accepted it and computed a selector from the malformed
+string; only JSON ABI emission failed later ("unbalanced selector argument
+list"). A check at declaration time would have caught the wrong selector.
+All `sol()` signatures in the port are now verified against the Solidity
+artifacts' `methodIdentifiers`.

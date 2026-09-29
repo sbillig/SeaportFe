@@ -5,7 +5,7 @@ use std::abi::{Bytes4, Bytes32, DynArray, MemVec, sol}
 use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, RawStorage, create2_address, keccak256, keccak_words, revert_error}
 use super::errors::{InvalidERC721TransferAmount, NoContract, Invalid1155BatchTransferEncoding}
 use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
-use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+use super::lowlevel::{bubble_revert_if_affordable, load_word, revert_with_reason_if_one_is_returned, store_word}
 
 #[abi]
 pub struct ConduitTransfer {
@@ -161,38 +161,38 @@ fn perform_erc1155_batch_transfers(_ array: u256) uses (ctx: Ctx, call: mut Call
         }
         let ids_and_amounts_size = 0x40 + (ids_length << 6)
         let size = 0xc4 + ids_and_amounts_size
-        // selector, from, to, ids head, amounts head, data head, ids, amounts,
-        // empty data
-        let data = ptr::alloc_bytes(size + 32)
+        // As in seaport-core, the call data starts one word into the buffer so
+        // the failure error can be laid over it from the buffer start.
+        // Call data: selector, from, to, ids head, amounts head, data head,
+        // ids, amounts, empty data.
+        let mem = ptr::alloc_bytes(size + 0x40)
+        let data = ptr::offset_bytes(mem, 0x20)
         store_word(data, SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224)
         let mut word: u256 = 0
         while word < 4 {
             store_word(ptr::offset_bytes(data, 4 + word * 32), ops.calldataload(element + 0x20 + word * 32))
             word += 1
         }
-        store_word(ptr::offset_bytes(data, 0xa4), 0xa0 + ids_and_amounts_size)
+        store_word(ptr::offset_bytes(data, 0x84), 0xa0 + ids_and_amounts_size)
         word = 0
         while word * 32 < ids_and_amounts_size {
-            store_word(ptr::offset_bytes(data, 0xc4 + word * 32), ops.calldataload(element + 0xa0 + word * 32))
+            store_word(ptr::offset_bytes(data, 0xa4 + word * 32), ops.calldataload(element + 0xa0 + word * 32))
             word += 1
         }
-        store_word(ptr::offset_bytes(data, 0xc4 + ids_and_amounts_size), 0)
+        store_word(ptr::offset_bytes(data, 0xa4 + ids_and_amounts_size), 0)
         let mut ret = MemBuffer::empty()
         let outcome = call.raw_call(addr: token, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: data, len: size), ret: mut ret)
         if !outcome.success() {
-            revert_with_reason_if_one_is_returned()
+            bubble_revert_if_affordable(msize_words: size >> 5)
             // ERC1155BatchTransferGenericFailure(token, from, to, ids, amounts)
-            // laid over the call data, as in seaport-core.
-            let amounts_head = load_word(ptr::offset_bytes(data, 0x84))
-            store_word(data, ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224)
-            let from = load_word(ptr::offset_bytes(data, 0x04))
-            let to = load_word(ptr::offset_bytes(data, 0x24))
-            store_word(ptr::offset_bytes(data, 0x04), token.inner)
-            store_word(ptr::offset_bytes(data, 0x24), from)
-            store_word(ptr::offset_bytes(data, 0x44), to)
-            store_word(ptr::offset_bytes(data, 0x64), 0xc0)
-            store_word(ptr::offset_bytes(data, 0x84), amounts_head + 0x20)
-            ops.revert(data: MemSpan::from_raw_parts(ptr: data, len: size))
+            // laid over the call data: from and to stay in place, ids follow
+            // at the same position, and the amounts head grows by the word
+            // taken by the token.
+            store_word(mem, ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224)
+            store_word(ptr::offset_bytes(mem, 0x04), token.inner)
+            store_word(ptr::offset_bytes(mem, 0x64), 0xc0)
+            store_word(ptr::offset_bytes(mem, 0x84), load_word(ptr::offset_bytes(mem, 0x84)) + 0x20)
+            ops.revert(data: MemSpan::from_raw_parts(ptr: mem, len: size))
         }
         i += 1
     }

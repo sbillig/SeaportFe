@@ -15,14 +15,19 @@ pub fn store_word(_ at: *u8, _ value: u256) {
 /// `_revertWithReasonIfOneIsReturned`: bubble returndata when there is some
 /// and copying it into memory leaves at least 32 gas.
 pub fn revert_with_reason_if_one_is_returned() uses (ctx: Ctx, ops: RawOps) {
+    // Fe exposes neither msize nor pointer addresses (ISSUES.md #5), so the
+    // expansion cost is computed from an empty memory, which overestimates it.
+    bubble_revert_if_affordable(msize_words: 0)
+}
+
+/// Bubble up the returned revert data when copying it into memory of
+/// `msize_words` words leaves enough gas.
+pub fn bubble_revert_if_affordable(msize_words: u256) uses (ctx: Ctx, ops: RawOps) {
     let size = ops.returndatasize()
     if size == 0 {
         return
     }
     let return_data_words = (size + 31) >> 5
-    // Fe exposes neither msize nor pointer addresses (ISSUES.md #5), so the
-    // expansion cost is computed from an empty memory, which overestimates it.
-    let msize_words: u256 = 0
     let mut cost = 3 * return_data_words
     if return_data_words > msize_words {
         cost = cost

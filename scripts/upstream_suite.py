@@ -82,7 +82,8 @@ def main():
         size = inject(artifact, contract)
         print(f"{artifact}: Fe {contract}, runtime {size} bytes", file=sys.stderr)
 
-    env = dict(os.environ, FOUNDRY_PROFILE="test")
+    # The Fe runtime code exceeds EIP-170 (ISSUES.md #13).
+    env = dict(os.environ, FOUNDRY_PROFILE="test", FOUNDRY_DISABLE_CODE_SIZE_LIMIT="true")
     cmd = ["forge", "test", *args.forge_args]
     return subprocess.call(cmd, cwd=WORK, env=env)
 
