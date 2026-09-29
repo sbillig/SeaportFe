@@ -1,0 +1,20 @@
+{
+  "reference": {
+    "url": "https://github.com/ProjectOpenSea/seaport.git",
+    "revision": "7f966fe7bd75932beb0366f6485aa720512b1259",
+    "seaport_core": "1.6.5"
+  },
+  "compiler": {
+    "url": "https://github.com/argotorg/fe.git",
+    "base": "06f7889d2",
+    "branch": "seaport-integration",
+    "patch": "compiler/seaport-integration.patch",
+    "patch_sha256": "",
+    "merged_prs": [1601, 1604, 1605, 1606, 1613, 1614, 1615, 1616, 1523],
+    "fix_branches": [
+      "fix/abi-struct-sol-compat",
+      "fix/temporary-pointer-field-projection",
+      "fix/pointer-loop-reassign-hang"
+    ]
+  }
+}

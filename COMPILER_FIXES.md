@@ -64,3 +64,51 @@ Base: `upstream/master` `5a298985b`; cherry-picked into `seaport-integration`.
 - Newsfragment: `newsfragments/+temporary-pointer-field.bugfix.md`.
 - A narrower fix in normalization (reads only) was tried first and dropped
   in favor of this one.
+
+### `fix/pointer-loop-reassign-hang` (ISSUES.md #6, part of #9)
+
+Base: `upstream/master`; cherry-picked into `seaport-integration`.
+
+- `ea612fd02` Widen self-offset pointer provenance in loops: `p = offset(p, k)`
+  inside a loop created a new provenance alternative per iteration, so
+  `fe check` never reached a fixed point.
+- `2b36e5d34` Bound overwritten raw-memory pointers across writes and loops:
+  each raw write that might overlap a cell holding a pointer added another
+  conditional "overwritten" handle; repeated writes and loop sweeps now reuse
+  a bounded set instead of multiplying.
+- Regression tests: `crates/fe/tests/fixtures/fe_test/pointer_loop_offset.fe`,
+  `crates/fe/tests/fixtures/fe_test/pointer_field_writes_in_loop.fe`.
+- Newsfragments: `newsfragments/+pointer-loop-offset-hang.bugfix.md`,
+  `newsfragments/+raw-pointer-write-blowup.performance.md`.
+
+### `fix/fixed-bytes-copy` (ISSUES.md #10)
+
+Base: `upstream/master` `342048ea5`; cherry-picked into `seaport-integration`.
+
+- `c384f4b5b` Implement `Copy` for `FixedBytes<N>`: it wraps a single `u256`
+  like `Address`, but reading a `Bytes32` field from a view parameter (the
+  router forwarding `fulfillerConduitKey`) was a move conflict.
+- Regression test: `crates/fe/tests/fixtures/fe_test/fixed_bytes_copy.fe`
+  (fails with error 16-0002 without the fix).
+- Newsfragment: `newsfragments/+fixed-bytes-copy.bugfix.md`.
+
+### `fix/borrowck-param-overwrite-scaling` (ISSUES.md #9)
+
+Base: `seaport-integration` (depends on `583610595` and `20da6b1b2`);
+cherry-picked as `aa4758dd3`.
+
+- `aa77071a8` Bound conditional pointer replacements by object pairs: a
+  write that might overlap a pointer cell in a parameter place or local
+  (e.g. `book.items.ptr`) added one "maybe overwritten" alternative per
+  write site, field, offset and call-site summary choice. One parameter cell
+  in `validate_orders_and_prepare_to_fulfill` held about 260 alternatives
+  with only about 40 distinct conditions, multiplied per loop sweep.
+  Replaced addresses now share the `OpaqueMemory` family of their type and
+  keep only their condition, and a raw-memory write against a non-raw target
+  is conditioned on the pair of objects instead of every field and offset.
+  Trade-off: a caller passing the same raw object for both loses refutation
+  by field or offset.
+- Regression test: `crates/fe/tests/fixtures/fe_test/pointer_parameter_writes_in_loop.fe`
+  (`fe test` 2m08s before, 2.8s after).
+- Newsfragment: `newsfragments/+pointer-parameter-overwrite-blowup.performance.md`.
+- Effect on the port: `fe check` from about 28 minutes to about 6 minutes.

@@ -171,3 +171,19 @@ the analysis tractable:
   allocated up front with a bound on the number of transfers.
 - Loop bodies are separate functions, and a loop writes through only one
   parameter-derived pointer where possible.
+
+Current state: with the restructuring above, `fe check` on the whole port
+finishes in about 28 minutes. No single function dominates any more; the
+cost is that borrow summaries are cached per semantic instance, and the
+large entry points (`validate_orders_and_prepare_to_fulfill` about 15 s,
+`perform_final_checks_and_execute_orders` about 11 s) are solved again for
+each caller context (both contracts, `fulfillAvailable*` and `match*`, plus
+provisional passes in call cycles).
+
+## 10. `FixedBytes<N>` is not `Copy`
+
+Status: fixed on `fix/fixed-bytes-copy`
+
+`Bytes32` wraps one `u256` like `Address`, but lacked `impl Copy`. Reading
+`params.fulfillerConduitKey` from a view parameter in the router, or using
+a `Bytes32` twice, was a move conflict (16-0002).
