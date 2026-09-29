@@ -62,8 +62,29 @@ Effect of the rebase on the port (runtime bytes, `-O 1`):
 
 ## Fixes made for the port
 
-Each defect found while porting gets its own branch in `toolchain/fe` with a
-regression test and a newsfragment. The branches are local (not pushed).
+Each defect found while porting gets its own branch with a regression test
+and a newsfragment. Every branch was rechecked against `upstream/master`
+`342048ea5` (the regression test fails there) and pushed to
+[argotorg/fe](https://github.com/argotorg/fe), rebased onto that commit:
+
+| Branch | Head | Commits on `upstream/master` |
+| --- | --- | --- |
+| `fix/temporary-pointer-field-projection` | `65f9b0865` | 1 |
+| `fix/pointer-loop-reassign-hang` | `b8ecbf67f` | 2 |
+| `fix/borrowck-param-overwrite-scaling` | `26ee8e7cf` | 3 |
+| `fix/fixed-bytes-copy` | `c384f4b5b` | 1 |
+| `fix/zero-field-event-emit` | `45b536623` | 1 |
+| `fix/sol-selector-signature-validation` | `584c81e29` | 1 |
+| `fix/tuple-return-abi-params` | `1b65ca8b1` | 1 |
+| `fix/embedded-contract-bytecode-consistency` | `7e6a7ce4d` | 1 |
+
+`fix/borrowck-param-overwrite-scaling` is stacked on
+`fix/pointer-loop-reassign-hang`, which it depends on. Its regression test
+takes 100 s on `upstream/master`, 105 s with only the pointer-loop fix and
+2 s with both. `fix/abi-struct-sol-compat` goes into PR #1606 instead of its own branch.
+`fix/borrowck-entry-instance-sharing` is superseded upstream and stays
+local. Hashes in the sections below refer to the original branches and the
+`seaport-integration-v1` cherry-picks.
 
 ### `fix/abi-struct-sol-compat` (ISSUES.md #3)
 
