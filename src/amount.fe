@@ -13,7 +13,9 @@ pub fn locate_current_amount(
     start_time: u256,
     end_time: u256,
     round_up: bool,
-) -> u256 uses (ctx: Ctx) {
+) -> u256
+uses (ctx: Ctx)
+{
     if start_amount == end_amount {
         return end_amount
     }
@@ -49,7 +51,9 @@ pub fn apply_fraction(
     start_time: u256,
     end_time: u256,
     round_up: bool,
-) -> u256 uses (ctx: Ctx) {
+) -> u256
+uses (ctx: Ctx)
+{
     if start_amount == end_amount {
         return get_fraction(numerator, denominator, value: end_amount)
     }

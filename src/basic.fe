@@ -42,7 +42,11 @@ use super::status::{
     verify_order_status,
 }
 use super::types::{ERC721, ReceivedItem, SpentItem}
-use super::zone::{AUTHORIZE_ORDER_SELECTOR, VALIDATE_ORDER_SELECTOR, is_restricted_and_caller_not_zone}
+use super::zone::{
+    AUTHORIZE_ORDER_SELECTOR,
+    VALIDATE_ORDER_SELECTOR,
+    is_restricted_and_caller_not_zone,
+}
 use super::errors::InvalidRestrictedOrder
 
 // Calldata offsets of BasicOrderParameters (behind the selector and the
@@ -80,9 +84,7 @@ fn cd_address(_ offset: u256) -> Address uses (ops: RawOps) {
 }
 
 fn byte_at(_ index: u256, _ word: u256) -> u256 {
-    if index >= 32 {
-        return 0
-    }
+    if index >= 32 { return 0 }
     (word >> (248 - index * 8)) & 0xff
 }
 
@@ -113,7 +115,9 @@ fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
 }
 
 /// `_validateAndFulfillBasicOrder`
-pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
+pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool
+uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+{
     let basic_order_type = cd(BASIC_ORDER_TYPE)
     let order_type = basic_order_type & 3
     let route = basic_order_type >> 2
@@ -140,7 +144,11 @@ pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool uses (ctx: Ctx, call
         offered_item_type,
     )
 
-    let conduit_key = if offer_type_is_additional_recipients_type { cd(FULFILLER_CONDUIT_KEY) } else { cd(OFFERER_CONDUIT_KEY) }
+    let conduit_key = if offer_type_is_additional_recipients_type {
+        cd(FULFILLER_CONDUIT_KEY)
+    } else {
+        cd(OFFERER_CONDUIT_KEY)
+    }
     if additional_recipients_item_type == 0 {
         if cd(CONSIDERATION_TOKEN) | cd(CONSIDERATION_IDENTIFIER) != 0 {
             revert_error(UnusedItemParameters {})
@@ -151,15 +159,60 @@ pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool uses (ctx: Ctx, call
         let buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
         let empty = new_accumulator()
         let acc = if route == 2 {
-            transfer_erc721(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc: empty, buf, env)
+            transfer_erc721(
+                token: cd_address(OFFER_TOKEN),
+                from: cd_address(OFFERER),
+                to: ctx.caller(),
+                identifier: cd(OFFER_IDENTIFIER),
+                amount: cd(OFFER_AMOUNT),
+                conduit_key,
+                acc: empty,
+                buf,
+                env,
+            )
         } else if route == 3 {
-            transfer_erc1155(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc: empty, buf, env)
+            transfer_erc1155(
+                token: cd_address(OFFER_TOKEN),
+                from: cd_address(OFFERER),
+                to: ctx.caller(),
+                identifier: cd(OFFER_IDENTIFIER),
+                amount: cd(OFFER_AMOUNT),
+                conduit_key,
+                acc: empty,
+                buf,
+                env,
+            )
         } else if route == 4 {
-            transfer_erc721(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc: empty, buf, env)
+            transfer_erc721(
+                token: cd_address(CONSIDERATION_TOKEN),
+                from: ctx.caller(),
+                to: cd_address(OFFERER),
+                identifier: cd(CONSIDERATION_IDENTIFIER),
+                amount: cd(CONSIDERATION_AMOUNT),
+                conduit_key,
+                acc: empty,
+                buf,
+                env,
+            )
         } else {
-            transfer_erc1155(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc: empty, buf, env)
+            transfer_erc1155(
+                token: cd_address(CONSIDERATION_TOKEN),
+                from: ctx.caller(),
+                to: cd_address(OFFERER),
+                identifier: cd(CONSIDERATION_IDENTIFIER),
+                amount: cd(CONSIDERATION_AMOUNT),
+                conduit_key,
+                acc: empty,
+                buf,
+                env,
+            )
         }
-        let finalized = transfer_erc20_and_finalize(env, from_offerer: offer_type_is_additional_recipients_type, acc, buf)
+        let finalized = transfer_erc20_and_finalize(
+            env,
+            from_offerer: offer_type_is_additional_recipients_type,
+            acc,
+            buf,
+        )
         let _ = trigger_if_armed(finalized, buf, env)
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
@@ -179,11 +232,15 @@ fn prepare_basic_fulfillment_from_calldata(
     additional_recipients_item_type: u256,
     additional_recipients_token: Address,
     offered_item_type: u256,
-) -> u256 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
+) -> u256
+uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+{
     set_reentrancy_guard(env, accept_native_tokens: false)
     assert_valid_basic_order_parameters()
     if cd(START_TIME) > ctx.timestamp() || cd(END_TIME) <= ctx.timestamp() {
-        revert_error(InvalidTime { startTime: cd(START_TIME), endTime: cd(END_TIME) })
+        revert_error(
+            InvalidTime { startTime: cd(START_TIME), endTime: cd(END_TIME) },
+        )
     }
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
     let total_original = cd(TOTAL_ORIGINAL_ADDITIONAL_RECIPIENTS)
@@ -195,100 +252,140 @@ fn prepare_basic_fulfillment_from_calldata(
     // additional recipients, and the ReceivedItems of all of them.
     let offerer = cd_address(OFFERER)
     let consideration_hashes = ptr::alloc_bytes((total_original + 1) * 32)
-    store_word(consideration_hashes, keccak_words([
-        CONSIDERATION_ITEM_TYPEHASH,
-        received_item_type,
-        cd(CONSIDERATION_TOKEN),
-        cd(CONSIDERATION_IDENTIFIER),
-        cd(CONSIDERATION_AMOUNT),
-        cd(CONSIDERATION_AMOUNT),
-        offerer.inner,
-    ]))
+    store_word(
+        consideration_hashes,
+        keccak_words(
+            [
+                CONSIDERATION_ITEM_TYPEHASH,
+                received_item_type,
+                cd(CONSIDERATION_TOKEN),
+                cd(CONSIDERATION_IDENTIFIER),
+                cd(CONSIDERATION_AMOUNT),
+                cd(CONSIDERATION_AMOUNT),
+                offerer.inner,
+            ],
+        ),
+    )
     let mut received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
-    received.set(index: 0, value: ReceivedItem {
-        itemType: received_item_type.downcast_truncate(),
-        token: cd_address(CONSIDERATION_TOKEN),
-        identifier: cd(CONSIDERATION_IDENTIFIER),
-        amount: cd(CONSIDERATION_AMOUNT),
-        recipient: offerer,
-    })
+    received
+        .set(
+            index: 0,
+            value: ReceivedItem {
+                itemType: received_item_type.downcast_truncate(),
+                token: cd_address(CONSIDERATION_TOKEN),
+                identifier: cd(CONSIDERATION_IDENTIFIER),
+                amount: cd(CONSIDERATION_AMOUNT),
+                recipient: offerer,
+            },
+        )
     let mut combined_recipients: u256 = 0
     let mut i: u256 = 0
     while i < total_recipients {
         let amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
         if i < total_original {
-            store_word(ptr::offset_bytes(consideration_hashes, (i + 1) * 32), keccak_words([
-                CONSIDERATION_ITEM_TYPEHASH,
-                additional_recipients_item_type,
-                additional_recipients_token.inner,
-                0,
-                amount,
-                amount,
-                recipient,
-            ]))
+            store_word(
+                ptr::offset_bytes(consideration_hashes, (i + 1) * 32),
+                keccak_words(
+                    [
+                        CONSIDERATION_ITEM_TYPEHASH,
+                        additional_recipients_item_type,
+                        additional_recipients_token.inner,
+                        0,
+                        amount,
+                        amount,
+                        recipient,
+                    ],
+                ),
+            )
         }
         combined_recipients = combined_recipients | recipient
-        received.set(index: i + 1, value: ReceivedItem {
-            itemType: additional_recipients_item_type.downcast_truncate(),
-            token: additional_recipients_token,
-            identifier: 0,
-            amount,
-            recipient: Address { inner: recipient },
-        })
+        received
+            .set(
+                index: i + 1,
+                value: ReceivedItem {
+                    itemType: additional_recipients_item_type.downcast_truncate(),
+                    token: additional_recipients_token,
+                    identifier: 0,
+                    amount,
+                    recipient: Address { inner: recipient },
+                },
+            )
         i += 1
     }
     if combined_recipients >= (1 << 160) {
         revert_error(InvalidBasicOrderParameterEncoding {})
     }
-    let received_items_hash = keccak256(MemSpan::from_raw_parts(ptr: consideration_hashes, len: (total_original + 1) * 32))
+    let received_items_hash = keccak256(
+        MemSpan::from_raw_parts(ptr: consideration_hashes, len: (total_original + 1) * 32),
+    )
 
-    let offer_item_hash = keccak_words([
-        OFFER_ITEM_TYPEHASH,
-        offered_item_type,
-        cd(OFFER_TOKEN),
-        cd(OFFER_IDENTIFIER),
-        cd(OFFER_AMOUNT),
-        cd(OFFER_AMOUNT),
-    ])
-    let order_hash = keccak_words([
-        ORDER_TYPEHASH,
-        offerer.inner,
-        cd(ZONE),
-        keccak_words([offer_item_hash]),
-        received_items_hash,
-        order_type,
-        cd(START_TIME),
-        cd(END_TIME),
-        cd(ZONE_HASH),
-        cd(SALT),
-        cd(OFFERER_CONDUIT_KEY),
-        get_counter(offerer),
-    ])
+    let offer_item_hash = keccak_words(
+        [
+            OFFER_ITEM_TYPEHASH,
+            offered_item_type,
+            cd(OFFER_TOKEN),
+            cd(OFFER_IDENTIFIER),
+            cd(OFFER_AMOUNT),
+            cd(OFFER_AMOUNT),
+        ],
+    )
+    let order_hash = keccak_words(
+        [
+            ORDER_TYPEHASH,
+            offerer.inner,
+            cd(ZONE),
+            keccak_words([offer_item_hash]),
+            received_items_hash,
+            order_type,
+            cd(START_TIME),
+            cd(END_TIME),
+            cd(ZONE_HASH),
+            cd(SALT),
+            cd(OFFERER_CONDUIT_KEY),
+            get_counter(offerer),
+        ],
+    )
 
     let mut spent = MemVec<SpentItem>::zeroed(1)
-    spent.set(index: 0, value: SpentItem {
-        itemType: offered_item_type.downcast_truncate(),
-        token: cd_address(OFFER_TOKEN),
-        identifier: cd(OFFER_IDENTIFIER),
-        amount: cd(OFFER_AMOUNT),
-    })
+    spent
+        .set(
+            index: 0,
+            value: SpentItem {
+                itemType: offered_item_type.downcast_truncate(),
+                token: cd_address(OFFER_TOKEN),
+                identifier: cd(OFFER_IDENTIFIER),
+                amount: cd(OFFER_AMOUNT),
+            },
+        )
     let offer_items = spent.to_dyn_array()
     let consideration_items = received.to_dyn_array()
-    log.emit(OrderFulfilled {
-        orderHash: Bytes32 { val: order_hash },
-        offerer,
-        zone: cd_address(ZONE),
-        recipient: ctx.caller(),
-        offer: offer_items,
-        consideration: consideration_items,
-    })
+    log.emit(
+        OrderFulfilled {
+            orderHash: Bytes32 { val: order_hash },
+            offerer,
+            zone: cd_address(ZONE),
+            recipient: ctx.caller(),
+            offer: offer_items,
+            consideration: consideration_items,
+        },
+    )
 
     // _validateBasicOrder
     let status = read_status(order_hash)
-    verify_order_status(order_hash, status, only_allow_unused: true, revert_on_invalid: true)
+    verify_order_status(
+        order_hash,
+        status,
+        only_allow_unused: true,
+        revert_on_invalid: true,
+    )
     if !status.is_validated {
-        verify_signature(env, offerer, order_hash, signature: basic_order_signature())
+        verify_signature(
+            env,
+            offerer,
+            order_hash,
+            signature: basic_order_signature(),
+        )
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
         call_basic_order_zone(order_hash, selector: AUTHORIZE_ORDER_SELECTOR)
@@ -315,10 +412,16 @@ fn basic_order_signature() -> ByteRef uses (ops: RawOps) {
 
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the
 /// order hash) for a basic order; the ZoneParameters come from calldata.
-fn call_basic_order_zone(_ order_hash: u256, selector: u256) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+fn call_basic_order_zone(_ order_hash: u256, selector: u256)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
     let consideration_size = 32 + (total_recipients + 1) * 160
-    let hashes_count: u256 = if selector == VALIDATE_ORDER_SELECTOR { 1 } else { 0 }
+    let hashes_count: u256 = if selector == VALIDATE_ORDER_SELECTOR {
+        1
+    } else {
+        0
+    }
     // head, offer (one SpentItem), consideration, empty extraData, hashes
     let params_size = 0x140 + 0xa0 + consideration_size + 32 + 32 + hashes_count * 32
     let size = 0x24 + params_size
@@ -342,19 +445,29 @@ fn call_basic_order_zone(_ order_hash: u256, selector: u256) uses (ctx: Ctx, cal
     let route = basic_order_type >> 2
     let offer = ptr::offset_bytes(head, 0x140)
     store_word(offer, 1)
-    store_word(ptr::offset_bytes(offer, 0x20), byte_at(route, OFFERED_ITEM_BYTE_MAP))
+    store_word(
+        ptr::offset_bytes(offer, 0x20),
+        byte_at(route, OFFERED_ITEM_BYTE_MAP),
+    )
     store_word(ptr::offset_bytes(offer, 0x40), cd(OFFER_TOKEN))
     store_word(ptr::offset_bytes(offer, 0x60), cd(OFFER_IDENTIFIER))
     store_word(ptr::offset_bytes(offer, 0x80), cd(OFFER_AMOUNT))
     // consideration: primary item, then all additional recipients
     let additional_recipients_item_type: u256 = if route > 1 { 1 } else { 0 }
-    let additional_recipients_token = if route > 3 { cd(OFFER_TOKEN) } else { cd(CONSIDERATION_TOKEN) }
+    let additional_recipients_token = if route > 3 {
+        cd(OFFER_TOKEN)
+    } else {
+        cd(CONSIDERATION_TOKEN)
+    }
     let consideration = ptr::offset_bytes(head, 0x1e0)
     store_word(consideration, total_recipients + 1)
     let first = ptr::offset_bytes(consideration, 0x20)
     store_word(first, byte_at(route, RECEIVED_ITEM_BYTE_MAP))
     store_word(ptr::offset_bytes(first, 0x20), cd(CONSIDERATION_TOKEN))
-    store_word(ptr::offset_bytes(first, 0x40), cd(CONSIDERATION_IDENTIFIER))
+    store_word(
+        ptr::offset_bytes(first, 0x40),
+        cd(CONSIDERATION_IDENTIFIER),
+    )
     store_word(ptr::offset_bytes(first, 0x60), cd(CONSIDERATION_AMOUNT))
     store_word(ptr::offset_bytes(first, 0x80), cd(OFFERER))
     let mut i: u256 = 0
@@ -363,26 +476,49 @@ fn call_basic_order_zone(_ order_hash: u256, selector: u256) uses (ctx: Ctx, cal
         store_word(item, additional_recipients_item_type)
         store_word(ptr::offset_bytes(item, 0x20), additional_recipients_token)
         store_word(ptr::offset_bytes(item, 0x40), 0)
-        store_word(ptr::offset_bytes(item, 0x60), cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40))
-        store_word(ptr::offset_bytes(item, 0x80), cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20))
+        store_word(
+            ptr::offset_bytes(item, 0x60),
+            cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
+        )
+        store_word(
+            ptr::offset_bytes(item, 0x80),
+            cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
+        )
         i += 1
     }
     store_word(ptr::offset_bytes(head, extra_data_offset), 0)
-    store_word(ptr::offset_bytes(head, extra_data_offset + 32), hashes_count)
+    store_word(
+        ptr::offset_bytes(head, extra_data_offset + 32),
+        hashes_count,
+    )
     if hashes_count == 1 {
-        store_word(ptr::offset_bytes(head, extra_data_offset + 64), order_hash)
+        store_word(
+            ptr::offset_bytes(head, extra_data_offset + 64),
+            order_hash,
+        )
     }
     let magic = selector << 224
     let mut ret = core::ptr::MemBuffer::with_capacity(32)
     store_word(ret.ptr(), 0)
     let zone = cd_address(ZONE)
-    let outcome = call.raw_call(addr: zone, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: data, len: size), ret: mut ret)
+    let outcome = call
+        .raw_call(
+            addr: zone,
+            gas: ctx.gas(),
+            value: 0,
+            args: MemSpan::from_raw_parts(ptr: data, len: size),
+            ret: mut ret,
+        )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } })
+        revert_error(
+            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
+        )
     }
     if load_word(ret.ptr()) != magic {
-        revert_error(InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } })
+        revert_error(
+            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
+        )
     }
 }
 
@@ -406,7 +542,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         store_word(ptr::offset_bytes(data, 0xa4), ctx.caller().inner)
         store_word(ptr::offset_bytes(data, 0xc4), identifier)
         store_word(ptr::offset_bytes(data, 0xe4), amount)
-        call_conduit(env, conduit_key, args: MemSpan::from_raw_parts(ptr: data, len: 0x104))
+        call_conduit(
+            env,
+            conduit_key,
+            args: MemSpan::from_raw_parts(ptr: data, len: 0x104),
+        )
     } else if item_type == ERC721 as u256 {
         if amount != 1 {
             revert_error(InvalidERC721TransferAmount { amount })
@@ -419,7 +559,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_transferNativeTokensAndFinalize`: pay additional recipients and the
 /// offerer from `msg.value` and refund the rest.
-fn transfer_native_tokens_and_finalize() uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+fn transfer_native_tokens_and_finalize()
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     let mut remaining = ctx.value()
     let amount = cd(CONSIDERATION_AMOUNT)
     let offerer = cd_address(OFFERER)
@@ -446,7 +588,14 @@ fn transfer_native_tokens_and_finalize() uses (ctx: Ctx, call: mut Call, ops: Ra
 
 /// `_transferERC20AndFinalize`: the ERC20 side of the order, split between
 /// the additional recipients and the counterparty.
-fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: Accumulator, buf: *u8) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+fn transfer_erc20_and_finalize(
+    _ env: Env,
+    from_offerer: bool,
+    acc: Accumulator,
+    buf: *u8,
+) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     let mut from = ctx.caller()
     let mut to = cd_address(OFFERER)
     let mut token = cd_address(CONSIDERATION_TOKEN)
@@ -462,7 +611,11 @@ fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: Accumulator,
     if identifier != 0 {
         revert_error(UnusedItemParameters {})
     }
-    let conduit_key = if from_offerer { cd(OFFERER_CONDUIT_KEY) } else { cd(FULFILLER_CONDUIT_KEY) }
+    let conduit_key = if from_offerer {
+        cd(OFFERER_CONDUIT_KEY)
+    } else {
+        cd(FULFILLER_CONDUIT_KEY)
+    }
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
     let mut current = acc
     let mut i: u256 = 0
@@ -472,8 +625,26 @@ fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: Accumulator,
         if from_offerer {
             amount = amount - additional_amount
         }
-        current = transfer_erc20(token, from, to: recipient, amount: additional_amount, conduit_key, acc: current, buf, env)
+        current = transfer_erc20(
+            token,
+            from,
+            to: recipient,
+            amount: additional_amount,
+            conduit_key,
+            acc: current,
+            buf,
+            env,
+        )
         i += 1
     }
-    transfer_erc20(token, from, to, amount, conduit_key, acc: current, buf, env)
+    transfer_erc20(
+        token,
+        from,
+        to,
+        amount,
+        conduit_key,
+        acc: current,
+        buf,
+        env,
+    )
 }

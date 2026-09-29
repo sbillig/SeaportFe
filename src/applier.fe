@@ -51,7 +51,10 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 /// available orders, zeroing them. All of them must share type, token,
 /// identifier, offerer and conduit key. Also returns the index of the first
 /// used component, which seaport-core moves to the front of the array.
-pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipient: Address) -> (ExecutionState, u256) {
+pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipient: Address) -> (
+    ExecutionState,
+    u256,
+) {
     let mut execution = empty_execution()
     let mut first_used: u256 = 0
     let mut amount: u256 = 0
@@ -86,8 +89,7 @@ pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipie
                 first_used = k
             } else if order.offerer != execution.offerer
                 || order.conduit_key != execution.conduit_key
-                || data_hash != keccak_words([item.item_type, item.token.inner, item.identifier])
-            {
+                || data_hash != keccak_words([item.item_type, item.token.inner, item.identifier]) {
                 revert_error(InvalidFulfillmentComponentData {})
             }
         }
@@ -130,7 +132,9 @@ pub fn aggregate_consideration_items(
             }
             amount = new_amount
             item.amount = 0
-            let item_hash = keccak_words([item.item_type, item.token.inner, item.identifier, 0, item.receiver.inner])
+            let item_hash = keccak_words(
+                [item.item_type, item.token.inner, item.identifier, 0, item.receiver.inner],
+            )
             if data_hash == 0 {
                 execution.item_type = item.item_type
                 execution.token = item.token
@@ -154,27 +158,37 @@ pub fn aggregate_consideration_items(
 /// `_applyFulfillment`: match aggregated offer items against aggregated
 /// consideration items; the unmatched rest stays on the first used
 /// component.
-pub fn apply_fulfillment(
-    _ book: Book,
-    groups: Groups,
-    fulfillment_index: u256,
-) -> ExecutionState {
+pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) -> ExecutionState {
     let offer_group = *groups.list.at(2 * fulfillment_index)
     let consideration_group = *groups.list.at(2 * fulfillment_index + 1)
     if offer_group.len == 0 || consideration_group.len == 0 {
         revert_error(OfferAndConsiderationRequiredOnFulfillment {})
     }
-    let (consideration, consideration_first) = aggregate_consideration_items(book, groups, group: consideration_group, offerer: Address::zero(), conduit_key: 0)
+    let (consideration, consideration_first) = aggregate_consideration_items(
+        book,
+        groups,
+        group: consideration_group,
+        offerer: Address::zero(),
+        conduit_key: 0,
+    )
     if consideration.amount == 0 {
         return consideration
     }
-    let (offered, offer_first) = aggregate_offer_items(book, groups, group: offer_group, recipient: consideration.recipient)
+    let (offered, offer_first) = aggregate_offer_items(
+        book,
+        groups,
+        group: offer_group,
+        recipient: consideration.recipient,
+    )
     let mut execution = offered
     if execution.item_type != consideration.item_type
         || execution.token != consideration.token
-        || execution.identifier != consideration.identifier
-    {
-        revert_error(MismatchedFulfillmentOfferAndConsiderationComponents { fulfillmentIndex: fulfillment_index })
+        || execution.identifier != consideration.identifier {
+        revert_error(
+            MismatchedFulfillmentOfferAndConsiderationComponents {
+                fulfillmentIndex: fulfillment_index,
+            },
+        )
     }
     if consideration.amount > execution.amount {
         let target = *groups.components.at(consideration_group.start + consideration_first)
@@ -199,7 +213,9 @@ pub fn aggregate_available(
     index: u256,
     fulfiller_conduit_key: u256,
     recipient: Address,
-) -> ExecutionState uses (ctx: Ctx) {
+) -> ExecutionState
+uses (ctx: Ctx)
+{
     let group = *groups.list.at(index)
     if group.len == 0 {
         revert_error(MissingFulfillmentComponentOnAggregation { side })
@@ -208,6 +224,12 @@ pub fn aggregate_available(
         let (execution, _) = aggregate_offer_items(book, groups, group, recipient)
         return execution
     }
-    let (execution, _) = aggregate_consideration_items(book, groups, group, offerer: ctx.caller(), conduit_key: fulfiller_conduit_key)
+    let (execution, _) = aggregate_consideration_items(
+        book,
+        groups,
+        group,
+        offerer: ctx.caller(),
+        conduit_key: fulfiller_conduit_key,
+    )
     execution
 }

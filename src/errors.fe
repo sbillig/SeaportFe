@@ -29,15 +29,10 @@ pub struct OrderCancelled {
 }
 
 #[event]
-pub struct OrderValidated {
-    pub orderHash: Bytes32,
-    pub orderParameters: OrderParameters,
-}
+pub struct OrderValidated { pub orderHash: Bytes32, pub orderParameters: OrderParameters }
 
 #[event]
-pub struct OrdersMatched {
-    pub orderHashes: DynArray<Bytes32>,
-}
+pub struct OrdersMatched { pub orderHashes: DynArray<Bytes32> }
 
 #[event]
 pub struct CounterIncremented {
@@ -59,7 +54,11 @@ pub struct ConsiderationLengthNotEqualToTotalOriginal {}
 #[error]
 pub struct InvalidCallToConduit { pub conduit: Address }
 #[error]
-pub struct ConsiderationNotMet { pub orderIndex: u256, pub considerationIndex: u256, pub shortfallAmount: u256 }
+pub struct ConsiderationNotMet {
+    pub orderIndex: u256,
+    pub considerationIndex: u256,
+    pub shortfallAmount: u256,
+}
 #[error]
 pub struct InsufficientNativeTokensSupplied {}
 #[error]

@@ -10,10 +10,7 @@ use core::size_of
 use std::abi::Bytes
 use std::evm::{revert_error, Panic, PANIC_INDEX_OUT_OF_BOUNDS}
 
-pub struct Arr<T> {
-    ptr: *T,
-    len: u256,
-}
+pub struct Arr<T> { ptr: *T, len: u256 }
 
 impl<T> Copy for Arr<T> {}
 
@@ -41,11 +38,7 @@ impl<T> Arr<T> {
 }
 
 /// A copyable reference to an ABI `bytes` tail (length word + padded data).
-pub struct ByteRef {
-    pub data: *u8,
-    pub len: u256,
-    pub size: u256,
-}
+pub struct ByteRef { pub data: *u8, pub len: u256, pub size: u256 }
 
 impl Copy for ByteRef {}
 

@@ -20,7 +20,11 @@ pub fn domain_separator(_ env: Env) -> u256 uses (ctx: Ctx) {
     if ctx.chainid() == env.chain_id {
         env.domain_separator
     } else {
-        derive_domain_separator(name_hash: env.name_hash, chain_id: ctx.chainid(), this: ctx.address())
+        derive_domain_separator(
+            name_hash: env.name_hash,
+            chain_id: ctx.chainid(),
+            this: ctx.address(),
+        )
     }
 }
 
@@ -96,7 +100,9 @@ pub fn assert_valid_signature(
     original_length: u256,
     signature_length: u256,
     _ signature: ByteRef,
-) uses (ctx: Ctx, call: Call, ops: RawOps) {
+)
+uses (ctx: Ctx, call: Call, ops: RawOps)
+{
     let payload = signature.payload()
     let mut recovered: u256 = 0
     let mut v: u256 = 0
@@ -110,8 +116,8 @@ pub fn assert_valid_signature(
             s = s & ALL_BUT_HIGHEST_BIT
         }
         recovered = match ecrecover_raw(hash: digest, v, r, s) {
-            Result::Ok(Option::Some(address)) => address
-            _ => 0
+            Result::Ok(Option::Some(address,),) => address,
+            _ => 0,
         }
     }
     let mut success = signer.inner == recovered && signer.inner != 0
@@ -122,12 +128,23 @@ pub fn assert_valid_signature(
         store_word(ptr::offset_bytes(args.ptr(), 4), original_digest)
         store_word(ptr::offset_bytes(args.ptr(), 0x24), 0x40)
         store_word(ptr::offset_bytes(args.ptr(), 0x44), original_length)
-        ptr::copy_raw(dest: ptr::offset_bytes(args.ptr(), 0x64), source: payload, len: original_length)
+        ptr::copy_raw(
+            dest: ptr::offset_bytes(args.ptr(), 0x64),
+            source: payload,
+            len: original_length,
+        )
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
         let mut ret = MemBuffer::with_capacity(32)
         store_word(ret.ptr(), recovered)
-        success = call.raw_staticcall(addr: signer, gas: ctx.gas(), args: args.span(), ret: mut ret).success()
+        success = call
+            .raw_staticcall(
+                addr: signer,
+                gas: ctx.gas(),
+                args: args.span(),
+                ret: mut ret,
+            )
+            .success()
         if success && load_word(ret.ptr()) != EIP1271_SELECTOR_WORD {
             if ctx.extcodesize(signer) != 0 {
                 revert_error(BadContractSignature {})

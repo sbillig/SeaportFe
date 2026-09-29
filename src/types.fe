@@ -102,10 +102,7 @@ pub struct OrderComponents {
 }
 
 #[abi]
-pub struct Order {
-    pub parameters: OrderParameters,
-    pub signature: Bytes,
-}
+pub struct Order { pub parameters: OrderParameters, pub signature: Bytes }
 
 #[abi]
 pub struct AdvancedOrder {
@@ -126,10 +123,7 @@ pub struct CriteriaResolver {
 }
 
 #[abi]
-pub struct FulfillmentComponent {
-    pub orderIndex: u256,
-    pub itemIndex: u256,
-}
+pub struct FulfillmentComponent { pub orderIndex: u256, pub itemIndex: u256 }
 impl Copy for FulfillmentComponent {}
 
 #[abi]
@@ -139,11 +133,7 @@ pub struct Fulfillment {
 }
 
 #[abi]
-pub struct Execution {
-    pub item: ReceivedItem,
-    pub offerer: Address,
-    pub conduitKey: Bytes32,
-}
+pub struct Execution { pub item: ReceivedItem, pub offerer: Address, pub conduitKey: Bytes32 }
 impl Copy for Execution {}
 
 /// `SpentItem` as decoded by zones (strict `uint8` item type).
@@ -183,8 +173,5 @@ pub struct ZoneParameters {
 }
 
 #[abi]
-pub struct AdditionalRecipient {
-    pub amount: u256,
-    pub recipient: Address,
-}
+pub struct AdditionalRecipient { pub amount: u256, pub recipient: Address }
 impl Copy for AdditionalRecipient {}

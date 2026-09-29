@@ -6,10 +6,29 @@
 // and `_pauser` in slots 0 to 2.
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
-use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, create2_address, keccak256, revert_error}
+use std::evm::{
+    Address,
+    Call,
+    Contract,
+    Create,
+    Ctx,
+    Log,
+    RawOps,
+    create2_address,
+    keccak256,
+    revert_error,
+}
 use super::lowlevel::store_word
 use super::seaport::SeaportMsg
-use super::types::{AdvancedOrder, CriteriaResolver, Execution, Fulfillment, Order, OrderComponents, ZoneParameters}
+use super::types::{
+    AdvancedOrder,
+    CriteriaResolver,
+    Execution,
+    Fulfillment,
+    Order,
+    OrderComponents,
+    ZoneParameters,
+}
 
 #[event]
 pub struct Paused {}
@@ -48,10 +67,7 @@ pub struct CallerIsNotPotentialOwner {}
 pub struct ZoneIsPaused {}
 
 #[abi]
-pub struct Schema {
-    pub id: u256,
-    pub metadata: Bytes,
-}
+pub struct Schema { pub id: u256, pub metadata: Bytes }
 
 const ZONE_INTERFACE_ID: u256 = 0x39dd6933
 const ERC165_INTERFACE_ID: u256 = 0x01ffc9a7
@@ -59,24 +75,38 @@ const AUTHORIZE_ORDER_SELECTOR: u256 = 0x01e4d72a
 const VALIDATE_ORDER_SELECTOR: u256 = 0x17b1f942
 
 pub msg PausableZoneMsg {
-    #[selector = sol("cancelOrders(address,(address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])")]
+    #[selector = sol(
+        "cancelOrders(address,(address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])",
+    )]
     CancelOrders { seaport: Address, orders: DynArray<OrderComponents> } -> bool,
     #[selector = sol("pause()")]
     Pause {},
     #[selector = sol("assignOperator(address)")]
     AssignOperator { operatorToAssign: Address },
-    #[selector = sol("executeMatchOrders(address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],((uint256,uint256)[],(uint256,uint256)[])[])")]
-    ExecuteMatchOrders { seaport: Address, orders: DynArray<Order>, fulfillments: DynArray<Fulfillment> } -> DynArray<Execution>,
-    #[selector = sol("executeMatchAdvancedOrders(address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],((uint256,uint256)[],(uint256,uint256)[])[])")]
+    #[selector = sol(
+        "executeMatchOrders(address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],((uint256,uint256)[],(uint256,uint256)[])[])",
+    )]
+    ExecuteMatchOrders {
+        seaport: Address,
+        orders: DynArray<Order>,
+        fulfillments: DynArray<Fulfillment>,
+    } -> DynArray<Execution>,
+    #[selector = sol(
+        "executeMatchAdvancedOrders(address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],((uint256,uint256)[],(uint256,uint256)[])[])",
+    )]
     ExecuteMatchAdvancedOrders {
         seaport: Address,
         orders: DynArray<AdvancedOrder>,
         criteriaResolvers: DynArray<CriteriaResolver>,
         fulfillments: DynArray<Fulfillment>,
     } -> DynArray<Execution>,
-    #[selector = sol("authorizeOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))")]
+    #[selector = sol(
+        "authorizeOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))",
+    )]
     AuthorizeOrder { zoneParameters: ZoneParameters } -> Bytes4,
-    #[selector = sol("validateOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))")]
+    #[selector = sol(
+        "validateOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))",
+    )]
     ValidateOrder { zoneParameters: ZoneParameters } -> Bytes4,
     #[selector = sol("getSeaportMetadata()")]
     GetSeaportMetadata {} -> (DynString, DynArray<Schema>),
@@ -119,13 +149,20 @@ fn assert_controller(_ controller: Address) uses (ctx: Ctx) {
 pub contract PausableZone {
     controller: Address,
 
-    init() uses (mut controller, ctx: Ctx, log: mut Log) {
+    init()
+    uses (mut controller, ctx: Ctx, log: mut Log)
+    {
         controller = ctx.caller()
         log.emit(Unpaused {})
     }
 
     recv PausableZoneMsg {
-        CancelOrders { seaport, orders } -> bool uses (controller, ctx: Ctx, call: mut Call, ops: RawOps) {
+        CancelOrders { seaport, orders } -> bool uses (
+            controller,
+            ctx: Ctx,
+            call: mut Call,
+            ops: RawOps,
+        ) {
             assert_operator(controller)
             seaport.call(SeaportMsg::Cancel { orders })
         }
@@ -134,22 +171,24 @@ pub contract PausableZone {
             log.emit(Paused {})
             ops.sstore(slot: 0, value: ops.sload(0) | (1 << 160))
         }
-        AssignOperator { operatorToAssign } uses (controller, ctx: Ctx, ops: mut RawOps, log: mut Log) {
+        AssignOperator { operatorToAssign } uses (
+            controller,
+            ctx: Ctx,
+            ops: mut RawOps,
+            log: mut Log,
+        ) {
             assert_controller(controller)
             if operatorToAssign.inner == 0 {
                 revert_error(PauserCanNotBeSetAsZero {})
             }
-            ops.sstore(slot: 0, value: (ops.sload(0) & !OPERATOR_MASK) | operatorToAssign.inner)
+            ops.sstore(
+                slot: 0,
+                value: (ops.sload(0) & !OPERATOR_MASK) | operatorToAssign.inner,
+            )
             log.emit(OperatorUpdated { newOperator: operatorToAssign })
         }
         #[payable]
-        ExecuteMatchOrders { seaport, orders, fulfillments } -> DynArray<Execution> uses (controller, ctx: Ctx, call: mut Call, ops: RawOps) {
-            assert_operator(controller)
-            assert_not_paused()
-            call.call(addr: seaport, gas: ctx.gas(), value: ctx.value(), message: SeaportMsg::MatchOrders { orders, fulfillments })
-        }
-        #[payable]
-        ExecuteMatchAdvancedOrders { seaport, orders, criteriaResolvers, fulfillments } -> DynArray<Execution>
+        ExecuteMatchOrders { seaport, orders, fulfillments } -> DynArray<Execution>
         uses (controller, ctx: Ctx, call: mut Call, ops: RawOps)
         {
             assert_operator(controller)
@@ -158,14 +197,38 @@ pub contract PausableZone {
                 addr: seaport,
                 gas: ctx.gas(),
                 value: ctx.value(),
-                message: SeaportMsg::MatchAdvancedOrders { orders, criteriaResolvers, fulfillments, recipient: ctx.caller() },
+                message: SeaportMsg::MatchOrders { orders, fulfillments },
             )
         }
-        AuthorizeOrder { zoneParameters } -> Bytes4 uses (ops: RawOps) {
+        #[payable]
+        ExecuteMatchAdvancedOrders { seaport, orders, criteriaResolvers, fulfillments } -> DynArray<
+            Execution,
+        >
+        uses (controller, ctx: Ctx, call: mut Call, ops: RawOps)
+        {
+            assert_operator(controller)
+            assert_not_paused()
+            call.call(
+                addr: seaport,
+                gas: ctx.gas(),
+                value: ctx.value(),
+                message: SeaportMsg::MatchAdvancedOrders {
+                    orders,
+                    criteriaResolvers,
+                    fulfillments,
+                    recipient: ctx.caller(),
+                },
+            )
+        }
+        AuthorizeOrder { zoneParameters } -> Bytes4
+        uses (ops: RawOps)
+        {
             assert_not_paused()
             Bytes4 { val: AUTHORIZE_ORDER_SELECTOR }
         }
-        ValidateOrder { zoneParameters } -> Bytes4 uses (ops: RawOps) {
+        ValidateOrder { zoneParameters } -> Bytes4
+        uses (ops: RawOps)
+        {
             assert_not_paused()
             Bytes4 { val: VALIDATE_ORDER_SELECTOR }
         }
@@ -198,16 +261,26 @@ pub msg PausableZoneControllerMsg {
     CreateZone { salt: Bytes32 } -> Address,
     #[selector = sol("pause(address)")]
     Pause { zone: Address } -> bool,
-    #[selector = sol("cancelOrders(address,address,(address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])")]
-    CancelOrders { pausableZoneAddress: Address, seaportAddress: Address, orders: DynArray<OrderComponents> },
-    #[selector = sol("executeMatchOrders(address,address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],((uint256,uint256)[],(uint256,uint256)[])[])")]
+    #[selector = sol(
+        "cancelOrders(address,address,(address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])",
+    )]
+    CancelOrders {
+        pausableZoneAddress: Address,
+        seaportAddress: Address,
+        orders: DynArray<OrderComponents>,
+    },
+    #[selector = sol(
+        "executeMatchOrders(address,address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],((uint256,uint256)[],(uint256,uint256)[])[])",
+    )]
     ExecuteMatchOrders {
         pausableZoneAddress: Address,
         seaportAddress: Address,
         orders: DynArray<Order>,
         fulfillments: DynArray<Fulfillment>,
     } -> DynArray<Execution>,
-    #[selector = sol("executeMatchAdvancedOrders(address,address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],((uint256,uint256)[],(uint256,uint256)[])[])")]
+    #[selector = sol(
+        "executeMatchAdvancedOrders(address,address,((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],((uint256,uint256)[],(uint256,uint256)[])[])",
+    )]
     ExecuteMatchAdvancedOrders {
         pausableZoneAddress: Address,
         seaportAddress: Address,
@@ -252,22 +325,39 @@ fn assert_owner() uses (ctx: Ctx, ops: RawOps) {
 fn zone_init_code_hash() -> u256 uses (ops: mut RawOps) {
     let len = <PausableZone as Contract>::init_code_len()
     let mut code = MemBuffer::with_capacity(len)
-    ops.codecopy(dest: mut code, dest_offset: 0, src_offset: <PausableZone as Contract>::init_code_offset(), len)
+    ops.codecopy(
+        dest: mut code,
+        dest_offset: 0,
+        src_offset: <PausableZone as Contract>::init_code_offset(),
+        len,
+    )
     keccak256(code.span())
 }
 
 pub contract PausableZoneController {
     zone_creation_code: u256,
 
-    init(ownerAddress: Address) uses (mut zone_creation_code, ops: mut RawOps) {
+    init(ownerAddress: Address)
+    uses (mut zone_creation_code, ops: mut RawOps)
+    {
         ops.sstore(slot: OWNER_SLOT, value: ownerAddress.inner)
         zone_creation_code = zone_init_code_hash()
     }
 
     recv PausableZoneControllerMsg {
-        CreateZone { salt } -> Address uses (zone_creation_code, ctx: Ctx, create: mut Create, ops: RawOps, log: mut Log) {
+        CreateZone { salt } -> Address uses (
+            zone_creation_code,
+            ctx: Ctx,
+            create: mut Create,
+            ops: RawOps,
+            log: mut Log,
+        ) {
             assert_owner()
-            let derived = create2_address(deployer: ctx.address(), salt: salt.val, init_code_hash: zone_creation_code)
+            let derived = create2_address(
+                deployer: ctx.address(),
+                salt: salt.val,
+                init_code_hash: zone_creation_code,
+            )
             if ctx.extcodesize(derived) != 0 {
                 revert_error(ZoneAlreadyExists { zone: derived })
             }
@@ -276,18 +366,29 @@ pub contract PausableZoneController {
             derived
         }
         Pause { zone } -> bool uses (ctx: Ctx, call: mut Call, ops: RawOps) {
-            if ctx.caller() != read_address(PAUSER_SLOT) && ctx.caller() != read_address(OWNER_SLOT) {
+            if ctx.caller() != read_address(PAUSER_SLOT)
+                && ctx.caller() != read_address(OWNER_SLOT) {
                 revert_error(InvalidPauser {})
             }
             zone.call(PausableZoneMsg::Pause {})
             true
         }
-        CancelOrders { pausableZoneAddress, seaportAddress, orders } uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+        CancelOrders { pausableZoneAddress, seaportAddress, orders }
+        uses (ctx: Ctx, call: mut Call, ops: RawOps)
+        {
             assert_owner()
-            let _: bool = pausableZoneAddress.call(PausableZoneMsg::CancelOrders { seaport: seaportAddress, orders })
+            let _: bool = pausableZoneAddress
+                .call(
+                    PausableZoneMsg::CancelOrders { seaport: seaportAddress, orders },
+                )
         }
         #[payable]
-        ExecuteMatchOrders { pausableZoneAddress, seaportAddress, orders, fulfillments } -> DynArray<Execution>
+        ExecuteMatchOrders {
+            pausableZoneAddress,
+            seaportAddress,
+            orders,
+            fulfillments,
+        } -> DynArray<Execution>
         uses (ctx: Ctx, call: mut Call, ops: RawOps)
         {
             assert_owner()
@@ -295,11 +396,21 @@ pub contract PausableZoneController {
                 addr: pausableZoneAddress,
                 gas: ctx.gas(),
                 value: ctx.value(),
-                message: PausableZoneMsg::ExecuteMatchOrders { seaport: seaportAddress, orders, fulfillments },
+                message: PausableZoneMsg::ExecuteMatchOrders {
+                    seaport: seaportAddress,
+                    orders,
+                    fulfillments,
+                },
             )
         }
         #[payable]
-        ExecuteMatchAdvancedOrders { pausableZoneAddress, seaportAddress, orders, criteriaResolvers, fulfillments } -> DynArray<Execution>
+        ExecuteMatchAdvancedOrders {
+            pausableZoneAddress,
+            seaportAddress,
+            orders,
+            criteriaResolvers,
+            fulfillments,
+        } -> DynArray<Execution>
         uses (ctx: Ctx, call: mut Call, ops: RawOps)
         {
             assert_owner()
@@ -307,7 +418,12 @@ pub contract PausableZoneController {
                 addr: pausableZoneAddress,
                 gas: ctx.gas(),
                 value: ctx.value(),
-                message: PausableZoneMsg::ExecuteMatchAdvancedOrders { seaport: seaportAddress, orders, criteriaResolvers, fulfillments },
+                message: PausableZoneMsg::ExecuteMatchAdvancedOrders {
+                    seaport: seaportAddress,
+                    orders,
+                    criteriaResolvers,
+                    fulfillments,
+                },
             )
         }
         TransferOwnership { newPotentialOwner } uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
@@ -320,16 +436,25 @@ pub contract PausableZoneController {
         }
         CancelOwnershipTransfer {} uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
             assert_owner()
-            log.emit(PotentialOwnerUpdated { newPotentialOwner: Address::zero() })
+            log.emit(
+                PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
+            )
             ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
         }
         AcceptOwnership {} uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
             if ctx.caller() != read_address(POTENTIAL_OWNER_SLOT) {
                 revert_error(CallerIsNotPotentialOwner {})
             }
-            log.emit(PotentialOwnerUpdated { newPotentialOwner: Address::zero() })
+            log.emit(
+                PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
+            )
             ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
-            log.emit(OwnershipTransferred { previousOwner: read_address(OWNER_SLOT), newOwner: ctx.caller() })
+            log.emit(
+                OwnershipTransferred {
+                    previousOwner: read_address(OWNER_SLOT),
+                    newOwner: ctx.caller(),
+                },
+            )
             ops.sstore(slot: OWNER_SLOT, value: ctx.caller().inner)
         }
         AssignPauser { pauserToAssign } uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
@@ -340,7 +465,9 @@ pub contract PausableZoneController {
             ops.sstore(slot: PAUSER_SLOT, value: pauserToAssign.inner)
             log.emit(PauserUpdated { newPauser: pauserToAssign })
         }
-        AssignOperator { pausableZoneAddress, operatorToAssign } uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+        AssignOperator { pausableZoneAddress, operatorToAssign }
+        uses (ctx: Ctx, call: mut Call, ops: RawOps)
+        {
             assert_owner()
             pausableZoneAddress.call(PausableZoneMsg::AssignOperator { operatorToAssign })
         }

@@ -47,11 +47,7 @@ impl Copy for Transfer {}
 /// buffer the caller allocates for the most transfers the operation can
 /// make; the accumulator holds no pointer and is passed by value
 /// (ISSUES.md #9).
-pub struct Accumulator {
-    pub armed: bool,
-    pub conduit_key: u256,
-    pub count: u256,
-}
+pub struct Accumulator { pub armed: bool, pub conduit_key: u256, pub count: u256 }
 
 impl Copy for Accumulator {}
 
@@ -75,7 +71,14 @@ fn set_arg(_ data: *u8, _ index: u256, _ value: u256) {
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
-pub fn transfer(_ item: Transfer, from: Address, conduit_key: u256, acc: Accumulator, buf: *u8, env: Env) -> Accumulator
+pub fn transfer(
+    _ item: Transfer,
+    from: Address,
+    conduit_key: u256,
+    acc: Accumulator,
+    buf: *u8,
+    env: Env,
+) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if item.item_type == NATIVE as u256 {
@@ -89,12 +92,41 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         if item.identifier != 0 {
             revert_error(UnusedItemParameters {})
         }
-        return transfer_erc20(token: item.token, from, to: item.recipient, amount: item.amount, conduit_key, acc, buf, env)
+        return transfer_erc20(
+            token: item.token,
+            from,
+            to: item.recipient,
+            amount: item.amount,
+            conduit_key,
+            acc,
+            buf,
+            env,
+        )
     }
     if item.item_type == ERC721 as u256 {
-        return transfer_erc721(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, buf, env)
+        return transfer_erc721(
+            token: item.token,
+            from,
+            to: item.recipient,
+            identifier: item.identifier,
+            amount: item.amount,
+            conduit_key,
+            acc,
+            buf,
+            env,
+        )
     }
-    transfer_erc1155(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, buf, env)
+    transfer_erc1155(
+        token: item.token,
+        from,
+        to: item.recipient,
+        identifier: item.identifier,
+        amount: item.amount,
+        conduit_key,
+        acc,
+        buf,
+        env,
+    )
 }
 
 pub fn assert_non_zero_amount(_ amount: u256) {
@@ -104,18 +136,30 @@ pub fn assert_non_zero_amount(_ amount: u256) {
 }
 
 /// `_transferNativeTokens`
-pub fn transfer_native_tokens(to: Address, amount: u256) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+pub fn transfer_native_tokens(to: Address, amount: u256)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     assert_non_zero_amount(amount)
     // The failure payload is written before the call: a recipient may burn
     // all forwarded gas, and seaport-core still reverts with the custom error
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
     let failure = ptr::alloc_bytes(0x44)
-    store_word(failure, NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224)
+    store_word(
+        failure,
+        NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+    )
     store_word(ptr::offset_bytes(failure, 0x04), to.inner)
     store_word(ptr::offset_bytes(failure, 0x24), amount)
     let mut ret = MemBuffer::empty()
-    let outcome = call.raw_call(addr: to, gas: ctx.gas(), value: amount, args: MemSpan::empty(), ret: mut ret)
+    let outcome = call
+        .raw_call(
+            addr: to,
+            gas: ctx.gas(),
+            value: amount,
+            args: MemSpan::empty(),
+            ret: mut ret,
+        )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
         ops.revert(data: MemSpan::from_raw_parts(ptr: failure, len: 0x44))
@@ -134,14 +178,26 @@ pub fn transfer_erc20(
     acc: Accumulator,
     buf: *u8,
     env: Env,
-) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     assert_non_zero_amount(amount)
     let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc20_transfer(token, from, to, amount)
         return acc
     }
-    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC20, token, from, to, identifier: 0, amount)
+    insert(
+        acc,
+        buf,
+        conduit_key,
+        item_type: CONDUIT_ERC20,
+        token,
+        from,
+        to,
+        identifier: 0,
+        amount,
+    )
 }
 
 pub fn transfer_erc721(
@@ -154,7 +210,9 @@ pub fn transfer_erc721(
     acc: Accumulator,
     buf: *u8,
     env: Env,
-) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         if amount != 1 {
@@ -163,7 +221,17 @@ pub fn transfer_erc721(
         perform_erc721_transfer(token, from, to, identifier)
         return acc
     }
-    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC721, token, from, to, identifier, amount)
+    insert(
+        acc,
+        buf,
+        conduit_key,
+        item_type: CONDUIT_ERC721,
+        token,
+        from,
+        to,
+        identifier,
+        amount,
+    )
 }
 
 pub fn transfer_erc1155(
@@ -176,17 +244,34 @@ pub fn transfer_erc1155(
     acc: Accumulator,
     buf: *u8,
     env: Env,
-) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     assert_non_zero_amount(amount)
     let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc1155_transfer(token, from, to, identifier, amount)
         return acc
     }
-    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC1155, token, from, to, identifier, amount)
+    insert(
+        acc,
+        buf,
+        conduit_key,
+        item_type: CONDUIT_ERC1155,
+        token,
+        from,
+        to,
+        identifier,
+        amount,
+    )
 }
 
-fn trigger_if_armed_and_not_accumulatable(_ acc: Accumulator, _ buf: *u8, _ conduit_key: u256, _ env: Env) -> Accumulator
+fn trigger_if_armed_and_not_accumulatable(
+    _ acc: Accumulator,
+    _ buf: *u8,
+    _ conduit_key: u256,
+    _ env: Env,
+) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if acc.conduit_key != conduit_key {
@@ -196,18 +281,26 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 /// Execute the accumulated conduit transfers, if any.
-pub fn trigger_if_armed(_ acc: Accumulator, _ buf: *u8, _ env: Env) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
-    if !acc.armed {
-        return acc
-    }
+pub fn trigger_if_armed(_ acc: Accumulator, _ buf: *u8, _ env: Env) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    if !acc.armed { return acc }
     let count = acc.count
     let size = 0x44 + count * 0xc0
     let data = ptr::alloc_bytes(size)
     store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
     store_word(ptr::offset_bytes(data, 4), 0x20)
     store_word(ptr::offset_bytes(data, 0x24), count)
-    ptr::copy_raw(dest: ptr::offset_bytes(data, 0x44), source: buf, len: count * 0xc0)
-    call_conduit(env, conduit_key: acc.conduit_key, args: MemSpan::from_raw_parts(ptr: data, len: size))
+    ptr::copy_raw(
+        dest: ptr::offset_bytes(data, 0x44),
+        source: buf,
+        len: count * 0xc0,
+    )
+    call_conduit(
+        env,
+        conduit_key: acc.conduit_key,
+        args: MemSpan::from_raw_parts(ptr: data, len: size),
+    )
     let mut disarmed = acc
     disarmed.armed = false
     disarmed
@@ -215,17 +308,27 @@ pub fn trigger_if_armed(_ acc: Accumulator, _ buf: *u8, _ env: Env) -> Accumulat
 
 /// `_callConduitUsingOffsets`: call the conduit and require the `execute`
 /// magic value.
-pub fn call_conduit(_ env: Env, conduit_key: u256, args: MemSpan) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+pub fn call_conduit(_ env: Env, conduit_key: u256, args: MemSpan)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
     let conduit = derive_conduit(env, conduit_key)
     let mut ret = MemBuffer::with_capacity(32)
     store_word(ret.ptr(), 0)
-    let outcome = call.raw_call(addr: conduit, gas: ctx.gas(), value: 0, args, ret: mut ret)
+    let outcome = call.raw_call(
+            addr: conduit,
+            gas: ctx.gas(),
+            value: 0,
+            args,
+            ret: mut ret,
+        )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
         revert_error(InvalidCallToConduit { conduit })
     }
     if load_word(ret.ptr()) >> 224 != CONDUIT_EXECUTE_SELECTOR {
-        revert_error(InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit })
+        revert_error(
+            InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
+        )
     }
 }
 
@@ -268,7 +371,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     set_arg(args, 2, amount)
     let mut ret = MemBuffer::with_capacity(32)
     store_word(ret.ptr(), 0)
-    let outcome = call.raw_call(addr: token, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: args, len: 0x64), ret: mut ret)
+    let outcome = call
+        .raw_call(
+            addr: token,
+            gas: ctx.gas(),
+            value: 0,
+            args: MemSpan::from_raw_parts(ptr: args, len: 0x64),
+            ret: mut ret,
+        )
     let call_status = outcome.success()
     let size = outcome.returndata_len()
     let success = call_status && ((load_word(ret.ptr()) == 1 && size > 31) || size == 0)
@@ -281,9 +391,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if !success {
         if !call_status {
             revert_with_reason_if_one_is_returned()
-            revert_error(TokenTransferGenericFailure { token, from, to, identifier: 0, amount })
+            revert_error(
+                TokenTransferGenericFailure { token, from, to, identifier: 0, amount },
+            )
         }
-        revert_error(BadReturnValueFromERC20OnTransfer { token, from, to, amount })
+        revert_error(
+            BadReturnValueFromERC20OnTransfer { token, from, to, amount },
+        )
     }
     revert_error(NoContract { account: token })
 }
@@ -299,14 +413,29 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     set_arg(args, 1, to.inner)
     set_arg(args, 2, identifier)
     let mut ret = MemBuffer::empty()
-    let outcome = call.raw_call(addr: token, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: args, len: 0x64), ret: mut ret)
+    let outcome = call
+        .raw_call(
+            addr: token,
+            gas: ctx.gas(),
+            value: 0,
+            args: MemSpan::from_raw_parts(ptr: args, len: 0x64),
+            ret: mut ret,
+        )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(TokenTransferGenericFailure { token, from, to, identifier, amount: 1 })
+        revert_error(
+            TokenTransferGenericFailure { token, from, to, identifier, amount: 1 },
+        )
     }
 }
 
-pub fn perform_erc1155_transfer(token: Address, from: Address, to: Address, identifier: u256, amount: u256)
+pub fn perform_erc1155_transfer(
+    token: Address,
+    from: Address,
+    to: Address,
+    identifier: u256,
+    amount: u256,
+)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if ctx.extcodesize(token) == 0 {
@@ -320,9 +449,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     set_arg(args, 4, 0xa0)
     set_arg(args, 5, 0)
     let mut ret = MemBuffer::empty()
-    let outcome = call.raw_call(addr: token, gas: ctx.gas(), value: 0, args: MemSpan::from_raw_parts(ptr: args, len: 0xc4), ret: mut ret)
+    let outcome = call
+        .raw_call(
+            addr: token,
+            gas: ctx.gas(),
+            value: 0,
+            args: MemSpan::from_raw_parts(ptr: args, len: 0xc4),
+            ret: mut ret,
+        )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(TokenTransferGenericFailure { token, from, to, identifier, amount })
+        revert_error(
+            TokenTransferGenericFailure { token, from, to, identifier, amount },
+        )
     }
 }

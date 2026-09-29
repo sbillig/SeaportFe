@@ -31,9 +31,19 @@ pub struct InvalidERC721TransferAmount { pub amount: u256 }
 #[error]
 pub struct InvalidERC721Recipient { pub recipient: Address }
 #[error]
-pub struct ERC721ReceiverErrorRevertBytes { pub reason: Bytes, pub receiver: Address, pub sender: Address, pub identifier: u256 }
+pub struct ERC721ReceiverErrorRevertBytes {
+    pub reason: Bytes,
+    pub receiver: Address,
+    pub sender: Address,
+    pub identifier: u256,
+}
 #[error]
-pub struct ERC721ReceiverErrorRevertString { pub reason: DynString, pub receiver: Address, pub sender: Address, pub identifier: u256 }
+pub struct ERC721ReceiverErrorRevertString {
+    pub reason: DynString,
+    pub receiver: Address,
+    pub sender: Address,
+    pub identifier: u256,
+}
 #[error]
 pub struct InvalidERC20Identifier {}
 #[error]
@@ -41,13 +51,26 @@ pub struct RecipientCannotBeZeroAddress {}
 #[error]
 pub struct InvalidConduit { pub conduitKey: Bytes32, pub conduit: Address }
 #[error]
-pub struct ConduitErrorRevertString { pub reason: DynString, pub conduitKey: Bytes32, pub conduit: Address }
+pub struct ConduitErrorRevertString {
+    pub reason: DynString,
+    pub conduitKey: Bytes32,
+    pub conduit: Address,
+}
 #[error]
-pub struct ConduitErrorRevertBytes { pub reason: Bytes, pub conduitKey: Bytes32, pub conduit: Address }
+pub struct ConduitErrorRevertBytes {
+    pub reason: Bytes,
+    pub conduitKey: Bytes32,
+    pub conduit: Address,
+}
 
 pub msg TransferHelperMsg {
-    #[selector = sol("bulkTransfer(((uint8,address,uint256,uint256)[],address,bool)[],bytes32)")]
-    BulkTransfer { items: DynArray<TransferHelperItemsWithRecipient>, conduitKey: Bytes32 } -> Bytes4,
+    #[selector = sol(
+        "bulkTransfer(((uint8,address,uint256,uint256)[],address,bool)[],bytes32)",
+    )]
+    BulkTransfer {
+        items: DynArray<TransferHelperItemsWithRecipient>,
+        conduitKey: Bytes32,
+    } -> Bytes4,
 }
 
 msg ERC721ReceiverMsg {
@@ -76,8 +99,13 @@ pub struct TransferHelperEnv {
 impl Copy for TransferHelperEnv {}
 
 pub fn setup(_ controller: Address) -> TransferHelperEnv uses (call: Call) {
-    let (creation, runtime) = controller.static(ConduitControllerCodeHashes::GetConduitCodeHashes {})
-    TransferHelperEnv { conduit_controller: controller, conduit_creation_code_hash: creation.val, conduit_runtime_code_hash: runtime.val }
+    let (creation, runtime) = controller
+        .static(ConduitControllerCodeHashes::GetConduitCodeHashes {})
+    TransferHelperEnv {
+        conduit_controller: controller,
+        conduit_creation_code_hash: creation.val,
+        conduit_runtime_code_hash: runtime.val,
+    }
 }
 
 /// The message of a Solidity `Error(string)` revert, decoded like the
@@ -96,7 +124,11 @@ pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
     if length > 0xffffffffffffffff || offset + 0x20 + length > size - 4 {
         return Option::None
     }
-    Option::Some(DynString::from_payload(source: data.slice(offset: 4 + offset + 0x20, len: length)))
+    Option::Some(
+        DynString::from_payload(
+            source: data.slice(offset: 4 + offset + 0x20, len: length),
+        ),
+    )
 }
 
 /// A Solidity `returns (bytes4)` value: at least one word whose low 28 bytes
@@ -113,8 +145,15 @@ fn decode_bytes4(_ data: MemSpan) -> u256 {
 }
 
 /// `_checkERC721Receiver`
-fn check_erc721_receiver(_ conduit: Address, recipient: Address, token_id: u256) uses (ctx: Ctx, call: mut Call) {
-    let message = ERC721ReceiverMsg::OnERC721Received { operator: conduit, from: ctx.caller(), tokenId: token_id, data: Bytes::empty() }
+fn check_erc721_receiver(_ conduit: Address, recipient: Address, token_id: u256)
+uses (ctx: Ctx, call: mut Call)
+{
+    let message = ERC721ReceiverMsg::OnERC721Received {
+        operator: conduit,
+        from: ctx.caller(),
+        tokenId: token_id,
+        data: Bytes::empty(),
+    }
     let outcome = call.try_call(addr: recipient, gas: ctx.gas(), value: 0, message)
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != ON_ERC721_RECEIVED_SELECTOR {
@@ -123,24 +162,43 @@ fn check_erc721_receiver(_ conduit: Address, recipient: Address, token_id: u256)
         return
     }
     match try_decode_error_string(outcome.returndata()) {
-        Option::Some(reason) => revert_error(ERC721ReceiverErrorRevertString { reason, receiver: recipient, sender: ctx.caller(), identifier: token_id })
-        Option::None => revert_error(ERC721ReceiverErrorRevertBytes {
-            reason: Bytes::from_payload(source: outcome.returndata()),
-            receiver: recipient,
-            sender: ctx.caller(),
-            identifier: token_id,
-        })
+        Option::Some(reason,) => revert_error(
+            ERC721ReceiverErrorRevertString {
+                reason,
+                receiver: recipient,
+                sender: ctx.caller(),
+                identifier: token_id,
+            },
+        ),
+        Option::None => revert_error(
+            ERC721ReceiverErrorRevertBytes {
+                reason: Bytes::from_payload(source: outcome.returndata()),
+                receiver: recipient,
+                sender: ctx.caller(),
+                identifier: token_id,
+            },
+        ),
     }
 }
 
 /// `bulkTransfer`
-pub fn bulk_transfer(_ env: TransferHelperEnv, transfers: DynArray<TransferHelperItemsWithRecipient>, conduit_key: u256) -> Bytes4
+pub fn bulk_transfer(
+    _ env: TransferHelperEnv,
+    transfers: DynArray<TransferHelperItemsWithRecipient>,
+    conduit_key: u256,
+) -> Bytes4
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if conduit_key == 0 {
-        revert_error(InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit: Address::zero() })
+        revert_error(
+            InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit: Address::zero() },
+        )
     }
-    let conduit = create2_address(deployer: env.conduit_controller, salt: conduit_key, init_code_hash: env.conduit_creation_code_hash)
+    let conduit = create2_address(
+        deployer: env.conduit_controller,
+        salt: conduit_key,
+        init_code_hash: env.conduit_creation_code_hash,
+    )
     let mut total: u256 = 0
     let mut i: u256 = 0
     while i < transfers.len() {
@@ -156,7 +214,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         if recipient.inner == 0 {
             revert_error(RecipientCannotBeZeroAddress {})
         }
-        let call_erc721_receiver = transfer.validateERC721Receiver && ctx.extcodesize(recipient) != 0
+        let call_erc721_receiver = transfer.validateERC721Receiver
+            && ctx.extcodesize(recipient) != 0
         let items = transfer.items
         let mut j: u256 = 0
         while j < items.len() {
@@ -171,49 +230,72 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             if item.itemType == 2 && call_erc721_receiver {
                 check_erc721_receiver(conduit, recipient, token_id: item.identifier)
             }
-            conduit_transfers.set(index, value: ConduitTransfer {
-                itemType: item.itemType,
-                token: item.token,
-                from: ctx.caller(),
-                to: recipient,
-                identifier: item.identifier,
-                amount: item.amount,
-            })
+            conduit_transfers
+                .set(
+                    index,
+                    value: ConduitTransfer {
+                        itemType: item.itemType,
+                        token: item.token,
+                        from: ctx.caller(),
+                        to: recipient,
+                        identifier: item.identifier,
+                        amount: item.amount,
+                    },
+                )
             index += 1
             j += 1
         }
         i += 1
     }
-    let outcome = call.try_call(addr: conduit, gas: ctx.gas(), value: 0, message: ConduitMsg::Execute { transfers: conduit_transfers.to_dyn_array() })
+    let outcome = call
+        .try_call(
+            addr: conduit,
+            gas: ctx.gas(),
+            value: 0,
+            message: ConduitMsg::Execute { transfers: conduit_transfers.to_dyn_array() },
+        )
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != CONDUIT_EXECUTE_SELECTOR {
-            revert_error(InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit })
+            revert_error(
+                InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
+            )
         }
         return Bytes4 { val: BULK_TRANSFER_SELECTOR }
     }
     let data = outcome.returndata()
     match try_decode_error_string(data) {
-        Option::Some(reason) => revert_error(ConduitErrorRevertString { reason, conduitKey: Bytes32 { val: conduit_key }, conduit })
-        Option::None => {}
+        Option::Some(reason,) => revert_error(
+            ConduitErrorRevertString { reason, conduitKey: Bytes32 { val: conduit_key }, conduit },
+        ),
+        Option::None => {},
     }
-    let selector = if data.len() >= 4 { load_word(data.ptr()) >> 224 } else { 0 }
+    let selector = if data.len() >= 4 {
+        load_word(data.ptr()) >> 224
+    } else {
+        0
+    }
     if (data.len() == 4 && selector == INVALID_ITEM_TYPE_SELECTOR)
-        || (data.len() == 36 && selector == INVALID_ERC721_TRANSFER_AMOUNT_SELECTOR)
-    {
+        || (data.len() == 36 && selector == INVALID_ERC721_TRANSFER_AMOUNT_SELECTOR) {
         ops.revert(data)
     }
-    revert_error(ConduitErrorRevertBytes { reason: Bytes::from_payload(source: data), conduitKey: Bytes32 { val: conduit_key }, conduit })
+    revert_error(
+        ConduitErrorRevertBytes {
+            reason: Bytes::from_payload(source: data),
+            conduitKey: Bytes32 { val: conduit_key },
+            conduit,
+        },
+    )
 }
 
 pub contract TransferHelper {
     env: TransferHelperEnv,
 
-    init(conduitController: Address) uses (mut env, call: Call) {
-        env = setup(conduitController)
-    }
+    init(conduitController: Address) uses (mut env, call: Call) { env = setup(conduitController) }
 
     recv TransferHelperMsg {
-        BulkTransfer { items, conduitKey } -> Bytes4 uses (env, ctx: Ctx, call: mut Call, ops: RawOps) {
+        BulkTransfer { items, conduitKey } -> Bytes4
+        uses (env, ctx: Ctx, call: mut Call, ops: RawOps)
+        {
             bulk_transfer(env, transfers: items, conduit_key: conduitKey.val)
         }
     }

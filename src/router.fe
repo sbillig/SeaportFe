@@ -43,11 +43,20 @@ pub struct FulfillAvailableAdvancedOrdersParams {
 #[error]
 pub struct SeaportNotAllowed { pub seaport: Address }
 #[error]
-pub struct EtherReturnTransferFailed { pub recipient: Address, pub amount: u256, pub returnData: Bytes }
+pub struct EtherReturnTransferFailed {
+    pub recipient: Address,
+    pub amount: u256,
+    pub returnData: Bytes,
+}
 
 pub msg SeaportRouterMsg {
-    #[selector = sol("fulfillAvailableAdvancedOrders((address[],(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],(uint256,uint256)[][],(uint256,uint256)[][],uint256)[],bytes32,address,uint256))")]
-    FulfillAvailableAdvancedOrders { params: FulfillAvailableAdvancedOrdersParams } -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>),
+    #[selector = sol(
+        "fulfillAvailableAdvancedOrders((address[],(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],(uint256,uint256)[][],(uint256,uint256)[][],uint256)[],bytes32,address,uint256))",
+    )]
+    FulfillAvailableAdvancedOrders { params: FulfillAvailableAdvancedOrdersParams } -> (
+        DynArray<DynArray<bool>>,
+        DynArray<DynArray<Execution>>,
+    ),
     #[selector = sol("getAllowedSeaportContracts()")]
     GetAllowedSeaportContracts {} -> DynArray<Address>,
     #[selector = sol("__activateTstore()")]
@@ -57,11 +66,7 @@ pub msg SeaportRouterMsg {
 /// NoSpecifiedOrdersAvailable()
 const NO_SPECIFIED_ORDERS_AVAILABLE_SELECTOR: u256 = 0xd5da9a1b
 
-pub struct RouterEnv {
-    pub seaport_v1_5: Address,
-    pub seaport_v1_6: Address,
-    pub guard: Env,
-}
+pub struct RouterEnv { pub seaport_v1_5: Address, pub seaport_v1_6: Address, pub guard: Env }
 
 impl Copy for RouterEnv {}
 
@@ -114,7 +119,11 @@ fn nested_array<T>(_ parts: Arr<ByteRef>) -> DynArray<T> where T: AbiSize {
     while i < count {
         let part = *parts.at(i)
         store_word(ptr::offset_bytes(data, 32 + i * 32), offset)
-        ptr::copy_raw(dest: ptr::offset_bytes(data, 32 + offset), source: part.data, len: part.size)
+        ptr::copy_raw(
+            dest: ptr::offset_bytes(data, 32 + offset),
+            source: part.data,
+            len: part.size,
+        )
         offset = offset + part.size
         i += 1
     }
@@ -133,8 +142,10 @@ fn empty_array_ref() -> ByteRef {
 
 /// `fulfillAvailableAdvancedOrders`: forward each group of orders to its
 /// Seaport, skipping groups that revert with `NoSpecifiedOrdersAvailable`.
-pub fn fulfill_available_advanced_orders(_ env: RouterEnv, params: FulfillAvailableAdvancedOrdersParams)
-    -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>)
+pub fn fulfill_available_advanced_orders(
+    _ env: RouterEnv,
+    params: FulfillAvailableAdvancedOrdersParams,
+) -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     set_reentrancy_guard(env.guard, accept_native_tokens: true)
@@ -151,7 +162,11 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     }
     let maximum_fulfilled = params.maximumFulfilled
     let mut fulfillments_left = maximum_fulfilled
-    let recipient = if params.recipient.inner == 0 { ctx.caller() } else { params.recipient }
+    let recipient = if params.recipient.inner == 0 {
+        ctx.caller()
+    } else {
+        params.recipient
+    }
     i = 0
     while i < count {
         let seaport = seaports.get(i)
@@ -170,7 +185,9 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
         let outcome = call.try_call(addr: seaport, gas: ctx.gas(), value: ether_value, message)
         let returned = outcome.returndata()
         if outcome.success() {
-            let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(returned)
+            let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(
+                returned,
+            )
             *available_parts.at(i) = span_ref(available.encoded_span())
             *execution_parts.at(i) = span_ref(executions.encoded_span())
             // Upstream only advances `j` for available orders, so an
@@ -186,7 +203,11 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
                 break
             }
         } else {
-            let selector = if returned.len() >= 4 { load_word(returned.ptr()) >> 224 } else { 0 }
+            let selector = if returned.len() >= 4 {
+                load_word(returned.ptr()) >> 224
+            } else {
+                0
+            }
             if selector != NO_SPECIFIED_ORDERS_AVAILABLE_SELECTOR {
                 ops.revert(data: returned)
             }
@@ -200,18 +221,29 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
         return_excess_ether()
     }
     clear_reentrancy_guard(env.guard)
-    (nested_array<DynArray<bool>>(available_parts), nested_array<DynArray<Execution>>(execution_parts))
+    (
+        nested_array<DynArray<bool>>(available_parts),
+        nested_array<DynArray<Execution>>(execution_parts),
+    )
 }
 
 /// `_returnExcessEther`
 fn return_excess_ether() uses (ctx: Ctx, call: mut Call) {
-    let outcome = call.try_call_raw(addr: ctx.caller(), gas: ctx.gas(), value: ctx.selfbalance(), args: MemSpan::empty())
+    let outcome = call
+        .try_call_raw(
+            addr: ctx.caller(),
+            gas: ctx.gas(),
+            value: ctx.selfbalance(),
+            args: MemSpan::empty(),
+        )
     if !outcome.success() {
-        revert_error(EtherReturnTransferFailed {
-            recipient: ctx.caller(),
-            amount: ctx.selfbalance(),
-            returnData: Bytes::from_payload(source: outcome.returndata()),
-        })
+        revert_error(
+            EtherReturnTransferFailed {
+                recipient: ctx.caller(),
+                amount: ctx.selfbalance(),
+                returnData: Bytes::from_payload(source: outcome.returndata()),
+            },
+        )
     }
 }
 
@@ -222,18 +254,28 @@ pub fn get_allowed_seaport_contracts(_ env: RouterEnv) -> DynArray<Address> {
 pub contract SeaportRouter {
     env: RouterEnv,
 
-    init(seaportV1point5: Address, seaportV1point6: Address) uses (mut env, ctx: Ctx, call: Call, create: mut Create, ops: mut RawOps) {
-        env = setup(seaport_v1_5: seaportV1point5, seaport_v1_6: seaportV1point6)
+    init(seaportV1point5: Address, seaportV1point6: Address)
+    uses (mut env, ctx: Ctx, call: Call, create: mut Create, ops: mut RawOps)
+    {
+        env = setup(
+            seaport_v1_5: seaportV1point5,
+            seaport_v1_6: seaportV1point6,
+        )
     }
 
     recv {
         #[payable]
-        SeaportRouterMsg::FulfillAvailableAdvancedOrders { params } -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>)
+        SeaportRouterMsg::FulfillAvailableAdvancedOrders { params } -> (
+            DynArray<DynArray<bool>>,
+            DynArray<DynArray<Execution>>,
+        )
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps)
         {
             fulfill_available_advanced_orders(env, params)
         }
-        SeaportRouterMsg::GetAllowedSeaportContracts {} -> DynArray<Address> uses (env) {
+        SeaportRouterMsg::GetAllowedSeaportContracts {} -> DynArray<Address>
+        uses (env)
+        {
             get_allowed_seaport_contracts(env)
         }
         SeaportRouterMsg::ActivateTstore {} uses (env, ctx: Ctx, call: Call, ops: mut RawOps) {

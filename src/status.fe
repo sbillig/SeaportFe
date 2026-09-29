@@ -82,16 +82,22 @@ pub fn verify_order_status(
 ) -> bool {
     if status.is_cancelled {
         if revert_on_invalid {
-            revert_error(OrderIsCancelled { orderHash: Bytes32 { val: order_hash } })
+            revert_error(
+                OrderIsCancelled { orderHash: Bytes32 { val: order_hash } },
+            )
         }
         return false
     }
     if status.numerator != 0 {
         if only_allow_unused {
-            revert_error(OrderPartiallyFilled { orderHash: Bytes32 { val: order_hash } })
+            revert_error(
+                OrderPartiallyFilled { orderHash: Bytes32 { val: order_hash } },
+            )
         } else if status.numerator >= status.denominator {
             if revert_on_invalid {
-                revert_error(OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } })
+                revert_error(
+                    OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } },
+                )
             }
             return false
         }
@@ -113,7 +119,10 @@ pub fn set_cancelled(_ order_hash: u256) uses (ops: mut RawOps) {
 
 /// Basic orders are always filled completely: validated, 1/1.
 pub fn set_basic_order_filled(_ order_hash: u256) uses (ops: mut RawOps) {
-    ops.sstore(slot: status_slot(order_hash), value: 0x0000000000000000000000000000010000000000000000000000000000010001)
+    ops.sstore(
+        slot: status_slot(order_hash),
+        value: 0x0000000000000000000000000000010000000000000000000000000000010001,
+    )
 }
 
 fn gcd(_ a: u256, _ b: u256) -> u256 {
@@ -134,7 +143,10 @@ fn panic_arithmetic() -> ! {
 /// The fill fraction `_validateOrder` derives from the requested fraction and
 /// the stored status: the requested fraction is reduced so that the total
 /// never exceeds the whole order.
-pub fn adjust_fill_fraction(_ raw_status: u256, numerator: u256, denominator: u256) -> (u256, u256) {
+pub fn adjust_fill_fraction(_ raw_status: u256, numerator: u256, denominator: u256) -> (
+    u256,
+    u256,
+) {
     let filled_denominator = raw_status >> 136
     if filled_denominator == 0 {
         return (numerator, denominator)
@@ -181,7 +193,9 @@ pub fn update_status(
     numerator: u256,
     denominator: u256,
     revert_on_invalid: bool,
-) -> bool uses (ops: mut RawOps) {
+) -> bool
+uses (ops: mut RawOps)
+{
     let slot = status_slot(order_hash)
     let raw = ops.sload(slot)
     let filled_denominator = raw >> 136
@@ -212,7 +226,9 @@ pub fn update_status(
     }
     if has_carry {
         if revert_on_invalid {
-            revert_error(OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } })
+            revert_error(
+                OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } },
+            )
         }
         return false
     }
@@ -226,7 +242,9 @@ pub fn increment_counter() -> u256 uses (ctx: Ctx, ops: mut RawOps, log: mut Log
     let slot = counter_slot(ctx.caller())
     let new_counter = quasi_random.wrapping_add(ops.sload(slot))
     ops.sstore(slot, value: new_counter)
-    log.emit(CounterIncremented { newCounter: new_counter, offerer: ctx.caller() })
+    log.emit(
+        CounterIncremented { newCounter: new_counter, offerer: ctx.caller() },
+    )
     new_counter
 }
 
@@ -254,7 +272,9 @@ fn revert_reentrant() -> ! {
     revert_error(NoReentrantCalls {})
 }
 
-pub fn set_reentrancy_guard(_ env: Env, accept_native_tokens: bool) uses (ops: mut RawOps) {
+pub fn set_reentrancy_guard(_ env: Env, accept_native_tokens: bool)
+uses (ops: mut RawOps)
+{
     let accept: u256 = if accept_native_tokens { 1 } else { 0 }
     if env.tstore_initial_support {
         if tload_guard() != 0 {
@@ -274,7 +294,10 @@ pub fn set_reentrancy_guard(_ env: Env, accept_native_tokens: bool) uses (ops: m
     if guard != NOT_ENTERED_SSTORE {
         revert_reentrant()
     }
-    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: ENTERED_SSTORE + accept)
+    ops.sstore(
+        slot: REENTRANCY_GUARD_SLOT,
+        value: ENTERED_SSTORE + accept,
+    )
 }
 
 pub fn clear_reentrancy_guard(_ env: Env) uses (ops: mut RawOps) {
@@ -334,14 +357,23 @@ pub fn prepare_tload_test() -> Address uses (create: mut Create) {
     let code = MemBuffer::alloc(32)
     let word = core::ptr::cast<u8, u256>(code.ptr())
     *word = TLOAD_TEST_PAYLOAD
-    create.create_raw(value: 0, init_code: code.span().slice(offset: 22, len: 10))
+    create.create_raw(
+            value: 0,
+            init_code: code.span().slice(offset: 22, len: 10),
+        )
 }
 
 /// Whether TLOAD works, by calling the probe contract with a tenth of the
 /// remaining gas.
 pub fn test_tload(_ probe: Address) -> bool uses (ctx: Ctx, call: Call) {
     let mut ret = MemBuffer::empty()
-    call.raw_staticcall(addr: probe, gas: ctx.gas() / 10, args: MemSpan::empty(), ret: mut ret).success()
+    call.raw_staticcall(
+        addr: probe,
+        gas: ctx.gas() / 10,
+        args: MemSpan::empty(),
+        ret: mut ret,
+    )
+        .success()
 }
 
 /// `__activateTstore`: switch to transient storage after a hard fork.

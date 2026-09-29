@@ -227,6 +227,19 @@ be deployed on mainnet as is. The test scripts disable the size limit
 (Foundry `FOUNDRY_DISABLE_CODE_SIZE_LIMIT`, Hardhat
 `allowUnlimitedContractSize`).
 
+Analysis of the Sonatina IR of `Seaport` (417 functions, about 40,500
+instructions): about 44% are additional copies of the same source function,
+because functions with effect parameters are specialized per entry point
+(`prepare_available_order` 4 times, `validate_order` 5 times,
+`generate_order` 6 times, `transfer_erc20` 8 times; part of this are
+legitimate generic instances such as `decode_from_bounded<T>`). The recv
+arms themselves are large (about 900 instructions each) because the ABI
+decoding of the nested order structs is emitted per arm. Removing the
+duplicates would not reach 24 KB on its own; seaport-core gets there with
+hand-written calldata pointers and assembly throughout. The Hardhat
+deployment also exceeds the 30M block gas limit (the code deposit alone is
+about 31M gas), so `hardhat_suite.py` raises that limit as well.
+
 ## 14. Unbalanced `sol("...")` selector signatures are accepted
 
 Status: fixed on `fix/sol-selector-signature-validation`
