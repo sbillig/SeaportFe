@@ -233,7 +233,7 @@ runtime instances across call sites), `Seaport` is 65,222 bytes and
 remains is mostly per-arm ABI decoding and general code generation
 overhead.
 
-Analysis before the rebase: of the Sonatina IR of `Seaport` (417 functions, about 40,500
+Analysis before the rebase, from the Sonatina IR of `Seaport` (417 functions, about 40,500
 instructions): about 44% are additional copies of the same source function,
 because functions with effect parameters are specialized per entry point
 (`prepare_available_order` 4 times, `validate_order` 5 times,
