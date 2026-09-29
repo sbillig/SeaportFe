@@ -6,20 +6,15 @@
   },
   "compiler": {
     "url": "https://github.com/argotorg/fe.git",
-    "base": "06f7889d2",
+    "base": "342048ea5",
     "branch": "seaport-integration",
     "patch": "compiler/seaport-integration.patch",
-    "patch_sha256": "741e590635a73d01483de9675b95a204011b515433eb5be07e35fe57fa05e834",
+    "patch_sha256": "22fc082060e45a109387e094455e140724108cb337de9b470c333c12043313f6",
     "merged_prs": [
-      1601,
-      1604,
-      1605,
       1606,
+      1523,
       1613,
-      1614,
-      1615,
-      1616,
-      1523
+      1604
     ],
     "fix_branches": [
       "fix/abi-struct-sol-compat",
@@ -30,9 +25,18 @@
       "fix/zero-field-event-emit",
       "fix/sol-selector-signature-validation",
       "fix/tuple-return-abi-params",
-      "fix/borrowck-entry-instance-sharing",
       "fix/embedded-contract-bytecode-consistency"
     ],
-    "head": "02cfdf211"
+    "head": "71173789d",
+    "merged_upstream_since_v1": [
+      1601,
+      1605,
+      1614,
+      1615,
+      1616,
+      1618,
+      1619,
+      1621
+    ]
   }
 }

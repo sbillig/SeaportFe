@@ -88,20 +88,27 @@ order entry points and the conduit batch functions use numeric selectors
 
 ## Limitations
 
-- Code size: the Fe `Seaport` runtime is about 154 KB, far above the
-  24 KB EIP-170 limit that the Solidity build just meets (ISSUES.md #13).
-  The contracts deploy only with the size limit lifted; both test scripts
-  do that.
+- Code size: the Fe `Seaport` runtime is about 65 KB (154 KB before the
+  rebase onto upstream PR #1618), still well above the 24 KB EIP-170 limit
+  that the Solidity build just meets (ISSUES.md #13). `Seaport` and
+  `Consideration` deploy only with the size limit lifted; both test scripts
+  do that. The periphery contracts are within 1.0 to 1.6 times their
+  Solidity size and below the limit. Sizes per contract are in
+  [COMPILER_FIXES.md](COMPILER_FIXES.md).
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. Tests that pin gas budgets pass, but absolute costs are
   higher. The same calls in the same Foundry test (`test_fuzzCoverage_x`):
 
   | Call | Solidity | Fe |
   | --- | --- | --- |
-  | `getCounter` (cold) | 2,677 | 5,754 |
-  | `getOrderStatus` (cold) | 2,465 | 5,825 |
-  | `getOrderHash` (1 consideration item) | 1,736 | 13,577 |
-  | `fulfillAdvancedOrder`, native consideration | 21,653 | 43,736 |
+  | `getCounter` (cold) | 2,677 | 6,295 |
+  | `getOrderStatus` (cold) | 2,465 | 6,203 |
+  | `getOrderHash` (1 consideration item) | 1,736 | 14,576 |
+  | `fulfillAdvancedOrder`, native consideration | 21,653 | 46,551 |
+
+  Sharing helper instances instead of specializing them per entry point
+  (upstream #1618) cost about 5 to 8% gas on these calls in exchange for
+  the smaller code.
 
   Most of the difference is fixed cost per call: ABI decoding into the
   in-memory order model and memory management, where seaport-core works on

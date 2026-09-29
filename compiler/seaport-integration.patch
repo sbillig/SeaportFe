@@ -117,7 +117,7 @@ index b2b7f74de..7fef0adb3 100644
          if !self.current_sections.is_empty()
              && self
 diff --git a/crates/codegen/src/sonatina/mod.rs b/crates/codegen/src/sonatina/mod.rs
-index 793312b6f..8dd88c28f 100644
+index c205948c0..3e30afd63 100644
 --- a/crates/codegen/src/sonatina/mod.rs
 +++ b/crates/codegen/src/sonatina/mod.rs
 @@ -311,6 +311,7 @@ fn merged_section_observability<'db>(
@@ -623,7 +623,7 @@ index 793312b6f..8dd88c28f 100644
  
  pub fn emit_module_sonatina_ir(
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/by_ref_trait_provider_storage_bug.snap b/crates/codegen/tests/fixtures/sonatina_ir/by_ref_trait_provider_storage_bug.snap
-index 5af3b8179..881187490 100644
+index 2e27cd894..fc8f53731 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/by_ref_trait_provider_storage_bug.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/by_ref_trait_provider_storage_bug.snap
 @@ -69,6 +69,15 @@ func private %abi_field_size(v0.i256) -> i256 {
@@ -642,38 +642,18 @@ index 5af3b8179..881187490 100644
  func private %abi_single_root_size(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -126,6 +135,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %cast(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -246,6 +268,29 @@ func private %encode(v0.i256, v1.i256) {
+@@ -233,6 +242,29 @@ func private %encode(v0.i256, v1.i256) {
          return;
  }
  
-+func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
++func inline(always) private %encode_alloc(v0.i256) -> @layout_0 {
 +    block0:
-+        v1.objref<@layout_1> = obj.alloc @layout_1;
++        v1.objref<@layout_0> = obj.alloc @layout_0;
 +        jump block1;
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
++        v4.@layout_0 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -683,20 +663,20 @@ index 5af3b8179..881187490 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode v0 v14;
-+        v16.@layout_1 = obj.load v1;
++        v16.@layout_0 = obj.load v1;
 +        return v16;
 +}
 +
  func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
      block0:
          jump block1;
-@@ -271,6 +316,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+@@ -258,6 +290,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
          return v3;
  }
  
-+func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
++func inline(always) private %encode_return_alloc(v0.i256) -> @layout_0 {
 +    block0:
 +        jump block1;
 +
@@ -704,63 +684,38 @@ index 5af3b8179..881187490 100644
 +        br 0.i1 block2 block3;
 +
 +    block2:
-+        v3.@layout_1 = call %encode_alloc v0;
++        v3.@layout_0 = call %encode_alloc v0;
 +        return v3;
 +
 +    block3:
 +        jump block4;
 +
 +    block4:
-+        v5.@layout_1 = call %encode_single_root_alloc v0;
++        v5.@layout_0 = call %encode_single_root_alloc v0;
 +        return v5;
 +}
 +
- func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
+ func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_0 {
      block0:
-         v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -422,6 +486,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -503,7 +577,7 @@ func private %return_value(v0.i256) {
+         v1.objref<@layout_0> = obj.alloc @layout_0;
+@@ -480,7 +531,7 @@ func private %return_value(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
--        v13.@layout_1 = call %encode_single_root_alloc v0;
-+        v13.@layout_1 = call %encode_return_alloc v0;
+-        v13.@layout_0 = call %encode_single_root_alloc v0;
++        v13.@layout_0 = call %encode_return_alloc v0;
          v15.objref<i256> = obj.proj v4 0.i256;
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/create_contract.snap b/crates/codegen/tests/fixtures/sonatina_ir/create_contract.snap
-index d3c72fa68..cb8fddccc 100644
+index 8b62c290d..7074700c2 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/create_contract.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/create_contract.snap
-@@ -78,7 +78,7 @@ func private %abi_field_size(v0.@layout_0) -> i256 {
+@@ -78,7 +78,16 @@ func private %abi_field_size(v0.@layout_0) -> i256 {
          return v6;
  }
  
 -func private %abi_payload_size(v0.@layout_1) -> i256 {
-+func private %abi_payload_size__ge23f(v0.@layout_1) -> i256 {
-     block0:
-         jump block1;
- 
-@@ -87,6 +87,15 @@ func private %abi_payload_size(v0.@layout_1) -> i256 {
-         return v2;
- }
- 
 +func private %abi_payload_size__g67a8(v0.@layout_0) -> i256 {
 +    block0:
 +        jump block1;
@@ -770,48 +725,28 @@ index d3c72fa68..cb8fddccc 100644
 +        return v2;
 +}
 +
- func private %abi_single_root_size(v0.@layout_0) -> i256 {
++func private %abi_payload_size__ge23f(v0.@layout_1) -> i256 {
      block0:
          jump block1;
-@@ -172,6 +181,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_629d(v0.i256) -> @layou
-         return v10;
- }
  
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_629d_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_8b23(v0.i256) -> @layout_2 {
-     block0:
-         jump block1;
-@@ -1092,17 +1114,40 @@ func inline(always) private %encode_abi_payload(v0.@layout_1) -> @layout_2 {
+@@ -1015,17 +1024,40 @@ func inline(always) private %encode_abi_payload(v0.@layout_1) -> @layout_3 {
          jump block1;
  
      block1:
--        v2.@layout_2 = call %encode_alloc v0;
-+        v2.@layout_2 = call %encode_alloc__g73ab v0;
+-        v2.@layout_3 = call %encode_alloc v0;
++        v2.@layout_3 = call %encode_alloc__g73ab v0;
          return v2;
  }
  
--func inline(always) private %encode_alloc(v0.@layout_1) -> @layout_2 {
-+func inline(always) private %encode_alloc__g2917(v0.@layout_0) -> @layout_2 {
-     block0:
-         v1.objref<@layout_2> = obj.alloc @layout_2;
-         jump block1;
- 
-     block1:
--        v3.i256 = call %abi_payload_size v0;
+-func inline(always) private %encode_alloc(v0.@layout_1) -> @layout_3 {
++func inline(always) private %encode_alloc__g2917(v0.@layout_0) -> @layout_3 {
++    block0:
++        v1.objref<@layout_3> = obj.alloc @layout_3;
++        jump block1;
++
++    block1:
 +        v3.i256 = call %abi_payload_size__g67a8 v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_629d_0 v3;
++        v4.@layout_3 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -821,27 +756,28 @@ index d3c72fa68..cb8fddccc 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eee1_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %impl_trait_Address__encode__gf13e v0 v14;
-+        v16.@layout_2 = obj.load v1;
++        v16.@layout_3 = obj.load v1;
 +        return v16;
 +}
 +
-+func inline(always) private %encode_alloc__g73ab(v0.@layout_1) -> @layout_2 {
-+    block0:
-+        v1.objref<@layout_2> = obj.alloc @layout_2;
-+        jump block1;
-+
-+    block1:
++func inline(always) private %encode_alloc__g73ab(v0.@layout_1) -> @layout_3 {
+     block0:
+         v1.objref<@layout_3> = obj.alloc @layout_3;
+         jump block1;
+ 
+     block1:
+-        v3.i256 = call %abi_payload_size v0;
 +        v3.i256 = call %abi_payload_size__ge23f v0;
-         v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_5a00 v3;
+         v4.@layout_3 = call %impl_MemBuffer__alloc v3;
          v6.objref<i256> = obj.proj v1 0.i256;
          v7.i256 = extract_value v4 0.i256;
-@@ -1178,6 +1223,25 @@ func inline(always) private %encode_field_at__gac80(v0.i256, v1.i256, v2.i256, v
+@@ -1113,6 +1145,25 @@ func inline(always) private %encode_field_at__g2917(v0.@layout_0, v1.i256, v2.i2
          return v3;
  }
  
-+func inline(always) private %encode_return_alloc(v0.@layout_0) -> @layout_2 {
++func inline(always) private %encode_return_alloc(v0.@layout_0) -> @layout_3 {
 +    block0:
 +        jump block1;
 +
@@ -849,48 +785,31 @@ index d3c72fa68..cb8fddccc 100644
 +        br 0.i1 block2 block3;
 +
 +    block2:
-+        v3.@layout_2 = call %encode_alloc__g2917 v0;
++        v3.@layout_3 = call %encode_alloc__g2917 v0;
 +        return v3;
 +
 +    block3:
 +        jump block4;
 +
 +    block4:
-+        v5.@layout_2 = call %encode_single_root_alloc v0;
++        v5.@layout_3 = call %encode_single_root_alloc v0;
 +        return v5;
 +}
 +
- func inline(always) private %encode_single_root_alloc(v0.@layout_0) -> @layout_2 {
+ func inline(always) private %encode_single_root_alloc(v0.@layout_0) -> @layout_3 {
      block0:
-         v1.objref<@layout_2> = obj.alloc @layout_2;
-@@ -1606,6 +1670,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eee1(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eee1_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_fb0a(v0.objref<@layout_2>) -> i256 {
-     block0:
-         jump block1;
-@@ -1762,7 +1836,7 @@ func private %return_value(v0.@layout_0) {
+         v1.objref<@layout_3> = obj.alloc @layout_3;
+@@ -1517,7 +1568,7 @@ func private %return_value(v0.@layout_0) {
          br 1.i1 block4 block5;
  
      block3:
--        v13.@layout_2 = call %encode_single_root_alloc v0;
-+        v13.@layout_2 = call %encode_return_alloc v0;
+-        v13.@layout_3 = call %encode_single_root_alloc v0;
++        v13.@layout_3 = call %encode_return_alloc v0;
          v15.objref<i256> = obj.proj v4 0.i256;
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/effect_handle_field_deref.snap b/crates/codegen/tests/fixtures/sonatina_ir/effect_handle_field_deref.snap
-index c51401b7b..0e3991f9b 100644
+index c86c3e521..b0734ff34 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/effect_handle_field_deref.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/effect_handle_field_deref.snap
 @@ -97,6 +97,15 @@ func private %abi_field_size(v0.i256) -> i256 {
@@ -909,27 +828,7 @@ index c51401b7b..0e3991f9b 100644
  func private %abi_single_root_size(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -154,6 +163,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %bump(v0.objref<@layout_2>, v1.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -694,6 +716,29 @@ func private %encode(v0.i256, v1.i256) {
+@@ -681,6 +690,29 @@ func private %encode(v0.i256, v1.i256) {
          return;
  }
  
@@ -940,7 +839,7 @@ index c51401b7b..0e3991f9b 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -950,7 +849,7 @@ index c51401b7b..0e3991f9b 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode v0 v14;
 +        v16.@layout_1 = obj.load v1;
 +        return v16;
@@ -959,7 +858,7 @@ index c51401b7b..0e3991f9b 100644
  func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
      block0:
          jump block1;
-@@ -719,6 +764,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+@@ -706,6 +738,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
          return v3;
  }
  
@@ -985,24 +884,7 @@ index c51401b7b..0e3991f9b 100644
  func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
      block0:
          v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -879,6 +943,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -978,7 +1052,7 @@ func private %return_value(v0.i256) {
+@@ -955,7 +1006,7 @@ func private %return_value(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1012,10 +894,10 @@ index c51401b7b..0e3991f9b 100644
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/erc20.snap b/crates/codegen/tests/fixtures/sonatina_ir/erc20.snap
-index a076c352a..e1b4715c3 100644
+index adbb2d0a3..1deeb8f0e 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/erc20.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/erc20.snap
-@@ -355,7 +355,25 @@ func private %abi_field_size__gda9b(v0.i1) -> i256 {
+@@ -355,7 +355,34 @@ func private %abi_field_size__g65da(v0.i256) -> i256 {
          return v6;
  }
  
@@ -1029,12 +911,21 @@ index a076c352a..e1b4715c3 100644
 +        return v2;
 +}
 +
-+func private %abi_payload_size__g79ff(v0.i8) -> i256 {
++func private %abi_payload_size__g5535(v0.i256) -> i256 {
 +    block0:
 +        jump block1;
 +
 +    block1:
-+        v2.i256 = call %payload_size__g79ff v0;
++        v2.i256 = call %payload_size__g3eb7 v0;
++        return v2;
++}
++
++func private %abi_payload_size__gda9b(v0.i1) -> i256 {
++    block0:
++        jump block1;
++
++    block1:
++        v2.i256 = call %payload_size__gda9b v0;
 +        return v2;
 +}
 +
@@ -1042,16 +933,16 @@ index a076c352a..e1b4715c3 100644
      block0:
          jump block1;
  
-@@ -364,6 +382,33 @@ func private %abi_payload_size(v0.@layout_0) -> i256 {
+@@ -364,6 +391,24 @@ func private %abi_payload_size(v0.@layout_0) -> i256 {
          return v2;
  }
  
-+func private %abi_payload_size__gda9b(v0.i1) -> i256 {
++func private %abi_payload_size__g79ff(v0.i8) -> i256 {
 +    block0:
 +        jump block1;
 +
 +    block1:
-+        v2.i256 = call %payload_size__gda9b v0;
++        v2.i256 = call %payload_size__g79ff v0;
 +        return v2;
 +}
 +
@@ -1064,119 +955,10 @@ index a076c352a..e1b4715c3 100644
 +        return v2;
 +}
 +
-+func private %abi_payload_size__g5535(v0.i256) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.i256 = call %payload_size__g3eb7 v0;
-+        return v2;
-+}
-+
  func private %abi_single_root_size__ge513(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -457,6 +502,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_1dc1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_1dc1_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_24b5(v0.i256) -> @layout_2 {
-     block0:
-         jump block1;
-@@ -470,6 +528,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_24b5(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_24b5_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4(v0.i256) -> @layout_2 {
-     block0:
-         jump block1;
-@@ -483,6 +554,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_36af(v0.i256) -> @layout_2 {
-     block0:
-         jump block1;
-@@ -496,6 +580,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_36af(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_36af_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_3895(v0.i256) -> @layout_2 {
-     block0:
-         jump block1;
-@@ -672,6 +769,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_2 = insert_value undef.@layout_2 0.i256 v3;
-+        v8.@layout_2 = insert_value v6 1.i256 v0;
-+        v10.@layout_2 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %standalone_erc20__erc20__approve__ga9cb_7b1c(v0.@layout_0, v1.@layout_0, v2.i256, v3.i256, v4.i256, v5.i256) {
-     block0:
-         jump block1;
-@@ -2559,17 +2669,86 @@ func inline(always) private %encode_abi_payload(v0.@layout_0) -> @layout_2 {
+@@ -2137,17 +2182,63 @@ func inline(always) private %encode_abi_payload(v0.@layout_0) -> @layout_2 {
          jump block1;
  
      block1:
@@ -1186,53 +968,6 @@ index a076c352a..e1b4715c3 100644
  }
  
 -func inline(always) private %encode_alloc(v0.@layout_0) -> @layout_2 {
-+func inline(always) private %encode_alloc__gcb0a(v0.i8) -> @layout_2 {
-+    block0:
-+        v1.objref<@layout_2> = obj.alloc @layout_2;
-+        jump block1;
-+
-+    block1:
-+        v3.i256 = call %abi_payload_size__g79ff v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_1dc1_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_3ef7_0 v1;
-+        call %impl_trait_u8__encode__gf13e v0 v14;
-+        v16.@layout_2 = obj.load v1;
-+        return v16;
-+}
-+
-+func inline(always) private %encode_alloc__g09ca(v0.i1) -> @layout_2 {
-     block0:
-         v1.objref<@layout_2> = obj.alloc @layout_2;
-         jump block1;
- 
-     block1:
--        v3.i256 = call %abi_payload_size v0;
-+        v3.i256 = call %abi_payload_size__gda9b v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a_0 v1;
-+        call %impl_trait_bool__encode__gf13e v0 v14;
-+        v16.@layout_2 = obj.load v1;
-+        return v16;
-+}
-+
 +func inline(always) private %encode_alloc__g472d(v0.i256) -> @layout_2 {
 +    block0:
 +        v1.objref<@layout_2> = obj.alloc @layout_2;
@@ -1240,7 +975,7 @@ index a076c352a..e1b4715c3 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size__g5535 v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_36af_0 v3;
++        v4.@layout_2 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -1250,23 +985,47 @@ index a076c352a..e1b4715c3 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_b0c9_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode__g4320 v0 v14;
 +        v16.@layout_2 = obj.load v1;
 +        return v16;
 +}
 +
-+func inline(always) private %encode_alloc__g727c(v0.@layout_0) -> @layout_2 {
++func inline(always) private %encode_alloc__g09ca(v0.i1) -> @layout_2 {
 +    block0:
 +        v1.objref<@layout_2> = obj.alloc @layout_2;
 +        jump block1;
 +
 +    block1:
++        v3.i256 = call %abi_payload_size__gda9b v0;
++        v4.@layout_2 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %impl_trait_bool__encode__gf13e v0 v14;
++        v16.@layout_2 = obj.load v1;
++        return v16;
++}
++
++func inline(always) private %encode_alloc__g727c(v0.@layout_0) -> @layout_2 {
+     block0:
+         v1.objref<@layout_2> = obj.alloc @layout_2;
+         jump block1;
+ 
+     block1:
+-        v3.i256 = call %abi_payload_size v0;
 +        v3.i256 = call %abi_payload_size__g900f v0;
-         v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_3895 v3;
+         v4.@layout_2 = call %impl_MemBuffer__alloc v3;
          v6.objref<i256> = obj.proj v1 0.i256;
          v7.i256 = extract_value v4 0.i256;
-@@ -2586,6 +2765,52 @@ func inline(always) private %encode_alloc(v0.@layout_0) -> @layout_2 {
+@@ -2164,6 +2255,75 @@ func inline(always) private %encode_alloc(v0.@layout_0) -> @layout_2 {
          return v16;
  }
  
@@ -1277,7 +1036,7 @@ index a076c352a..e1b4715c3 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size__g65da v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_24b5_0 v3;
++        v4.@layout_2 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -1287,8 +1046,31 @@ index a076c352a..e1b4715c3 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_60e6_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode__g30cc v0 v14;
++        v16.@layout_2 = obj.load v1;
++        return v16;
++}
++
++func inline(always) private %encode_alloc__gcb0a(v0.i8) -> @layout_2 {
++    block0:
++        v1.objref<@layout_2> = obj.alloc @layout_2;
++        jump block1;
++
++    block1:
++        v3.i256 = call %abi_payload_size__g79ff v0;
++        v4.@layout_2 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %impl_trait_u8__encode__gf13e v0 v14;
 +        v16.@layout_2 = obj.load v1;
 +        return v16;
 +}
@@ -1300,7 +1082,7 @@ index a076c352a..e1b4715c3 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size__ge513 v0;
-+        v4.@layout_2 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
++        v4.@layout_2 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -1310,16 +1092,16 @@ index a076c352a..e1b4715c3 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %impl_trait_u256__encode__gf13e v0 v14;
 +        v16.@layout_2 = obj.load v1;
 +        return v16;
 +}
 +
- func private %impl_trait_u256__encode__gf13e(v0.i256, v1.i256) {
+ func inline(always) private %encode__g30cc(v0.i256, v1.i256) {
      block0:
          jump block1;
-@@ -2730,6 +2955,101 @@ func inline(always) private %encode_field_at__g09ca(v0.i1, v1.i256, v2.i256, v3.
+@@ -2325,6 +2485,101 @@ func inline(always) private %encode_field_at__g09ca(v0.i1, v1.i256, v2.i256, v3.
          return v3;
  }
  
@@ -1342,6 +1124,25 @@ index a076c352a..e1b4715c3 100644
 +        return v5;
 +}
 +
++func inline(always) private %encode_return_alloc__gac80(v0.i256) -> @layout_2 {
++    block0:
++        jump block1;
++
++    block1:
++        br 0.i1 block2 block3;
++
++    block2:
++        v3.@layout_2 = call %encode_alloc__gac80 v0;
++        return v3;
++
++    block3:
++        jump block4;
++
++    block4:
++        v5.@layout_2 = call %encode_single_root_alloc__gac80 v0;
++        return v5;
++}
++
 +func inline(always) private %encode_return_alloc__gcb0a(v0.i8) -> @layout_2 {
 +    block0:
 +        jump block1;
@@ -1358,25 +1159,6 @@ index a076c352a..e1b4715c3 100644
 +
 +    block4:
 +        v5.@layout_2 = call %encode_single_root_alloc__gcb0a v0;
-+        return v5;
-+}
-+
-+func inline(always) private %encode_return_alloc__g09ca(v0.i1) -> @layout_2 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        br 0.i1 block2 block3;
-+
-+    block2:
-+        v3.@layout_2 = call %encode_alloc__g09ca v0;
-+        return v3;
-+
-+    block3:
-+        jump block4;
-+
-+    block4:
-+        v5.@layout_2 = call %encode_single_root_alloc__g09ca v0;
 +        return v5;
 +}
 +
@@ -1399,7 +1181,7 @@ index a076c352a..e1b4715c3 100644
 +        return v5;
 +}
 +
-+func inline(always) private %encode_return_alloc__gac80(v0.i256) -> @layout_2 {
++func inline(always) private %encode_return_alloc__g09ca(v0.i1) -> @layout_2 {
 +    block0:
 +        jump block1;
 +
@@ -1407,115 +1189,21 @@ index a076c352a..e1b4715c3 100644
 +        br 0.i1 block2 block3;
 +
 +    block2:
-+        v3.@layout_2 = call %encode_alloc__gac80 v0;
++        v3.@layout_2 = call %encode_alloc__g09ca v0;
 +        return v3;
 +
 +    block3:
 +        jump block4;
 +
 +    block4:
-+        v5.@layout_2 = call %encode_single_root_alloc__gac80 v0;
++        v5.@layout_2 = call %encode_single_root_alloc__g09ca v0;
 +        return v5;
 +}
 +
- func inline(always) private %encode_single_root_alloc__gcb0a(v0.i8) -> @layout_2 {
+ func inline(always) private %encode_single_root_alloc__g09ca(v0.i1) -> @layout_2 {
      block0:
          v1.objref<@layout_2> = obj.alloc @layout_2;
-@@ -3707,6 +4027,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_3ef7(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_3ef7_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_3f14(v0.objref<@layout_2>) -> i256 {
-     block0:
-         jump block1;
-@@ -3757,6 +4087,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_60e6(v0.objref<@layout_2>) -> i256 {
-     block0:
-         jump block1;
-@@ -3767,6 +4107,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_60e6(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_60e6_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemSlice_aa77__ptr__g79ff_631e(v0.objref<@layout_3>) -> i256 {
-     block0:
-         jump block1;
-@@ -3837,6 +4187,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_b0c9(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_b0c9_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_2>) -> i256 {
-     block0:
-         jump block1;
-@@ -3847,6 +4207,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_2>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_2>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func inline(always) private %core__lib__ptr__impl_FixedMemBuffer_e15d__ptr__g03ed_e193(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -4058,7 +4428,7 @@ func private %return_value__g472d(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_2 = call %encode_single_root_alloc__g472d v0;
-+        v13.@layout_2 = call %encode_return_alloc__g472d v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-@@ -4160,7 +4530,7 @@ func private %return_value__gcb0a(v0.i8) {
+@@ -3304,7 +3559,7 @@ func private %return_value__gcb0a(v0.i8) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1524,16 +1212,7 @@ index a076c352a..e1b4715c3 100644
          v15.objref<i256> = obj.proj v4 0.i256;
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
-@@ -4262,7 +4632,7 @@ func private %return_value__g0c18(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_2 = call %encode_single_root_alloc__g0c18 v0;
-+        v13.@layout_2 = call %encode_return_alloc__g0c18 v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-@@ -4364,7 +4734,7 @@ func private %return_value__gac80(v0.i256) {
+@@ -3406,7 +3661,7 @@ func private %return_value__gac80(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1542,7 +1221,25 @@ index a076c352a..e1b4715c3 100644
          v15.objref<i256> = obj.proj v4 0.i256;
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
-@@ -4466,7 +4836,7 @@ func private %return_value__g09ca(v0.i1) {
+@@ -3508,7 +3763,7 @@ func private %return_value__g0c18(v0.i256) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_2 = call %encode_single_root_alloc__g0c18 v0;
++        v13.@layout_2 = call %encode_return_alloc__g0c18 v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
+@@ -3610,7 +3865,7 @@ func private %return_value__g472d(v0.i256) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_2 = call %encode_single_root_alloc__g472d v0;
++        v13.@layout_2 = call %encode_return_alloc__g472d v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
+@@ -3712,7 +3967,7 @@ func private %return_value__g09ca(v0.i1) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1552,7 +1249,7 @@ index a076c352a..e1b4715c3 100644
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/high_level_contract.snap b/crates/codegen/tests/fixtures/sonatina_ir/high_level_contract.snap
-index b4dff2da6..1f5b43913 100644
+index 631fcbdec..3d5afc6e1 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/high_level_contract.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/high_level_contract.snap
 @@ -80,6 +80,15 @@ func private %abi_field_size(v0.i256) -> i256 {
@@ -1571,27 +1268,7 @@ index b4dff2da6..1f5b43913 100644
  func private %abi_single_root_size(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -137,6 +146,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %base(v0.objref<@layout_4>) -> i256 {
-     block0:
-         jump block1;
-@@ -627,6 +649,29 @@ func private %encode(v0.i256, v1.i256) {
+@@ -614,6 +623,29 @@ func private %encode(v0.i256, v1.i256) {
          return;
  }
  
@@ -1602,7 +1279,7 @@ index b4dff2da6..1f5b43913 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -1612,7 +1289,7 @@ index b4dff2da6..1f5b43913 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode v0 v14;
 +        v16.@layout_1 = obj.load v1;
 +        return v16;
@@ -1621,7 +1298,7 @@ index b4dff2da6..1f5b43913 100644
  func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
      block0:
          jump block1;
-@@ -652,6 +697,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+@@ -639,6 +671,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
          return v3;
  }
  
@@ -1647,24 +1324,7 @@ index b4dff2da6..1f5b43913 100644
  func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
      block0:
          v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -908,6 +972,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -1054,7 +1128,7 @@ func private %return_value(v0.i256) {
+@@ -1011,7 +1062,7 @@ func private %return_value(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1674,7 +1334,7 @@ index b4dff2da6..1f5b43913 100644
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/immutable_contract_field_init_set.snap b/crates/codegen/tests/fixtures/sonatina_ir/immutable_contract_field_init_set.snap
-index 8093338bc..da14d62d5 100644
+index e72c26117..b6fafe79b 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/immutable_contract_field_init_set.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/immutable_contract_field_init_set.snap
 @@ -64,6 +64,15 @@ func private %abi_field_size(v0.i256) -> i256 {
@@ -1693,27 +1353,7 @@ index 8093338bc..da14d62d5 100644
  func private %abi_single_root_size(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -121,6 +130,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %base(v0.objref<@layout_4>) -> i256 {
-     block0:
-         jump block1;
-@@ -424,6 +446,29 @@ func private %encode(v0.i256, v1.i256) {
+@@ -411,6 +420,29 @@ func private %encode(v0.i256, v1.i256) {
          return;
  }
  
@@ -1724,7 +1364,7 @@ index 8093338bc..da14d62d5 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -1734,7 +1374,7 @@ index 8093338bc..da14d62d5 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode v0 v14;
 +        v16.@layout_1 = obj.load v1;
 +        return v16;
@@ -1743,7 +1383,7 @@ index 8093338bc..da14d62d5 100644
  func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
      block0:
          jump block1;
-@@ -449,6 +494,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+@@ -436,6 +468,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
          return v3;
  }
  
@@ -1769,24 +1409,7 @@ index 8093338bc..da14d62d5 100644
  func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
      block0:
          v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -705,6 +769,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -851,7 +925,7 @@ func private %return_value(v0.i256) {
+@@ -808,7 +859,7 @@ func private %return_value(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
@@ -1796,7 +1419,7 @@ index 8093338bc..da14d62d5 100644
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_byplace_effect_arg.snap b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_byplace_effect_arg.snap
-index 17ecf54a9..7de507817 100644
+index b7790af5a..1c13e6761 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_byplace_effect_arg.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_byplace_effect_arg.snap
 @@ -70,6 +70,15 @@ func private %abi_field_size(v0.i256) -> i256 {
@@ -1815,526 +1438,18 @@ index 17ecf54a9..7de507817 100644
  func private %abi_single_root_size(v0.i256) -> i256 {
      block0:
          jump block1;
-@@ -127,6 +136,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %bump(v0.i256) {
-     block0:
-         jump block1;
-@@ -266,6 +288,29 @@ func private %encode(v0.i256, v1.i256) {
+@@ -253,6 +262,29 @@ func private %encode(v0.i256, v1.i256) {
          return;
  }
  
-+func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        v1.objref<@layout_1> = obj.alloc @layout_1;
-+        jump block1;
-+
-+    block1:
-+        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
-+        call %encode v0 v14;
-+        v16.@layout_1 = obj.load v1;
-+        return v16;
-+}
-+
- func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -291,6 +336,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
-         return v3;
- }
- 
-+func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        br 0.i1 block2 block3;
-+
-+    block2:
-+        v3.@layout_1 = call %encode_alloc v0;
-+        return v3;
-+
-+    block3:
-+        jump block4;
-+
-+    block4:
-+        v5.@layout_1 = call %encode_single_root_alloc v0;
-+        return v5;
-+}
-+
- func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
-     block0:
-         v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -442,6 +506,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -523,7 +597,7 @@ func private %return_value(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_1 = call %encode_single_root_alloc v0;
-+        v13.@layout_1 = call %encode_return_alloc v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-diff --git a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
-index 8152fcb30..048b9c972 100644
---- a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
-+++ b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
-@@ -59,6 +59,15 @@ func private %abi_field_size(v0.i256) -> i256 {
-         return v6;
- }
- 
-+func private %abi_payload_size(v0.i256) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.i256 = call %payload_size v0;
-+        return v2;
-+}
-+
- func private %abi_single_root_size(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -116,6 +125,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %bump(v0.i256) {
-     block0:
-         jump block1;
-@@ -255,6 +277,29 @@ func private %encode(v0.i256, v1.i256) {
-         return;
- }
- 
-+func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        v1.objref<@layout_1> = obj.alloc @layout_1;
-+        jump block1;
-+
-+    block1:
-+        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
-+        call %encode v0 v14;
-+        v16.@layout_1 = obj.load v1;
-+        return v16;
-+}
-+
- func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -280,6 +325,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
-         return v3;
- }
- 
-+func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        br 0.i1 block2 block3;
-+
-+    block2:
-+        v3.@layout_1 = call %encode_alloc v0;
-+        return v3;
-+
-+    block3:
-+        jump block4;
-+
-+    block4:
-+        v5.@layout_1 = call %encode_single_root_alloc v0;
-+        return v5;
-+}
-+
- func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
-     block0:
-         v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -431,6 +495,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -512,7 +586,7 @@ func private %return_value(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_1 = call %encode_single_root_alloc v0;
-+        v13.@layout_1 = call %encode_return_alloc v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-diff --git a/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap b/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
-index 4cf6326bc..0473b0029 100644
---- a/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
-+++ b/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
-@@ -51,6 +51,15 @@ func private %abi_field_size(v0.i256) -> i256 {
-         return v6;
- }
- 
-+func private %abi_payload_size(v0.i256) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.i256 = call %payload_size v0;
-+        return v2;
-+}
-+
- func private %abi_single_root_size(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -118,6 +127,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %cast(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -237,6 +259,29 @@ func private %encode(v0.i256, v1.i256) {
-         return;
- }
- 
-+func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        v1.objref<@layout_1> = obj.alloc @layout_1;
-+        jump block1;
-+
-+    block1:
-+        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
-+        call %encode v0 v14;
-+        v16.@layout_1 = obj.load v1;
-+        return v16;
-+}
-+
- func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -262,6 +307,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
-         return v3;
- }
- 
-+func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        br 0.i1 block2 block3;
-+
-+    block2:
-+        v3.@layout_1 = call %encode_alloc v0;
-+        return v3;
-+
-+    block3:
-+        jump block4;
-+
-+    block4:
-+        v5.@layout_1 = call %encode_single_root_alloc v0;
-+        return v5;
-+}
-+
- func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
-     block0:
-         v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -514,6 +578,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -595,7 +669,7 @@ func private %return_value(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_1 = call %encode_single_root_alloc v0;
-+        v13.@layout_1 = call %encode_return_alloc v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-diff --git a/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap b/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
-index a8c31c1f2..c84279b75 100644
---- a/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
-+++ b/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
-@@ -57,6 +57,15 @@ func private %abi_field_size(v0.i256) -> i256 {
-         return v6;
- }
- 
-+func private %abi_payload_size(v0.i256) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.i256 = call %payload_size v0;
-+        return v2;
-+}
-+
- func private %abi_single_root_size(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -114,6 +123,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_1 = insert_value undef.@layout_1 0.i256 v3;
-+        v8.@layout_1 = insert_value v6 1.i256 v0;
-+        v10.@layout_1 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %cast(v0.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -233,6 +255,29 @@ func private %encode(v0.i256, v1.i256) {
-         return;
- }
- 
-+func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        v1.objref<@layout_1> = obj.alloc @layout_1;
-+        jump block1;
-+
-+    block1:
-+        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_1 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_e5e1_0 v3;
-+        v6.objref<i256> = obj.proj v1 0.i256;
-+        v7.i256 = extract_value v4 0.i256;
-+        obj.store v6 v7;
-+        v9.objref<i256> = obj.proj v1 1.i256;
-+        v10.i256 = extract_value v4 1.i256;
-+        obj.store v9 v10;
-+        v12.objref<i256> = obj.proj v1 2.i256;
-+        v13.i256 = extract_value v4 2.i256;
-+        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0 v1;
-+        call %encode v0 v14;
-+        v16.@layout_1 = obj.load v1;
-+        return v16;
-+}
-+
- func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
-     block0:
-         jump block1;
-@@ -258,6 +303,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
-         return v3;
- }
- 
-+func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        br 0.i1 block2 block3;
-+
-+    block2:
-+        v3.@layout_1 = call %encode_alloc v0;
-+        return v3;
-+
-+    block3:
-+        jump block4;
-+
-+    block4:
-+        v5.@layout_1 = call %encode_single_root_alloc v0;
-+        return v5;
-+}
-+
- func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
-     block0:
-         v1.objref<@layout_1> = obj.alloc @layout_1;
-@@ -433,6 +497,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f(v0.objref<@layout_1>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_bc2f_0(v0.objref<@layout_1>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_eea0(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -514,7 +588,7 @@ func private %return_value(v0.i256) {
-         br 1.i1 block4 block5;
- 
-     block3:
--        v13.@layout_1 = call %encode_single_root_alloc v0;
-+        v13.@layout_1 = call %encode_return_alloc v0;
-         v15.objref<i256> = obj.proj v4 0.i256;
-         v16.i256 = extract_value v13 0.i256;
-         obj.store v15 v16;
-diff --git a/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap b/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
-index aa793194a..382d6d1f6 100644
---- a/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
-+++ b/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
-@@ -75,6 +75,15 @@ func private %abi_field_size(v0.i1) -> i256 {
-         return v6;
- }
- 
-+func private %abi_payload_size(v0.i1) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.i256 = call %payload_size v0;
-+        return v2;
-+}
-+
- func private %abi_single_root_size(v0.i1) -> i256 {
-     block0:
-         jump block1;
-@@ -97,6 +106,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4_0(v0.i256) -> @layout_0 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_0 = insert_value undef.@layout_0 0.i256 v3;
-+        v8.@layout_0 = insert_value v6 1.i256 v0;
-+        v10.@layout_0 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func inline(always) private %alloc__g1d2b() -> @layout_1 {
-     block0:
-         jump block1;
-@@ -262,6 +284,29 @@ func private %encode(v0.i1, v1.i256) {
-         return;
- }
- 
-+func inline(always) private %encode_alloc(v0.i1) -> @layout_0 {
++func inline(always) private %encode_alloc(v0.i256) -> @layout_0 {
 +    block0:
 +        v1.objref<@layout_0> = obj.alloc @layout_0;
 +        jump block1;
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_0 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_26d4_0 v3;
++        v4.@layout_0 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -2344,20 +1459,20 @@ index aa793194a..382d6d1f6 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode v0 v14;
 +        v16.@layout_0 = obj.load v1;
 +        return v16;
 +}
 +
- func inline(always) private %encode_field_at(v0.i1, v1.i256, v2.i256, v3.i256) -> i256 {
+ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
      block0:
          jump block1;
-@@ -287,6 +332,25 @@ func inline(always) private %encode_field_at(v0.i1, v1.i256, v2.i256, v3.i256) -
+@@ -278,6 +310,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
          return v3;
  }
  
-+func inline(always) private %encode_return_alloc(v0.i1) -> @layout_0 {
++func inline(always) private %encode_return_alloc(v0.i256) -> @layout_0 {
 +    block0:
 +        jump block1;
 +
@@ -2376,27 +1491,10 @@ index aa793194a..382d6d1f6 100644
 +        return v5;
 +}
 +
- func inline(always) private %encode_single_root_alloc(v0.i1) -> @layout_0 {
+ func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_0 {
      block0:
          v1.objref<@layout_0> = obj.alloc @layout_0;
-@@ -438,6 +502,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a(v0.objref<@layout_0>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_554a_0(v0.objref<@layout_0>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func inline(always) private %ptr__g03ed(v0.objref<@layout_1>) -> i256 {
-     block0:
-         jump block1;
-@@ -519,7 +593,7 @@ func private %return_value(v0.i1) {
+@@ -500,7 +551,7 @@ func private %return_value(v0.i256) {
          br 1.i1 block4 block5;
  
      block3:
@@ -2405,8 +1503,348 @@ index aa793194a..382d6d1f6 100644
          v15.objref<i256> = obj.proj v4 0.i256;
          v16.i256 = extract_value v13 0.i256;
          obj.store v15 v16;
+diff --git a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
+index 607c7e6a2..9e2b87f1b 100644
+--- a/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
++++ b/crates/codegen/tests/fixtures/sonatina_ir/newtype_storage_field_mut_method_call.snap
+@@ -59,6 +59,15 @@ func private %abi_field_size(v0.i256) -> i256 {
+         return v6;
+ }
+ 
++func private %abi_payload_size(v0.i256) -> i256 {
++    block0:
++        jump block1;
++
++    block1:
++        v2.i256 = call %payload_size v0;
++        return v2;
++}
++
+ func private %abi_single_root_size(v0.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -242,6 +251,29 @@ func private %encode(v0.i256, v1.i256) {
+         return;
+ }
+ 
++func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
++    block0:
++        v1.objref<@layout_1> = obj.alloc @layout_1;
++        jump block1;
++
++    block1:
++        v3.i256 = call %abi_payload_size v0;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %encode v0 v14;
++        v16.@layout_1 = obj.load v1;
++        return v16;
++}
++
+ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -267,6 +299,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+         return v3;
+ }
+ 
++func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
++    block0:
++        jump block1;
++
++    block1:
++        br 0.i1 block2 block3;
++
++    block2:
++        v3.@layout_1 = call %encode_alloc v0;
++        return v3;
++
++    block3:
++        jump block4;
++
++    block4:
++        v5.@layout_1 = call %encode_single_root_alloc v0;
++        return v5;
++}
++
+ func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
+     block0:
+         v1.objref<@layout_1> = obj.alloc @layout_1;
+@@ -489,7 +540,7 @@ func private %return_value(v0.i256) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_1 = call %encode_single_root_alloc v0;
++        v13.@layout_1 = call %encode_return_alloc v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
+diff --git a/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap b/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
+index 4cd245f7e..b57a38737 100644
+--- a/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
++++ b/crates/codegen/tests/fixtures/sonatina_ir/storage_map.snap
+@@ -51,6 +51,15 @@ func private %abi_field_size(v0.i256) -> i256 {
+         return v6;
+ }
+ 
++func private %abi_payload_size(v0.i256) -> i256 {
++    block0:
++        jump block1;
++
++    block1:
++        v2.i256 = call %payload_size v0;
++        return v2;
++}
++
+ func private %abi_single_root_size(v0.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -224,6 +233,29 @@ func private %encode(v0.i256, v1.i256) {
+         return;
+ }
+ 
++func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
++    block0:
++        v1.objref<@layout_1> = obj.alloc @layout_1;
++        jump block1;
++
++    block1:
++        v3.i256 = call %abi_payload_size v0;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %encode v0 v14;
++        v16.@layout_1 = obj.load v1;
++        return v16;
++}
++
+ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -249,6 +281,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+         return v3;
+ }
+ 
++func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
++    block0:
++        jump block1;
++
++    block1:
++        br 0.i1 block2 block3;
++
++    block2:
++        v3.@layout_1 = call %encode_alloc v0;
++        return v3;
++
++    block3:
++        jump block4;
++
++    block4:
++        v5.@layout_1 = call %encode_single_root_alloc v0;
++        return v5;
++}
++
+ func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
+     block0:
+         v1.objref<@layout_1> = obj.alloc @layout_1;
+@@ -542,7 +593,7 @@ func private %return_value(v0.i256) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_1 = call %encode_single_root_alloc v0;
++        v13.@layout_1 = call %encode_return_alloc v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
+diff --git a/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap b/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
+index d8a52f1ca..afee1d3fc 100644
+--- a/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
++++ b/crates/codegen/tests/fixtures/sonatina_ir/storage_packed_array.snap
+@@ -57,6 +57,15 @@ func private %abi_field_size(v0.i256) -> i256 {
+         return v6;
+ }
+ 
++func private %abi_payload_size(v0.i256) -> i256 {
++    block0:
++        jump block1;
++
++    block1:
++        v2.i256 = call %payload_size v0;
++        return v2;
++}
++
+ func private %abi_single_root_size(v0.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -220,6 +229,29 @@ func private %encode(v0.i256, v1.i256) {
+         return;
+ }
+ 
++func inline(always) private %encode_alloc(v0.i256) -> @layout_1 {
++    block0:
++        v1.objref<@layout_1> = obj.alloc @layout_1;
++        jump block1;
++
++    block1:
++        v3.i256 = call %abi_payload_size v0;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %encode v0 v14;
++        v16.@layout_1 = obj.load v1;
++        return v16;
++}
++
+ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -245,6 +277,25 @@ func inline(always) private %encode_field_at(v0.i256, v1.i256, v2.i256, v3.i256)
+         return v3;
+ }
+ 
++func inline(always) private %encode_return_alloc(v0.i256) -> @layout_1 {
++    block0:
++        jump block1;
++
++    block1:
++        br 0.i1 block2 block3;
++
++    block2:
++        v3.@layout_1 = call %encode_alloc v0;
++        return v3;
++
++    block3:
++        jump block4;
++
++    block4:
++        v5.@layout_1 = call %encode_single_root_alloc v0;
++        return v5;
++}
++
+ func inline(always) private %encode_single_root_alloc(v0.i256) -> @layout_1 {
+     block0:
+         v1.objref<@layout_1> = obj.alloc @layout_1;
+@@ -491,7 +542,7 @@ func private %return_value(v0.i256) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_1 = call %encode_single_root_alloc v0;
++        v13.@layout_1 = call %encode_return_alloc v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
+diff --git a/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap b/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
+index 6c9bbd8c0..e053f1bd0 100644
+--- a/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
++++ b/crates/codegen/tests/fixtures/sonatina_ir/tstor_ptr_contract.snap
+@@ -75,6 +75,15 @@ func private %abi_field_size(v0.i1) -> i256 {
+         return v6;
+ }
+ 
++func private %abi_payload_size(v0.i1) -> i256 {
++    block0:
++        jump block1;
++
++    block1:
++        v2.i256 = call %payload_size v0;
++        return v2;
++}
++
+ func private %abi_single_root_size(v0.i1) -> i256 {
+     block0:
+         jump block1;
+@@ -249,6 +258,29 @@ func private %encode(v0.i1, v1.i256) {
+         return;
+ }
+ 
++func inline(always) private %encode_alloc(v0.i1) -> @layout_1 {
++    block0:
++        v1.objref<@layout_1> = obj.alloc @layout_1;
++        jump block1;
++
++    block1:
++        v3.i256 = call %abi_payload_size v0;
++        v4.@layout_1 = call %impl_MemBuffer__alloc v3;
++        v6.objref<i256> = obj.proj v1 0.i256;
++        v7.i256 = extract_value v4 0.i256;
++        obj.store v6 v7;
++        v9.objref<i256> = obj.proj v1 1.i256;
++        v10.i256 = extract_value v4 1.i256;
++        obj.store v9 v10;
++        v12.objref<i256> = obj.proj v1 2.i256;
++        v13.i256 = extract_value v4 2.i256;
++        obj.store v12 v13;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
++        call %encode v0 v14;
++        v16.@layout_1 = obj.load v1;
++        return v16;
++}
++
+ func inline(always) private %encode_field_at(v0.i1, v1.i256, v2.i256, v3.i256) -> i256 {
+     block0:
+         jump block1;
+@@ -274,6 +306,25 @@ func inline(always) private %encode_field_at(v0.i1, v1.i256, v2.i256, v3.i256) -
+         return v3;
+ }
+ 
++func inline(always) private %encode_return_alloc(v0.i1) -> @layout_1 {
++    block0:
++        jump block1;
++
++    block1:
++        br 0.i1 block2 block3;
++
++    block2:
++        v3.@layout_1 = call %encode_alloc v0;
++        return v3;
++
++    block3:
++        jump block4;
++
++    block4:
++        v5.@layout_1 = call %encode_single_root_alloc v0;
++        return v5;
++}
++
+ func inline(always) private %encode_single_root_alloc(v0.i1) -> @layout_1 {
+     block0:
+         v1.objref<@layout_1> = obj.alloc @layout_1;
+@@ -496,7 +547,7 @@ func private %return_value(v0.i1) {
+         br 1.i1 block4 block5;
+ 
+     block3:
+-        v13.@layout_1 = call %encode_single_root_alloc v0;
++        v13.@layout_1 = call %encode_return_alloc v0;
+         v15.objref<i256> = obj.proj v4 0.i256;
+         v16.i256 = extract_value v13 0.i256;
+         obj.store v15 v16;
 diff --git a/crates/codegen/tests/fixtures/sonatina_ir/tuple_return_contract.snap b/crates/codegen/tests/fixtures/sonatina_ir/tuple_return_contract.snap
-index ae45aa333..5d64093b4 100644
+index e181eca16..2225facf0 100644
 --- a/crates/codegen/tests/fixtures/sonatina_ir/tuple_return_contract.snap
 +++ b/crates/codegen/tests/fixtures/sonatina_ir/tuple_return_contract.snap
 @@ -53,6 +53,15 @@ func private %abi_field_size(v0.@layout_1) -> i256 {
@@ -2425,27 +1863,7 @@ index ae45aa333..5d64093b4 100644
  func private %abi_single_root_size(v0.@layout_1) -> i256 {
      block0:
          jump block1;
-@@ -86,6 +95,19 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_9db4(v0.i256) -> @layou
-         return v10;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_9db4_0(v0.i256) -> @layout_3 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v2.*i8 = evm_malloc v0;
-+        v3.i256 = ptr_to_int v2 i256;
-+        v6.@layout_3 = insert_value undef.@layout_3 0.i256 v3;
-+        v8.@layout_3 = insert_value v6 1.i256 v0;
-+        v10.@layout_3 = insert_value v8 2.i256 v0;
-+        return v10;
-+}
-+
- func private %core__lib__ptr__impl_MemBuffer_2cdf__alloc_b41e(v0.i256) -> @layout_3 {
-     block0:
-         jump block1;
-@@ -278,6 +300,29 @@ func private %impl_trait_Address__encode__gf13e(v0.@layout_0, v1.i256) {
+@@ -265,6 +274,29 @@ func inline(always) private %encode__g753b(v0.@layout_1, v1.i256) {
          return;
  }
  
@@ -2456,7 +1874,7 @@ index ae45aa333..5d64093b4 100644
 +
 +    block1:
 +        v3.i256 = call %abi_payload_size v0;
-+        v4.@layout_3 = call %core__lib__ptr__impl_MemBuffer_2cdf__alloc_9db4_0 v3;
++        v4.@layout_3 = call %impl_MemBuffer__alloc v3;
 +        v6.objref<i256> = obj.proj v1 0.i256;
 +        v7.i256 = extract_value v4 0.i256;
 +        obj.store v6 v7;
@@ -2466,7 +1884,7 @@ index ae45aa333..5d64093b4 100644
 +        v12.objref<i256> = obj.proj v1 2.i256;
 +        v13.i256 = extract_value v4 2.i256;
 +        obj.store v12 v13;
-+        v14.i256 = call %core__lib__ptr__impl_MemBuffer_2cdf__ptr_2eaf_0 v1;
++        v14.i256 = call %impl_MemBuffer__ptr v1;
 +        call %encode__g753b v0 v14;
 +        v16.@layout_3 = obj.load v1;
 +        return v16;
@@ -2475,7 +1893,7 @@ index ae45aa333..5d64093b4 100644
  func private %impl_trait_u256__encode__gf13e(v0.i256, v1.i256) {
      block0:
          jump block1;
-@@ -362,6 +407,25 @@ func inline(always) private %encode_field_at__gac80(v0.i256, v1.i256, v2.i256, v
+@@ -349,6 +381,25 @@ func inline(always) private %encode_field_at__gff0b(v0.@layout_1, v1.i256, v2.i2
          return v3;
  }
  
@@ -2501,24 +1919,7 @@ index ae45aa333..5d64093b4 100644
  func inline(always) private %encode_single_root_alloc(v0.@layout_1) -> @layout_3 {
      block0:
          v1.objref<@layout_3> = obj.alloc @layout_3;
-@@ -515,6 +579,16 @@ func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_2eaf(v0.objref<@layout_3>
-         return v4;
- }
- 
-+func private %core__lib__ptr__impl_MemBuffer_2cdf__ptr_2eaf_0(v0.objref<@layout_3>) -> i256 {
-+    block0:
-+        jump block1;
-+
-+    block1:
-+        v3.objref<i256> = obj.proj v0 0.i256;
-+        v4.i256 = obj.load v3;
-+        return v4;
-+}
-+
- func inline(always) private %ptr__g1d2b(v0.objref<@layout_2>) -> i256 {
-     block0:
-         jump block1;
-@@ -616,7 +690,7 @@ func private %return_value(v0.@layout_1) {
+@@ -593,7 +644,7 @@ func private %return_value(v0.@layout_1) {
          br 0.i1 block4 block5;
  
      block3:
@@ -3181,85 +2582,6 @@ index 000000000..820cb4def
 +fn abi_struct_error_selector() uses (evm: mut Evm) {
 +    revert_error(BadItem { item: item(4) })
 +}
-diff --git a/crates/fe/tests/fixtures/fe_test/address_checksum.fe b/crates/fe/tests/fixtures/fe_test/address_checksum.fe
-new file mode 100644
-index 000000000..272128ee7
---- /dev/null
-+++ b/crates/fe/tests/fixtures/fe_test/address_checksum.fe
-@@ -0,0 +1,73 @@
-+// Published ERC-55 test vectors: https://eips.ethereum.org/EIPS/eip-55
-+use std::evm::{Address, checksum_address}
-+
-+#[test]
-+fn published_checksum_vectors() {
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0x52908400098527886e0f7030069857d2e4169ee7 },
-+            )
-+            == "0x52908400098527886E0F7030069857D2E4169EE7",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0x8617e340b3d01fa5f11f306f4090fd50e238070d },
-+            )
-+            == "0x8617E340B3D01FA5F11F306F4090FD50E238070D",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0xde709f2102306220921060314715629080e2fb77 },
-+            )
-+            == "0xde709f2102306220921060314715629080e2fb77",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0x27b1fdb04752bbc536007a920d24acb045561c26 },
-+            )
-+            == "0x27b1fdb04752bbc536007a920d24acb045561c26",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed },
-+            )
-+            == "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359 },
-+            )
-+            == "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0xdbf03b407c01e7cd3cbea99509d93f8dddc8c6fb },
-+            )
-+            == "0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB",
-+    )
-+    assert!(
-+        checksum_address(
-+                Address { inner: 0xd1220a0cf47c7b9be7a2e6ba89f429762e7b9adb },
-+            )
-+            == "0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb",
-+    )
-+}
-+
-+#[test]
-+fn leading_zeroes_and_digits() {
-+    assert!(
-+        checksum_address(Address::zero()) == "0x0000000000000000000000000000000000000000",
-+    )
-+    assert!(
-+        checksum_address(Address { inner: 1 }) == "0x0000000000000000000000000000000000000001",
-+    )
-+    assert!(
-+        checksum_address(Address { inner: 0x1234567890 })
-+            == "0x0000000000000000000000000000001234567890",
-+    )
-+}
-+
-+#[test(should_revert)]
-+fn rejects_noncanonical_address() {
-+    let _ = checksum_address(Address { inner: 1 << 160 })
-+}
 diff --git a/crates/fe/tests/fixtures/fe_test/erc1167_clones.fe b/crates/fe/tests/fixtures/fe_test/erc1167_clones.fe
 new file mode 100644
 index 000000000..981f8c3a4
@@ -3606,261 +2928,6 @@ index 000000000..f5df1abb4
 +    let selector = Bytes4 { val: 0x01ffc9a7 }
 +    let copy = selector
 +    assert!(selector.word() == copy.word())
-+}
-diff --git a/crates/fe/tests/fixtures/fe_test/isqrt.fe b/crates/fe/tests/fixtures/fe_test/isqrt.fe
-index 6e9811c9d..5ca03428e 100644
---- a/crates/fe/tests/fixtures/fe_test/isqrt.fe
-+++ b/crates/fe/tests/fixtures/fe_test/isqrt.fe
-@@ -58,3 +58,27 @@ fn isqrt_arbitrary_values() {
-     // 2^255
-     assert(isqrt(57896044618658097711785492504343953926634992332820282019728792003956564819968) == 240615969168004511545033772477625056927)
- }
-+
-+// Cover every power-of-two root boundary, including seed bit-length transitions.
-+#[test]
-+fn isqrt_all_power_of_two_square_boundaries() {
-+    let mut bit: u256 = 1
-+    while bit < 128 {
-+        let root: u256 = 1 << bit
-+        let square = root * root
-+        assert!(isqrt(square - 1) == root - 1)
-+        assert!(isqrt(square) == root)
-+        assert!(isqrt(square + 1) == root)
-+        bit += 1
-+    }
-+}
-+
-+#[test]
-+fn isqrt_largest_square_boundary() {
-+    let root: u256 = (1 << 128) - 1
-+    let square = root * root
-+    assert!(isqrt(square - 1) == root - 1)
-+    assert!(isqrt(square) == root)
-+    assert!(isqrt(square + 1) == root)
-+    assert!(isqrt(u256::max() - 1) == root)
-+}
-diff --git a/crates/fe/tests/fixtures/fe_test/minimum_gas_calls.fe b/crates/fe/tests/fixtures/fe_test/minimum_gas_calls.fe
-new file mode 100644
-index 000000000..894191440
---- /dev/null
-+++ b/crates/fe/tests/fixtures/fe_test/minimum_gas_calls.fe
-@@ -0,0 +1,217 @@
-+use core::ptr
-+use std::evm::{calls::has_min_gas, Create, RawOps}
-+
-+#[test]
-+fn admission_boundaries_and_overflow() {
-+    assert!(has_min_gas(40000, 0, 0))
-+    assert!(!has_min_gas(39999, 0, 0))
-+    assert!(has_min_gas(40002, 1, 0))
-+    assert!(!has_min_gas(40001, 1, 0))
-+    assert!(has_min_gas(41064, 63, 1000))
-+    assert!(!has_min_gas(41063, 63, 1000))
-+    assert!(has_min_gas(41066, 64, 1000))
-+    assert!(!has_min_gas(41065, 64, 1000))
-+    let max = !0 as u256
-+    assert!(!has_min_gas(max, max, 0))
-+    assert!(!has_min_gas(max, 1, max))
-+    assert!(!has_min_gas(max, max, max))
-+    assert!(has_min_gas(max, 0, max - 40000))
-+    assert!(!has_min_gas(max, 0, max - 39999))
-+}
-+
-+// Deploy tiny independent EVM programs so the first GAS instruction measures
-+// the forwarded allotment without compiler-generated dispatch overhead.
-+fn deploy(_ runtime: u256, _ length: u256, _ salt: u256) -> Address
-+uses (create: mut Create)
-+{
-+    let p = ptr::alloc_bytes(64)
-+    core::abi::store_word(
-+        ptr: p,
-+        value: (0x6000600c60003960006000f3 as u256) << 160 | length << 240 | length << 184,
-+    )
-+    core::abi::store_word(
-+        ptr: ptr::offset_bytes(p, 12),
-+        value: runtime << (256 - length * 8),
-+    )
-+    let target = create
-+        .create2_raw(
-+            value: 0,
-+            init_code: ptr::MemSpan::from_raw_parts(ptr: p, len: 12 + length),
-+            salt,
-+        )
-+    assert!(target != Address::zero())
-+    target
-+}
-+
-+#[test]
-+fn full_allotment()
-+uses (call: mut Call, create: mut Create, raw: mut RawOps, ctx: Ctx)
-+{
-+    // GAS; PUSH0; MSTORE; PUSH1 32; PUSH0; RETURN
-+    let target = deploy(0x5a5f5260205ff3, 7, 0)
-+    let mut output = ptr::MemBuffer::alloc(32)
-+    let result = call
-+        .call_with_min_gas(
-+            addr: target,
-+            minimum: 50000,
-+            reserved: 20000,
-+            value: 0,
-+            args: ptr::MemSpan::empty(),
-+        )
-+    match result {
-+        Result::Err(_,) => assert!(false),
-+        Result::Ok(outcome,) => {
-+            assert!(outcome.success() && outcome.returndata_len() == 32)
-+            raw.returndatacopy(dest: mut output, dest_offset: 0, src_offset: 0, len: 32)
-+            assert!(raw.mload(output.ptr()) == 49998)
-+            assert!(ctx.gas() > 20000)
-+        },
-+    }
-+}
-+
-+#[test(balance = 1000)]
-+fn value_forwarding_to_cold_new_account() uses (call: mut Call, ctx: Ctx) {
-+    let target = Address { inner: 0x12345678 }
-+    match call.call_with_min_gas(
-+        addr: target,
-+        minimum: 10000,
-+        reserved: 20000,
-+        value: 7,
-+        args: ptr::MemSpan::empty(),
-+    ) {
-+        Result::Err(_,) => assert!(false),
-+        Result::Ok(outcome,) => assert!(outcome.success() && outcome.returndata_len() == 0),
-+    }
-+    assert!(ctx.balance(target) == 7)
-+}
-+
-+msg RunMsg {
-+    #[selector = 1]
-+    Run { target: Address, minimum: u256, reserved: u256 } -> (bool, bool, u256, u256),
-+}
-+pub contract Runner {
-+    recv RunMsg {
-+        Run { target, minimum, reserved } -> (bool, bool, u256, u256)
-+        uses (call: mut Call, ctx: Ctx)
-+        {
-+            match call.call_with_min_gas(
-+                addr: target,
-+                minimum,
-+                reserved,
-+                value: 0,
-+                args: ptr::MemSpan::empty(),
-+            ) {
-+                Result::Err(_,) => (false, false, 0, ctx.gas()),
-+                Result::Ok(outcome,) => (
-+                    true,
-+                    outcome.success(),
-+                    outcome.returndata_len(),
-+                    ctx.gas(),
-+                ),
-+            }
-+        }
-+    }
-+}
-+
-+#[test]
-+fn exhausted_callee_preserves_reserve()
-+uses (evm: mut Evm, create: mut Create)
-+{
-+    // JUMPDEST; PUSH1 0; JUMP: consume the entire allotment.
-+    let burner = deploy(0x5b600056, 4, 1)
-+    let runner = evm.create2<Runner>(value: 0, args: (), salt: 2)
-+    let answer: (bool, bool, u256, u256) = evm
-+        .call(
-+            addr: runner,
-+            gas: 120000,
-+            value: 0,
-+            message: RunMsg::Run { target: burner, minimum: 50000, reserved: 20000 },
-+        )
-+    assert!(
-+        answer.0 && !answer.1 && answer.2 == 0 && answer.3 >= 20000,
-+    )
-+}
-+
-+#[test]
-+fn insufficient_budget_skips_external_call()
-+uses (evm: mut Evm, create: mut Create)
-+{
-+    // Increment slot 0 and return its new value.
-+    let target = deploy(0x5f54600101805f555f5260205ff3, 13, 1)
-+    let runner = evm.create2<Runner>(value: 0, args: (), salt: 2)
-+    let answer: (bool, bool, u256, u256) = evm
-+        .call(
-+            addr: runner,
-+            gas: 90000,
-+            value: 0,
-+            message: RunMsg::Run { target, minimum: 50000, reserved: 20000 },
-+        )
-+    assert!(
-+        !answer.0 && !answer.1 && answer.2 == 0 && answer.3 > 50000,
-+    )
-+}
-+
-+#[test]
-+fn large_return_is_not_copied() uses (evm: mut Evm, create: mut Create) {
-+    // PUSH3 196608; PUSH0; RETURN.
-+    let target = deploy(0x620300005ff3, 6, 1)
-+    let runner = evm.create2<Runner>(value: 0, args: (), salt: 2)
-+    let answer: (bool, bool, u256, u256) = evm
-+        .call(
-+            addr: runner,
-+            gas: 170000,
-+            value: 0,
-+            message: RunMsg::Run { target, minimum: 100000, reserved: 20000 },
-+        )
-+    assert!(
-+        answer.0 && answer.1 && answer.2 == 196608 && answer.3 >= 20000,
-+    )
-+}
-+
-+#[test(balance = 1000)]
-+fn value_stipend_and_balance()
-+uses (call: mut Call, create: mut Create, raw: mut RawOps, ctx: Ctx)
-+{
-+    let target = deploy(0x5a5f5260205ff3, 7, 0)
-+    let mut output = ptr::MemBuffer::alloc(32)
-+    match call.call_with_min_gas(
-+        addr: target,
-+        minimum: 50000,
-+        reserved: 20000,
-+        value: 7,
-+        args: ptr::MemSpan::empty(),
-+    ) {
-+        Result::Err(_,) => assert!(false),
-+        Result::Ok(outcome,) => {
-+            assert!(outcome.success())
-+            raw.returndatacopy(dest: mut output, dest_offset: 0, src_offset: 0, len: 32)
-+            assert!(raw.mload(output.ptr()) == 52298)
-+            assert!(ctx.balance(target) == 7)
-+        },
-+    }
-+}
-+
-+#[test]
-+fn input_is_forwarded_and_revert_is_not_bubbled()
-+uses (call: mut Call, create: mut Create, raw: mut RawOps)
-+{
-+    // CALLDATALOAD(0); MSTORE(0); REVERT(0,32).
-+    let target = deploy(0x5f355f5260205ffd, 8, 0)
-+    let input = ptr::MemBuffer::alloc(4096)
-+    core::abi::store_word(ptr: input.ptr(), value: 0xdeadbeef)
-+    let mut output = ptr::MemBuffer::alloc(32)
-+    match call.call_with_min_gas(
-+        addr: target,
-+        minimum: 50000,
-+        reserved: 20000,
-+        value: 0,
-+        args: input.span(),
-+    ) {
-+        Result::Err(_,) => assert!(false),
-+        Result::Ok(outcome,) => {
-+            assert!(!outcome.success() && outcome.returndata_len() == 32)
-+            raw.returndatacopy(dest: mut output, dest_offset: 0, src_offset: 0, len: 32)
-+            assert!(raw.mload(output.ptr()) == 0xdeadbeef)
-+        },
-+    }
 +}
 diff --git a/crates/fe/tests/fixtures/fe_test/pointer_field_writes_in_loop.fe b/crates/fe/tests/fixtures/fe_test/pointer_field_writes_in_loop.fe
 new file mode 100644
@@ -4233,184 +3300,6 @@ index 000000000..574040ad6
 +    assert(load_word(ptr::offset_bytes(buf, 0x2a0)) == 3)
 +    assert(load_word(ptr::offset_bytes(book.blob, 0x240)) == 3)
 +}
-diff --git a/crates/fe/tests/fixtures/fe_test/sol_slot.fe b/crates/fe/tests/fixtures/fe_test/sol_slot.fe
-new file mode 100644
-index 000000000..6d4462d96
---- /dev/null
-+++ b/crates/fe/tests/fixtures/fe_test/sol_slot.fe
-@@ -0,0 +1,172 @@
-+// `SolSlot` reads and writes Solidity-packed fields without touching the
-+// neighbouring bytes of the slot.
-+use std::abi::{Bytes, Bytes4, DynString, FixedBytes}
-+use std::abi::sol::{Int24, Uint24}
-+use core::ptr::{self, MemSpan}
-+use core::abi::store_word
-+use std::evm::{Address, Evm, RawStorage, SolMapping, SolSlot, keccak256}
-+
-+#[test]
-+fn packed_fields_round_trip() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        // address currency; uint24 fee; int24 tickSpacing; bool flag; int8 small
-+        let slot = SolSlot::at(7)
-+        slot.write(offset: 0, value: Address { inner: 0xabc })
-+        slot.write(offset: 20, value: Uint24 { val: 3000 })
-+        slot.write(offset: 23, value: Int24 { val: -60 })
-+        slot.write(offset: 26, value: true)
-+        slot.write(offset: 27, value: -2 as i8)
-+        slot.write(offset: 28, value: Bytes4 { val: 0x11223344 })
-+
-+        let currency: Address = slot.read(offset: 0)
-+        let fee: Uint24 = slot.read(offset: 20)
-+        let spacing: Int24 = slot.read(offset: 23)
-+        let flag: bool = slot.read(offset: 26)
-+        let small: i8 = slot.read(offset: 27)
-+        let tag: Bytes4 = slot.read(offset: 28)
-+        assert(currency.inner == 0xabc)
-+        assert(fee.val == 3000)
-+        assert(spacing.val == -60)
-+        assert(flag)
-+        assert(small == -2)
-+        assert(tag.val == 0x11223344)
-+
-+        // Overwriting one field keeps the others.
-+        slot.write(offset: 0, value: Address { inner: 0 })
-+        let fee_again: Uint24 = slot.read(offset: 20)
-+        assert(fee_again.val == 3000)
-+        let word: u256 = SolSlot::at(7).read(offset: 0)
-+        assert(word == 0x11223344fe01ffffc4000bb8 << 160)
-+    }
-+}
-+
-+#[test]
-+fn bytes_and_strings_use_solidity_layout() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        let slot = SolSlot::at(3)
-+        slot.write_string("short")
-+        // Short strings live in the slot: data in the high bytes, 2 * len low.
-+        let head: u256 = slot.read(offset: 0)
-+        assert(head == (0x73686f7274 << 216) | 10)
-+        let short = slot.read_string()
-+        assert(short.len() == 5)
-+        assert(short.byte_at(0) == 0x73)
-+        assert(short.byte_at(4) == 0x74)
-+
-+        let long: DynString = "a string that is longer than thirty-two bytes"
-+        slot.write_string(long)
-+        let head: u256 = slot.read(offset: 0)
-+        assert(head == long.len() * 2 + 1)
-+        let read_back = slot.read_string()
-+        assert(read_back.len() == long.len())
-+        assert(read_back.byte_at(0) == 0x61)
-+        assert(read_back.byte_at(44) == long.byte_at(44))
-+        assert(slot.read_bytes().len() == long.len())
-+
-+        // Shrinking clears the words the long value left behind.
-+        slot.write_bytes(Bytes::from_word_prefix(word: 0xabcd << 240, len: 2))
-+        let second_word: u256 = SolSlot::at(hash_words(3, 0, 1) + 1).read(offset: 0)
-+        assert(second_word == 0)
-+        assert(slot.read_bytes().len() == 2)
-+        assert(slot.read_bytes().byte_at(1) == 0xcd)
-+    }
-+}
-+
-+#[test(should_revert)]
-+fn write_past_slot_end_reverts() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(1).write(offset: 31, value: 0x1234 as u16)
-+    }
-+}
-+
-+#[test(should_revert)]
-+fn read_past_slot_end_reverts() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        let _: Address = SolSlot::at(1).read(offset: 13)
-+    }
-+}
-+
-+#[test(should_revert)]
-+fn noncanonical_fixed_bytes_write_reverts() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(1).write(offset: 0, value: Bytes4 { val: 0x1122334455 })
-+    }
-+}
-+
-+#[test(should_revert)]
-+fn zero_width_fixed_bytes_write_reverts() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(1).write(offset: 0, value: FixedBytes<0> { val: 0 })
-+    }
-+}
-+
-+#[test(should_revert)]
-+fn noncanonical_address_write_reverts() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(1).write(offset: 0, value: Address { inner: 1 << 160 })
-+    }
-+}
-+
-+#[test]
-+fn short_read_zeroes_bytes_past_len() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        // "a" (len 1) with stray bytes behind it in the slot.
-+        let head: u256 = (0x61 << 248) | (0x99 << 200) | 2
-+        SolSlot::at(5).write(offset: 0, value: head)
-+        let value = SolSlot::at(5).read_bytes()
-+        assert(value.len() == 1)
-+        assert(value.payload_span().word_at(0) == 0x61 << 248)
-+    }
-+}
-+
-+#[test]
-+fn long_read_zeroes_bytes_past_len() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        // 33 bytes: a full first word, then "b" with stray bytes behind it.
-+        SolSlot::at(6).write(offset: 0, value: 33 * 2 + 1 as u256)
-+        let tail: u256 = (0x62 << 248) | (0x99 << 200)
-+        SolSlot::at(hash_words(6, 0, 1) + 1).write(offset: 0, value: tail)
-+        let value = SolSlot::at(6).read_bytes()
-+        assert(value.len() == 33)
-+        assert(value.payload_span().word_at(32) == 0x62 << 248)
-+    }
-+}
-+
-+// A long head (odd) with a short length is corrupt, as in Solidity.
-+#[test(should_revert, panic = 0x22)]
-+fn long_head_with_short_length_panics() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(5).write(offset: 0, value: 3 as u256)
-+        let _ = SolSlot::at(5).read_bytes()
-+    }
-+}
-+
-+// A short head (even) with a length of 32 or more is corrupt, as in Solidity.
-+#[test(should_revert, panic = 0x22)]
-+fn short_head_with_long_length_panics() uses (evm: mut Evm) {
-+    with (RawStorage = evm) {
-+        SolSlot::at(5).write(offset: 0, value: 64 as u256)
-+        SolSlot::at(5).write_string("x")
-+    }
-+}
-+
-+// keccak256 over the first `n` of the words `a`, `b`.
-+fn hash_words(_ a: u256, _ b: u256, _ n: u256) -> u256 {
-+    let buffer = ptr::alloc_bytes(64)
-+    store_word(ptr: buffer, value: a)
-+    store_word(ptr: ptr::offset_bytes(buffer, 32), value: b)
-+    keccak256(MemSpan::from_raw_parts(ptr: buffer, len: n * 32))
-+}
-+
-+#[test]
-+fn mapping_slots_follow_solidity() {
-+    // mapping(uint256 => V) at slot 3: keccak256(abi.encode(key, 3))
-+    assert(SolMapping::at(3).slot_of(5 as u256) == hash_words(5, 3, 2))
-+    // Signed and custom-width keys are sign-extended like abi.encode.
-+    assert(SolMapping::at(3).slot_of(Int24 { val: -1 }) == hash_words(u256::max(), 3, 2))
-+    assert(SolMapping::at(3).slot_of(-1 as i16) == hash_words(u256::max(), 3, 2))
-+    // mapping(address => mapping(address => V)) at slot 1
-+    let a = Address { inner: 0xa }
-+    let b = Address { inner: 0xb }
-+    assert(SolMapping::at(1).nested(a).slot_of(b) == hash_words(0xb, hash_words(0xa, 1, 2), 2))
-+}
 diff --git a/crates/fe/tests/fixtures/fe_test/temporary_pointer_field.fe b/crates/fe/tests/fixtures/fe_test/temporary_pointer_field.fe
 new file mode 100644
 index 000000000..a858f23c8
@@ -4476,83 +3365,6 @@ index 000000000..a858f23c8
 +    assert(links.ptr_at(0).next.a == 3)
 +    links.ptr_at(0).next.b = 8
 +    assert(items.ptr_at(0).b == 8)
-+}
-diff --git a/crates/fe/tests/fixtures/fe_test/text_dynamic.fe b/crates/fe/tests/fixtures/fe_test/text_dynamic.fe
-new file mode 100644
-index 000000000..defbc0489
---- /dev/null
-+++ b/crates/fe/tests/fixtures/fe_test/text_dynamic.fe
-@@ -0,0 +1,71 @@
-+use core::num::IntDowncast
-+use core::ptr::{self, MemArray, MemSlice}
-+use std::abi::DynString
-+use std::text::{concat_slice, TextBuilder}
-+
-+#[test]
-+fn runtime_slice_and_empty() {
-+    assert!(concat_slice(MemSlice::empty()) == "")
-+    let mut parts = MemArray<DynString>::new_uninit(4)
-+    *parts.ptr_at(0) = "ab"
-+    *parts.ptr_at(1) = ""
-+    *parts.ptr_at(2) = "cde"
-+    *parts.ptr_at(3) = "f"
-+    assert!(concat_slice(parts.as_slice()) == "abcdef")
-+    assert!(
-+        concat_slice(parts.as_slice().slice(offset: 1, len: 2)) == "cde",
-+    )
-+    assert!(*parts.ptr_at(0) == "ab")
-+}
-+
-+#[test]
-+fn builder_empty_and_capacity() {
-+    assert!(TextBuilder::new().finish() == "")
-+    let mut b = TextBuilder::with_capacity(1)
-+    assert!(b.is_empty())
-+    b = b.push("")
-+    b = b.push("a")
-+    b = b.push("bc")
-+    assert!(b.len() == 3)
-+    assert!(!b.is_empty())
-+    assert!(b.finish() == "abc")
-+}
-+
-+#[test]
-+fn growth_and_arbitrary_bytes() {
-+    let input = ptr::MemBuffer::alloc(65)
-+    let mut i = 0
-+    while i < 65 {
-+        *ptr::offset_bytes(input.ptr(), i) = i.downcast_truncate()
-+        i += 1
-+    }
-+    *ptr::offset_bytes(input.ptr(), 64) = 255
-+    let mut b = TextBuilder::new()
-+    b = b.push_bytes(input.slice(offset: 0, len: 31))
-+    b = b.push_bytes(input.slice(offset: 31, len: 1))
-+    b = b.push_bytes(input.slice(offset: 32, len: 33))
-+    let output = b.finish()
-+    assert!(output.len() == 65)
-+    i = 0
-+    while i < 65 {
-+        assert!(output.byte_at(i) == input.span().byte_at(i))
-+        i += 1
-+    }
-+}
-+
-+#[test]
-+fn many_fragments() {
-+    let mut b = TextBuilder::new()
-+    let mut i = 0
-+    while i < 100 {
-+        b = b.push("abcd")
-+        i += 1
-+    }
-+    let output = b.finish()
-+    assert!(output.len() == 400)
-+    i = 0
-+    while i < 100 {
-+        assert!(output.slice(start: i * 4, len: 4) == "abcd")
-+        i += 1
-+    }
 +}
 diff --git a/crates/fe/tests/fixtures/fe_test/tuple_return_abi_params.fe b/crates/fe/tests/fixtures/fe_test/tuple_return_abi_params.fe
 new file mode 100644
@@ -4672,105 +3484,6 @@ index 000000000..67ab63bdd
 +
 +    let name: DynString = info.call(InfoMsg::Name {})
 +    assert!(name == version())
-+}
-diff --git a/crates/fe/tests/fixtures/fe_test/typed_calls.fe b/crates/fe/tests/fixtures/fe_test/typed_calls.fe
-new file mode 100644
-index 000000000..aa1aade27
---- /dev/null
-+++ b/crates/fe/tests/fixtures/fe_test/typed_calls.fe
-@@ -0,0 +1,93 @@
-+// Bounded typed calls, value sends, raw calls and ERC-165 probes.
-+use core::abi::ByteInput
-+use core::ptr::{MemBuffer, MemSpan}
-+use std::abi::{Bytes4, sol}
-+use std::evm::{Address, Call, Ctx, Evm, erc165, encode_msg_calldata}
-+
-+msg TargetMsg {
-+    #[selector = sol("words(uint256)")]
-+    Words { n: u256 } -> u256,
-+    #[selector = sol("fail()")]
-+    Fail {} -> u256,
-+    #[selector = sol("supportsInterface(bytes4)")]
-+    Supports { id: Bytes4 } -> bool,
-+}
-+
-+pub contract Target {
-+    recv TargetMsg {
-+        // Returns `n` (a single word) as the ABI result.
-+        Words { n } -> u256 { n }
-+        Fail {} -> u256 {
-+            assert!(false, "no")
-+            0
-+        }
-+        Supports { id } -> bool { id.val == 0x01ffc9a7 || id.val == 0x12345678 }
-+    }
-+}
-+
-+pub contract Plain {
-+    recv TargetMsg {
-+        Words { n } -> u256 { n }
-+        Fail {} -> u256 { 0 }
-+        Supports { id } -> bool { false }
-+    }
-+}
-+
-+#[test]
-+fn bounded_calls_copy_at_most_capacity() uses (evm: mut Evm) {
-+    let target = evm.create2<Target>(value: 0, args: (), salt: 0)
-+    with (Call = evm, Ctx = evm) {
-+        let mut ret = MemBuffer::with_capacity(0)
-+        let outcome = evm.try_call_into(addr: target, gas: 100000, value: 0, message: TargetMsg::Words { n: 7 }, ret: mut ret)
-+        assert(outcome.success())
-+        assert(outcome.returndata_len() == 32)
-+        assert(ret.len() == 0)
-+
-+        let mut word = MemBuffer::with_capacity(32)
-+        let outcome = evm.try_static_into(addr: target, gas: 100000, message: TargetMsg::Words { n: 9 }, ret: mut word)
-+        assert(outcome.success())
-+        assert(word.span().word_at(0) == 9)
-+
-+        let mut ignored = MemBuffer::with_capacity(0)
-+        let failed = evm.try_call_into(addr: target, gas: 100000, value: 0, message: TargetMsg::Fail {}, ret: mut ignored)
-+        assert(!failed.success())
-+
-+        let raw = evm.try_call_raw(addr: target, gas: 100000, value: 0, args: encode_msg_calldata(TargetMsg::Words { n: 3 }).span())
-+        assert(raw.success())
-+        assert(raw.returndata().word_at(0) == 3)
-+
-+        // A read-only `Call` is enough for a typed static call.
-+        let n: u256 = target.static(TargetMsg::Words { n: 11 })
-+        assert(n == 11)
-+    }
-+}
-+
-+#[test]
-+fn send_value_transfers_ether() uses (evm: mut Evm) {
-+    let receiver = Address { inner: 0xbeef }
-+    with (Call = evm, Ctx = evm) {
-+        let outcome = evm.send_value(addr: receiver, gas: 100000, value: 0)
-+        assert(outcome.success())
-+        assert(outcome.returndata_len() == 0)
-+    }
-+}
-+
-+#[test]
-+fn erc165_probes() uses (evm: mut Evm) {
-+    let target = evm.create2<Target>(value: 0, args: (), salt: 1)
-+    let plain = evm.create2<Plain>(value: 0, args: (), salt: 2)
-+    with (Call = evm) {
-+        assert(erc165::supports_erc165(target))
-+        assert(erc165::supports_interface(target, interface_id: 0x12345678))
-+        assert(!erc165::supports_interface(target, interface_id: 0xffffffff))
-+        assert(!erc165::supports_erc165(plain))
-+        assert(!erc165::supports_interface(plain, interface_id: 0x12345678))
-+        assert(!erc165::supports_erc165(Address { inner: 0x1234 }))
-+    }
-+}
-+
-+#[test]
-+fn address_from_word_truncates() {
-+    assert(Address::from_word_truncate(u256::max()).inner == (1 << 160) - 1)
-+    assert(Address::from_word_truncate((5 << 160) | 7).inner == 7)
 +}
 diff --git a/crates/fmt/src/ast/expr.rs b/crates/fmt/src/ast/expr.rs
 index 21125c422..9b5ace430 100644
@@ -5562,176 +4275,8 @@ index c9c6989de..fce649550 100644
          };
  
          let error_code = GlobalErrorCode::new(DiagnosticPass::ErrorLower, code);
-diff --git a/crates/hir/src/analysis/semantic/borrowck/check.rs b/crates/hir/src/analysis/semantic/borrowck/check.rs
-index b3e4e7adc..4cd39c51a 100644
---- a/crates/hir/src/analysis/semantic/borrowck/check.rs
-+++ b/crates/hir/src/analysis/semantic/borrowck/check.rs
-@@ -578,7 +578,7 @@ mod tests {
-                     source::SourceExpr,
-                     value::{ValueInterner, ValueLimits},
-                 },
--                check_semantic_boundaries,
-+                check_semantic_boundaries, root_semantic_instance_key,
-             },
-             ty::{ProviderAddressSpace, corelib::MemoryAccessKind},
-         },
-@@ -859,4 +859,154 @@ fn storage(_ raw: u256) -> Ptr<AddressSpace::Storage> {
-             }
-         }
-     }
-+
-+    #[test]
-+    fn entry_functions_share_callee_instances_reached_through_trait_effects() {
-+        let source = r#"
-+trait Ops {
-+    fn get(self) -> u256
-+}
-+trait Other {
-+    fn other(self) -> u256
-+}
-+fn leaf() -> u256 uses (ops: Ops) {
-+    ops.get()
-+}
-+fn middle() -> u256 uses (ops: Ops) {
-+    leaf() + leaf()
-+}
-+fn root_a() -> u256 uses (other: Other, ops: Ops) {
-+    middle() + other.other()
-+}
-+fn root_b() -> u256 uses (ops: Ops, other: Other) {
-+    middle()
-+}
-+"#;
-+        let mut db = HirAnalysisTestDb::default();
-+        let file = db.new_stand_alone("shared_callees.fe".into(), source);
-+        let (top_mod, _) = db.top_mod(file);
-+        db.assert_no_diags(top_mod);
-+        let callees_of = |caller: &str, callee: &str| {
-+            let callee = BodyOwner::Func(find_func(&db, top_mod, callee));
-+            let root = get_or_build_semantic_instance(
-+                &db,
-+                identity_semantic_instance_key(
-+                    &db,
-+                    BodyOwner::Func(find_func(&db, top_mod, caller)),
-+                ),
-+            );
-+            // Abstract trait methods leave the check pending, not failed.
-+            assert!(matches!(
-+                semantic_borrow_check_query(&db, root),
-+                SemanticBorrowCheckResult::Ok | SemanticBorrowCheckResult::Pending(_)
-+            ));
-+            root.call_sites(&db)
-+                .iter()
-+                .flatten()
-+                .filter_map(|site| site.callee)
-+                .map(|site| site.key)
-+                .filter(|key| key.owner(&db) == callee)
-+                .collect::<Vec<_>>()
-+        };
-+        // Both entry functions supply `ops` from a differently positioned
-+        // `uses` parameter and carry an unrelated `Other` effect, yet reach
-+        // the same `middle` instance, which in turn reaches `leaf` once.
-+        let from_a = callees_of("root_a", "middle");
-+        assert_eq!(from_a.len(), 1);
-+        assert_eq!(from_a, callees_of("root_b", "middle"));
-+        let middle = get_or_build_semantic_instance(&db, from_a[0]);
-+        let leaves = middle
-+            .call_sites(&db)
-+            .iter()
-+            .flatten()
-+            .filter_map(|site| site.callee)
-+            .map(|site| site.key)
-+            .filter(|key| key.owner(&db) == BodyOwner::Func(find_func(&db, top_mod, "leaf")))
-+            .collect::<FxHashSet<_>>();
-+        assert_eq!(leaves.len(), 1);
-+        // Checking `middle` as an entry function reaches the same `leaf`.
-+        assert_eq!(
-+            callees_of("middle", "leaf")
-+                .into_iter()
-+                .collect::<FxHashSet<_>>(),
-+            leaves
-+        );
-+    }
-+
-+    #[test]
-+    fn receive_arms_share_callee_instances_reached_through_the_runtime_provider() {
-+        let source = r#"
-+use std::evm::RawOps
-+
-+msg Counter {
-+    #[selector = 1]
-+    Get -> u256,
-+    #[selector = 2]
-+    Bump -> u256,
-+}
-+
-+fn read(_ slot: u256) -> u256 uses (ops: RawOps) {
-+    ops.sload(slot)
-+}
-+
-+fn bump(_ slot: u256) -> u256 uses (ops: mut RawOps) {
-+    let value = read(slot) + 1
-+    ops.sstore(slot, value)
-+    value
-+}
-+
-+pub contract C {
-+    recv Counter {
-+        Get -> u256 uses (ops: mut RawOps) {
-+            bump(0)
-+        }
-+        Bump -> u256 uses (ops: mut RawOps) {
-+            bump(1)
-+        }
-+    }
-+}
-+"#;
-+        let mut db = HirAnalysisTestDb::default();
-+        let file = db.new_stand_alone("shared_arm_callees.fe".into(), source);
-+        let (top_mod, _) = db.top_mod(file);
-+        db.assert_no_diags(top_mod);
-+        let contract = top_mod
-+            .all_contracts(&db)
-+            .first()
-+            .copied()
-+            .expect("missing contract");
-+        let bump = BodyOwner::Func(find_func(&db, top_mod, "bump"));
-+        let callees_of = |key| {
-+            let arm = get_or_build_semantic_instance(&db, key);
-+            arm.call_sites(&db)
-+                .iter()
-+                .flatten()
-+                .filter_map(|site| site.callee)
-+                .map(|site| site.key)
-+                .filter(|key| key.owner(&db) == bump)
-+                .collect::<Vec<_>>()
-+        };
-+        let arm = |arm_idx| BodyOwner::ContractRecvArm {
-+            contract,
-+            recv_idx: 0,
-+            arm_idx,
-+        };
-+        let checked = [0, 1].map(|arm_idx| {
-+            let key = identity_semantic_instance_key(&db, arm(arm_idx));
-+            assert_eq!(
-+                semantic_borrow_check_query(&db, get_or_build_semantic_instance(&db, key)),
-+                SemanticBorrowCheckResult::Ok
-+            );
-+            callees_of(key)
-+        });
-+        assert_eq!(checked[0].len(), 1);
-+        assert_eq!(checked[0], checked[1]);
-+        // Code generation roots keep one instance per arm.
-+        let generated = [0, 1].map(|arm_idx| {
-+            callees_of(root_semantic_instance_key(&db, arm(arm_idx)).expect("arm root"))
-+        });
-+        assert_eq!(generated[0].len(), 1);
-+        assert_ne!(generated[0], generated[1]);
-+        assert!(!generated[0].contains(&checked[0][0]));
-+    }
- }
 diff --git a/crates/hir/src/analysis/semantic/borrowck/summary.rs b/crates/hir/src/analysis/semantic/borrowck/summary.rs
-index bd31804f9..dadd8d0e8 100644
+index 769895654..ed2f1713a 100644
 --- a/crates/hir/src/analysis/semantic/borrowck/summary.rs
 +++ b/crates/hir/src/analysis/semantic/borrowck/summary.rs
 @@ -527,7 +527,10 @@ impl<'db> Borrowck<'db> {
@@ -5746,7 +4291,7 @@ index bd31804f9..dadd8d0e8 100644
                          ExternalOrigin::Provider {
                              provider,
                              target_ty,
-@@ -2472,6 +2475,84 @@ impl<'db> Borrowck<'db> {
+@@ -2490,6 +2493,84 @@ impl<'db> Borrowck<'db> {
          SourceInstantiations::new(state, result, inputs).resolve(self, source, scope)
      }
  
@@ -5831,7 +4376,7 @@ index bd31804f9..dadd8d0e8 100644
      fn instantiate_source_uncached(
          &mut self,
          source: &SourceExpr<'db>,
-@@ -2533,12 +2614,11 @@ impl<'db> Borrowck<'db> {
+@@ -2551,12 +2632,11 @@ impl<'db> Borrowck<'db> {
          }
          let (mut resolved, mut target_ty) = match &external.origin {
              ExternalOrigin::OpaqueMemory => {
@@ -5849,7 +4394,7 @@ index bd31804f9..dadd8d0e8 100644
                  return Ok(Resolution {
                      invalidated: if invalidated {
                          NativeValidity::from_region(&region)
-@@ -2580,76 +2660,7 @@ impl<'db> Borrowck<'db> {
+@@ -2598,76 +2678,7 @@ impl<'db> Borrowck<'db> {
                      self.calls[&result].single_result_port,
                  )?;
                  let ty = source.contract.ty;
@@ -6223,520 +4768,6 @@ index 4ed359c0f..5c02f71a8 100644
              && !expected_ty.has_hole(db)
              && actual_ty != expected_ty
              && const_identity_ty(db, actual_ty) != const_identity_ty(db, expected_ty)
-diff --git a/crates/hir/src/analysis/semantic/instance/const_ref.rs b/crates/hir/src/analysis/semantic/instance/const_ref.rs
-index 21fdb1604..5adc28b07 100644
---- a/crates/hir/src/analysis/semantic/instance/const_ref.rs
-+++ b/crates/hir/src/analysis/semantic/instance/const_ref.rs
-@@ -2,6 +2,7 @@ use super::{
-     EffectProviderSubst, GenericSubst, ImplEnv, SemanticInstance, SemanticInstanceKey,
-     provisional_provider_binding_for_instance_effect, provisional_provider_idx_for_requirement,
-     resolved_effect_binding_ty_for_instance_effect, resolved_provider_binding_for_instance_effect,
-+    share_callee_key,
- };
- use crate::{
-     analysis::{
-@@ -712,12 +713,15 @@ fn semantic_callee_key_with_assumptions<'db>(
-     }
-     Ok(Some(SemanticCallCallee {
-         concrete_dispatch: callable.trait_inst().is_none() || selected_impl,
--        key: SemanticInstanceKey::new(
-+        key: share_callee_key(
-             db,
--            owner,
--            GenericSubst::for_owner(db, body_func.into(), subst_args),
--            EffectProviderSubst::new(db, effect_providers),
--            impl_env,
-+            SemanticInstanceKey::new(
-+                db,
-+                owner,
-+                GenericSubst::for_owner(db, body_func.into(), subst_args),
-+                EffectProviderSubst::new(db, effect_providers),
-+                impl_env,
-+            ),
-         ),
-         effect_pairs,
-         provider_pairs,
-diff --git a/crates/hir/src/analysis/semantic/instance/mod.rs b/crates/hir/src/analysis/semantic/instance/mod.rs
-index ea26f2fc8..d962fcd37 100644
---- a/crates/hir/src/analysis/semantic/instance/mod.rs
-+++ b/crates/hir/src/analysis/semantic/instance/mod.rs
-@@ -15,7 +15,9 @@ pub use semantic::{
-     root_semantic_instance_key, semantic_layout_bundle_signature,
-     validate_instantiated_effect_env_key,
- };
--pub(crate) use semantic::{CallSiteProviderRefinement, SemanticBodyAdmissionError};
-+pub(crate) use semantic::{
-+    CallSiteProviderRefinement, SemanticBodyAdmissionError, share_callee_key,
-+};
- pub(crate) use semantic::{
-     provisional_provider_binding_for_instance_effect, provisional_provider_idx_for_requirement,
-     resolved_effect_binding_ty_for_instance_effect, semantic_instance_base_assumptions_for_key,
-diff --git a/crates/hir/src/analysis/semantic/instance/semantic.rs b/crates/hir/src/analysis/semantic/instance/semantic.rs
-index 70f4a2433..b35b86619 100644
---- a/crates/hir/src/analysis/semantic/instance/semantic.rs
-+++ b/crates/hir/src/analysis/semantic/instance/semantic.rs
-@@ -1719,19 +1719,459 @@ pub fn root_semantic_instance_key<'db>(
-     Ok(key)
- }
- 
-+/// The generic instance of `owner`, which checks its body for every
-+/// instantiation.
-+///
-+/// Its parameters stay symbolic, but nothing in it names the entry point that
-+/// supplies an effect, so entry points with the same effect shape reach the
-+/// same callee instances (see [`share_callee_key`]):
-+/// - the hidden provider parameter of each trait-keyed effect of a function
-+///   (`uses (ops: mut RawOps)`) is renamed to a placeholder shared across
-+///   functions, named after the trait and its occurrence among the
-+///   function's effects of that trait;
-+/// - a receive arm's root provider is named by its contract rather than the
-+///   arm.
- pub fn identity_semantic_instance_key<'db>(
-     db: &'db dyn HirAnalysisDb,
-     owner: BodyOwner<'db>,
- ) -> SemanticInstanceKey<'db> {
--    SemanticInstanceKey::new(
-+    shared_provider_identity_key(db, owner).unwrap_or_else(|| {
-+        SemanticInstanceKey::new(
-+            db,
-+            owner,
-+            GenericSubst::for_body_owner(db, owner, Vec::new()),
-+            EffectProviderSubst::empty(db),
-+            ImplEnv::empty(db, owner.scope()),
-+        )
-+    })
-+}
-+
-+fn shared_provider_identity_key<'db>(
-+    db: &'db dyn HirAnalysisDb,
-+    owner: BodyOwner<'db>,
-+) -> Option<SemanticInstanceKey<'db>> {
-+    let func = match owner {
-+        BodyOwner::Func(func) => func,
-+        BodyOwner::ContractRecvArm { contract, .. } => {
-+            return shared_recv_arm_identity_key(db, owner, contract);
-+        }
-+        BodyOwner::Const(_) | BodyOwner::AnonConstBody { .. } | BodyOwner::ContractInit { .. } => {
-+            return None;
-+        }
-+    };
-+    let args = shared_effect_provider_args(db, func)?;
-+    let site = EffectParamSite::Func(func);
-+    let view = EffectEnvView::new(site);
-+    let requirements = view.requirements(db);
-+    let unspecialized = SemanticInstanceKey::new(
-         db,
-         owner,
--        GenericSubst::for_body_owner(db, owner, Vec::new()),
-+        GenericSubst::for_owner(db, func.into(), args),
-         EffectProviderSubst::empty(db),
-         ImplEnv::empty(db, owner.scope()),
-+    );
-+    // Provider bindings are carried explicitly, as call sites do, so that both
-+    // provisional and final provider resolution see the placeholder types.
-+    let all_providers = view.providers(db);
-+    let resolves_other_source = view.resolutions(db).iter().any(|resolution| {
-+        all_providers.iter().any(|provider| {
-+            provider.provider_idx == resolution.provider_idx
-+                && !matches!(provider.source, ProviderSource::UsesParam { .. })
-+        })
-+    });
-+    if resolves_other_source {
-+        return None;
-+    }
-+    let mut providers = Vec::new();
-+    for provider in all_providers {
-+        let ProviderSource::UsesParam {
-+            requirement_idx, ..
-+        } = provider.source
-+        else {
-+            continue;
-+        };
-+        let requirement = requirements
-+            .iter()
-+            .find(|requirement| requirement.binding_idx == requirement_idx)?;
-+        let instantiated =
-+            instantiate_provider_binding(db, unspecialized, provider.clone()).ok()?;
-+        providers.push(EffectProviderSpecialization {
-+            provenance: EffectProviderProvenance::Binding {
-+                owner,
-+                binding: LocalBinding::EffectParam {
-+                    site,
-+                    idx: requirement_idx as usize,
-+                    binding_name: requirement.binding_name,
-+                    provider_idx: provider.provider_idx,
-+                    is_mut: requirement.is_mut,
-+                },
-+            },
-+            provider: instantiated,
-+        });
-+    }
-+    let key = SemanticInstanceKey::new(
-+        db,
-+        owner,
-+        unspecialized.subst(db),
-+        EffectProviderSubst::new(db, providers),
-+        unspecialized.impl_env(db),
-+    );
-+    validate_instantiated_effect_env_key(db, key).ok()?;
-+    Some(key)
-+}
-+
-+/// A receive arm's root provider is the contract's runtime object. Every arm
-+/// runs in its own call, so the arms of a contract can name that object the
-+/// same way; it is re-rooted at the contract. Its registration keeps the arm
-+/// site kind, so it cannot coincide with a contract-level root provider.
-+fn shared_recv_arm_identity_key<'db>(
-+    db: &'db dyn HirAnalysisDb,
-+    owner: BodyOwner<'db>,
-+    contract: crate::hir_def::Contract<'db>,
-+) -> Option<SemanticInstanceKey<'db>> {
-+    let site = effect_param_site(owner)?;
-+    let view = EffectEnvView::new(site);
-+    let requirements = view.requirements(db);
-+    let resolutions = view.resolutions(db);
-+    let unspecialized = SemanticInstanceKey::new(
-+        db,
-+        owner,
-+        GenericSubst::none(db),
-+        EffectProviderSubst::empty(db),
-+        ImplEnv::empty(db, owner.scope()),
-+    );
-+    let mut providers = Vec::new();
-+    for provider in view.providers(db) {
-+        let ProviderSource::RootProvider {
-+            site: provider_site,
-+            registration,
-+        } = provider.source.clone()
-+        else {
-+            continue;
-+        };
-+        if provider_site != site {
-+            continue;
-+        }
-+        // Name the provider by the first effect it resolves.
-+        let Some(requirement) = resolutions
-+            .iter()
-+            .filter(|resolution| resolution.provider_idx == provider.provider_idx)
-+            .find_map(|resolution| {
-+                requirements
-+                    .iter()
-+                    .find(|requirement| requirement.binding_idx == resolution.requirement_idx)
-+            })
-+        else {
-+            continue;
-+        };
-+        let instantiated =
-+            instantiate_provider_binding(db, unspecialized, provider.clone()).ok()?;
-+        providers.push(EffectProviderSpecialization {
-+            provenance: EffectProviderProvenance::Binding {
-+                owner,
-+                binding: LocalBinding::EffectParam {
-+                    site,
-+                    idx: requirement.binding_idx as usize,
-+                    binding_name: requirement.binding_name,
-+                    provider_idx: provider.provider_idx,
-+                    is_mut: requirement.is_mut,
-+                },
-+            },
-+            provider: ProviderBinding {
-+                source: ProviderSource::RootProvider {
-+                    site: EffectParamSite::Contract(contract),
-+                    registration,
-+                },
-+                ..instantiated
-+            },
-+        });
-+    }
-+    if providers.is_empty() {
-+        return None;
-+    }
-+    let key = SemanticInstanceKey::new(
-+        db,
-+        owner,
-+        unspecialized.subst(db),
-+        EffectProviderSubst::new(db, providers),
-+        unspecialized.impl_env(db),
-+    );
-+    validate_instantiated_effect_env_key(db, key).ok()?;
-+    Some(key)
-+}
-+
-+/// Generic arguments for `func` that replace each trait-keyed effect's hidden
-+/// provider parameter by a placeholder shared across functions. Returns `None`
-+/// when no parameter can be replaced.
-+///
-+/// Placeholders are distinct within one function (the trait plus an ordinal),
-+/// so the substitution is a renaming. Placeholders of different functions may
-+/// coincide; instance keys still carry every assumption about them.
-+fn shared_effect_provider_args<'db>(
-+    db: &'db dyn HirAnalysisDb,
-+    func: crate::hir_def::Func<'db>,
-+) -> Option<Vec<TyId<'db>>> {
-+    let params = CallableDef::Func(func).params(db);
-+    let requirements = EffectEnvView::new(EffectParamSite::Func(func)).requirements(db);
-+    let mut args = params.to_vec();
-+    let mut ordinals: FxHashMap<crate::hir_def::Trait<'db>, usize> = FxHashMap::default();
-+    let mut changed = false;
-+    for (effect_idx, param_idx) in place_effect_provider_param_index_map(db, func)
-+        .iter()
-+        .enumerate()
-+        .filter_map(|(effect_idx, param_idx)| param_idx.map(|param_idx| (effect_idx, param_idx)))
-+    {
-+        let Some(requirement) = requirements
-+            .iter()
-+            .find(|requirement| requirement.binding_idx as usize == effect_idx)
-+        else {
-+            continue;
-+        };
-+        let EffectRequirementKey::Trait(trait_inst) = requirement.key else {
-+            continue;
-+        };
-+        let Some(&param_ty) = params.get(param_idx) else {
-+            continue;
-+        };
-+        let is_own_provider_param = matches!(
-+            param_ty.data(db),
-+            crate::analysis::ty::ty_def::TyData::TyParam(param)
-+                if param.is_effect_provider() && param.owner == func.scope()
-+        );
-+        // Other trait arguments must not name this function's parameters,
-+        // or the placeholder's bound would depend on them.
-+        let closed = trait_inst.args(db)[1..]
-+            .iter()
-+            .chain(trait_inst.assoc_type_bindings(db).values())
-+            .all(|ty| !ty.has_param(db) && !ty.has_var(db) && !ty.has_invalid(db));
-+        let trait_ = trait_inst.def(db);
-+        let Some(name) = trait_.name(db).to_opt() else {
-+            continue;
-+        };
-+        // The canonical requirement leaves `Self` unfilled; the provider
-+        // parameter mapped to this effect supplies it.
-+        let self_ty = trait_inst.self_ty(db);
-+        let self_is_param = self_ty == param_ty || self_ty.has_invalid(db);
-+        if !self_is_param || !is_own_provider_param || !closed {
-+            continue;
-+        }
-+        let ordinal = ordinals.entry(trait_).or_default();
-+        // The placeholder is owned by the trait's module: a module owns no
-+        // generic parameters, so no substitution schema can claim it.
-+        args[param_idx] = crate::analysis::ty::ty_def::TyParam::effect_provider_param(
-+            name,
-+            *ordinal,
-+            trait_.top_mod(db).scope(),
-+        )
-+        .ty(db);
-+        *ordinal += 1;
-+        changed = true;
-+    }
-+    changed.then_some(args)
-+}
-+
-+/// Removes the identity of the entry function from a callee key reached from
-+/// a checking root (see [`identity_semantic_instance_key`]), so that equal
-+/// work reached from different entry functions shares one instance.
-+///
-+/// Such a key names the entry function in places that do not affect the
-+/// callee's analysis:
-+/// - a provider's `uses` source site, an identity token that callers resolve
-+///   back to their own effect arguments through the callee's effect
-+///   environment; it is re-rooted at the callee's own `uses` parameter for
-+///   that slot. Contract fields and root providers name one object wherever
-+///   they occur and are kept;
-+/// - a provider's provenance, which names the caller's binding;
-+/// - the proof environment, whose normalization scope only selects an ingot
-+///   and whose assumptions may constrain parameters the key never mentions.
-+///
-+/// Providers the caller supplies from its own locals already carry the
-+/// callee's source and keep their provenance. Keys reached from code
-+/// generation roots are left unchanged, as are keys where two providers share
-+/// a `uses` source (re-rooting would split an alias).
-+pub(crate) fn share_callee_key<'db>(
-+    db: &'db dyn HirAnalysisDb,
-+    key: SemanticInstanceKey<'db>,
-+) -> SemanticInstanceKey<'db> {
-+    let BodyOwner::Func(func) = key.owner(db) else {
-+        return key;
-+    };
-+    let specializations = key.effect_providers(db).providers(db);
-+    if !specializations
-+        .iter()
-+        .any(|specialization| is_shared_root_provider(db, &specialization.provider))
-+    {
-+        return key;
-+    }
-+    let site = EffectParamSite::Func(func);
-+    let view = EffectEnvView::new(site);
-+    let canonical_providers = view.providers(db);
-+    let requirements = view.requirements(db);
-+    let mut sources = FxHashSet::default();
-+    let mut providers = Vec::with_capacity(specializations.len());
-+    for specialization in specializations {
-+        if matches!(
-+            specialization.provider.source,
-+            ProviderSource::UsesParam { site: source_site, .. } if source_site == site
-+        ) {
-+            providers.push(specialization.clone());
-+            continue;
-+        }
-+        let Some(canonical) = canonical_providers
-+            .iter()
-+            .find(|provider| provider.provider_idx == specialization.provider.provider_idx)
-+        else {
-+            return key;
-+        };
-+        let ProviderSource::UsesParam {
-+            requirement_idx, ..
-+        } = canonical.source
-+        else {
-+            return key;
-+        };
-+        let Some(requirement) = requirements
-+            .iter()
-+            .find(|requirement| requirement.binding_idx == requirement_idx)
-+        else {
-+            return key;
-+        };
-+        let source = match &specialization.provider.source {
-+            ProviderSource::UsesParam { .. } => {
-+                if !sources.insert(specialization.provider.source.clone()) {
-+                    return key;
-+                }
-+                canonical.source.clone()
-+            }
-+            source @ (ProviderSource::ContractField { .. }
-+            | ProviderSource::RootProvider { .. }) => source.clone(),
-+        };
-+        providers.push(EffectProviderSpecialization {
-+            provider: ProviderBinding {
-+                source,
-+                ..specialization.provider.clone()
-+            },
-+            provenance: EffectProviderProvenance::Binding {
-+                owner: BodyOwner::Func(func),
-+                binding: LocalBinding::EffectParam {
-+                    site,
-+                    idx: requirement_idx as usize,
-+                    binding_name: requirement.binding_name,
-+                    provider_idx: canonical.provider_idx,
-+                    is_mut: requirement.is_mut,
-+                },
-+            },
-+        });
-+    }
-+
-+    let impl_env = key.impl_env(db);
-+    let caller_scope = impl_env.normalization_scope(db);
-+    // Trait solving and normalization consult the scope only for its ingot.
-+    let scope = if caller_scope.ingot(db) == func.scope().ingot(db) {
-+        func.scope()
-+    } else {
-+        caller_scope
-+    };
-+    let mut relevant = FxHashSet::default();
-+    collect_ty_params(db, &key.subst(db).generic_args(db), &mut relevant);
-+    collect_ty_params(db, &providers, &mut relevant);
-+    // A predicate over parameters the key never mentions cannot help prove a
-+    // goal about the callee's types. Ground predicates are kept.
-+    let is_relevant = |pred: &crate::analysis::ty::trait_def::TraitInstId<'db>| {
-+        let mut params = FxHashSet::default();
-+        collect_ty_params(db, pred, &mut params);
-+        params.is_empty() || !params.is_disjoint(&relevant)
-+    };
-+    let assumptions = impl_env
-+        .assumptions(db)
-+        .list(db)
-+        .iter()
-+        .copied()
-+        .filter(is_relevant)
-+        .collect::<Vec<_>>();
-+    let witnesses = impl_env
-+        .witnesses(db)
-+        .iter()
-+        .copied()
-+        .filter(is_relevant)
-+        .collect::<Vec<_>>();
-+    let assumptions = if assumptions.len() == impl_env.assumptions(db).list(db).len() {
-+        impl_env.assumptions(db)
-+    } else {
-+        PredicateListId::new(db, assumptions)
-+    };
-+    SemanticInstanceKey::new(
-+        db,
-+        key.owner(db),
-+        key.subst(db),
-+        EffectProviderSubst::new(db, providers),
-+        ImplEnv::new(db, scope, assumptions, witnesses),
-     )
- }
- 
-+/// Whether `provider` can only come from a checking root: its type mentions
-+/// a shared provider placeholder, or it is a receive arm's runtime object
-+/// re-rooted at the contract.
-+fn is_shared_root_provider<'db>(
-+    db: &'db dyn HirAnalysisDb,
-+    provider: &ProviderBinding<'db>,
-+) -> bool {
-+    if let ProviderSource::RootProvider {
-+        site: EffectParamSite::Contract(_),
-+        registration,
-+    } = &provider.source
-+        && registration.site_kind
-+            == crate::analysis::ty::provider::RootProviderSiteKind::ContractRecvArm
-+    {
-+        return true;
-+    }
-+    let mut params = FxHashSet::default();
-+    collect_ty_params(db, &provider.provider_ty, &mut params);
-+    if let Some(target_ty) = provider.semantics.target_ty {
-+        collect_ty_params(db, &target_ty, &mut params);
-+    }
-+    params.iter().any(is_shared_provider_placeholder)
-+}
-+
-+/// Shared provider placeholders are the only effect provider parameters owned
-+/// by a module; see [`shared_effect_provider_args`].
-+fn is_shared_provider_placeholder(param: &crate::analysis::ty::ty_def::TyParam<'_>) -> bool {
-+    param.is_effect_provider()
-+        && matches!(
-+            param.owner,
-+            ScopeId::Item(crate::hir_def::ItemKind::TopMod(_))
-+        )
-+}
-+
-+fn collect_ty_params<'db, T>(
-+    db: &'db dyn HirAnalysisDb,
-+    value: &T,
-+    params: &mut FxHashSet<crate::analysis::ty::ty_def::TyParam<'db>>,
-+) where
-+    T: crate::analysis::ty::visitor::TyVisitable<'db> + ?Sized,
-+{
-+    struct Collector<'a, 'db> {
-+        db: &'db dyn HirAnalysisDb,
-+        params: &'a mut FxHashSet<crate::analysis::ty::ty_def::TyParam<'db>>,
-+    }
-+    impl<'db> crate::analysis::ty::visitor::TyVisitor<'db> for Collector<'_, 'db> {
-+        fn db(&self) -> &'db dyn HirAnalysisDb {
-+            self.db
-+        }
-+        fn visit_param(&mut self, param: &crate::analysis::ty::ty_def::TyParam<'db>) {
-+            self.params.insert(param.clone());
-+        }
-+        fn visit_const_param(
-+            &mut self,
-+            param: &crate::analysis::ty::ty_def::TyParam<'db>,
-+            ty: TyId<'db>,
-+        ) {
-+            self.params.insert(param.clone());
-+            self.visit_ty(ty);
-+        }
-+    }
-+    value.visit_with(&mut Collector { db, params });
-+}
-+
- #[salsa::tracked]
- pub fn get_or_build_semantic_instance<'db>(
-     db: &'db dyn HirAnalysisDb,
 diff --git a/crates/hir/src/analysis/semantic/lower/body.rs b/crates/hir/src/analysis/semantic/lower/body.rs
 index 1234ca7f4..743893af5 100644
 --- a/crates/hir/src/analysis/semantic/lower/body.rs
@@ -6958,22 +4989,6 @@ index 94c4a6ee2..061a3265f 100644
      }
  
      fn missing_place_issue(
-diff --git a/crates/hir/src/analysis/ty/ty_def.rs b/crates/hir/src/analysis/ty/ty_def.rs
-index aa813ef2c..e3840a775 100644
---- a/crates/hir/src/analysis/ty/ty_def.rs
-+++ b/crates/hir/src/analysis/ty/ty_def.rs
-@@ -1478,6 +1478,11 @@ impl<'db> TyParam<'db> {
-         }
- 
-         if self.is_effect_provider() {
-+            // A provider placeholder shared across functions is named after
-+            // its effect trait.
-+            if let ItemKind::TopMod(_) = self.owner.item() {
-+                return self.name.data(db).to_string();
-+            }
-             if let ItemKind::Func(func) = self.owner.item() {
-                 let provider_map = place_effect_provider_param_index_map(db, func);
-                 for effect in func.effect_params(db) {
 diff --git a/crates/hir/src/core/lower/abi_struct.rs b/crates/hir/src/core/lower/abi_struct.rs
 new file mode 100644
 index 000000000..734a063ea
@@ -8140,17 +6155,17 @@ index 7af8a1fec..387730c49 100644
 +399 │     where T: Encode<A> + AbiSize
      │                          ------- required by this bound on `encode_field_at`
 diff --git a/crates/uitest/fixtures/ty_check/event_too_many_data_fields.snap b/crates/uitest/fixtures/ty_check/event_too_many_data_fields.snap
-index 00f717745..fbd51e809 100644
+index e37eae828..fbd51e809 100644
 --- a/crates/uitest/fixtures/ty_check/event_too_many_data_fields.snap
 +++ b/crates/uitest/fixtures/ty_check/event_too_many_data_fields.snap
 @@ -15,9 +15,9 @@ error[6-0003]: trait bound is not satisfied
   25 │ │ }
      │ ╰─^ `(u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256)` doesn't implement `Encode<Sol>`
      │
--    ┌─ src/evm/effects.fe:466:14
+-    ┌─ src/evm/effects.fe:472:14
 +    ┌─ src/evm/effects.fe:473:14
      │
--466 │     where T: Encode<Sol> + AbiSize
+-472 │     where T: Encode<Sol> + AbiSize
 +473 │     where T: Encode<Sol> + AbiSize
      │              ----------- required by this bound on `encode_abi_payload`
  
@@ -8159,24 +6174,24 @@ index 00f717745..fbd51e809 100644
   25 │ │ }
      │ ╰─^ `(u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256, u256)` doesn't implement `AbiSize`
      │
--    ┌─ src/evm/effects.fe:466:28
+-    ┌─ src/evm/effects.fe:472:28
 +    ┌─ src/evm/effects.fe:473:28
      │
--466 │     where T: Encode<Sol> + AbiSize
+-472 │     where T: Encode<Sol> + AbiSize
 +473 │     where T: Encode<Sol> + AbiSize
      │                            ------- required by this bound on `encode_abi_payload`
 diff --git a/crates/uitest/fixtures/ty_check/event_unsupported_field_type.snap b/crates/uitest/fixtures/ty_check/event_unsupported_field_type.snap
-index 7980ce7e2..c4d7c6431 100644
+index 135a42e54..c4d7c6431 100644
 --- a/crates/uitest/fixtures/ty_check/event_unsupported_field_type.snap
 +++ b/crates/uitest/fixtures/ty_check/event_unsupported_field_type.snap
 @@ -12,9 +12,9 @@ error[6-0003]: trait bound is not satisfied
    6 │ │ }
      │ ╰─^ `(StorageMap<Address, u256, 0>)` doesn't implement `Encode<Sol>`
      │
--    ┌─ src/evm/effects.fe:466:14
+-    ┌─ src/evm/effects.fe:472:14
 +    ┌─ src/evm/effects.fe:473:14
      │
--466 │     where T: Encode<Sol> + AbiSize
+-472 │     where T: Encode<Sol> + AbiSize
 +473 │     where T: Encode<Sol> + AbiSize
      │              ----------- required by this bound on `encode_abi_payload`
  
@@ -8185,10 +6200,10 @@ index 7980ce7e2..c4d7c6431 100644
    6 │ │ }
      │ ╰─^ `(StorageMap<Address, u256, 0>)` doesn't implement `AbiSize`
      │
--    ┌─ src/evm/effects.fe:466:28
+-    ┌─ src/evm/effects.fe:472:28
 +    ┌─ src/evm/effects.fe:473:28
      │
--466 │     where T: Encode<Sol> + AbiSize
+-472 │     where T: Encode<Sol> + AbiSize
 +473 │     where T: Encode<Sol> + AbiSize
      │                            ------- required by this bound on `encode_abi_payload`
 diff --git a/crates/uitest/fixtures/ty_check/msg_selector_malformed_signature.fe b/crates/uitest/fixtures/ty_check/msg_selector_malformed_signature.fe
@@ -8479,76 +6494,6 @@ index 6d28afcdd..403c5d206 100644
          self.return_bytes(data: out.span())
      }
  }
-diff --git a/ingots/core/src/text.fe b/ingots/core/src/text.fe
-index 85df08402..e5b3afc01 100644
---- a/ingots/core/src/text.fe
-+++ b/ingots/core/src/text.fe
-@@ -115,3 +115,65 @@ fn base64_digit(_ value: u8) -> u8 {
-         47
-     }
- }
-+
-+/// Concatenate a runtime-length slice of strings with one output allocation.
-+/// Payloads are copied as bytes; no UTF-8 validation or normalization is done.
-+pub fn concat_slice(_ parts: ptr::MemSlice<DynString>) -> DynString {
-+    let mut len: u256 = 0
-+    let mut i: u256 = 0
-+    while i < parts.len() {
-+        len += (*parts.ptr_at(i)).len()
-+        i += 1
-+    }
-+    let out = DynString::zeroed(len)
-+    let mut offset: u256 = 0
-+    i = 0
-+    while i < parts.len() {
-+        let part = (*parts.ptr_at(i)).payload_span()
-+        ptr::copy(
-+            dest: ptr::offset_bytes(out.payload_span().ptr(), offset),
-+            source: part,
-+        )
-+        offset += part.len()
-+        i += 1
-+    }
-+    out
-+}
-+
-+/// Incremental byte-preserving text construction. Capacity grows geometrically
-+/// through `MemBuffer`; finishing copies the result into an ABI string once.
-+/// No reference into the growable backing allocation is exposed.
-+/// Append operations consume and return the builder: `builder = builder.push(part)`.
-+#[must_use]
-+pub struct TextBuilder { buffer: ptr::MemBuffer }
-+
-+impl TextBuilder {
-+    pub fn new() -> Self {
-+        Self { buffer: ptr::MemBuffer::empty() }
-+    }
-+    pub fn with_capacity(_ capacity: u256) -> Self {
-+        Self { buffer: ptr::MemBuffer::with_capacity(capacity) }
-+    }
-+    pub fn len(self) -> u256 {
-+        self.buffer.len()
-+    }
-+    pub fn is_empty(self) -> bool {
-+        self.buffer.is_empty()
-+    }
-+
-+    /// Append a string without copying the already accumulated prefix unless
-+    /// the buffer must grow.
-+    pub fn push(own self, _ value: DynString) -> Self {
-+        self.push_bytes(value.payload_span())
-+    }
-+
-+    /// Append arbitrary bytes, including zero bytes and non-UTF-8 sequences.
-+    pub fn push_bytes(own self, _ value: MemSpan) -> Self {
-+        let mut buffer = self.buffer
-+        buffer.extend_from(value)
-+        Self { buffer }
-+    }
-+    pub fn finish(own self) -> DynString {
-+        DynString::from_payload(source: self.buffer.span())
-+    }
-+}
 diff --git a/ingots/std/src/abi.fe b/ingots/std/src/abi.fe
 index 03506fd74..16c0d7b34 100644
 --- a/ingots/std/src/abi.fe
@@ -8764,459 +6709,22 @@ index 97dcc3dd1..2c7447497 100644
      decode_field_from_prechecked_head<Sol, T, I>(input, base: base, head_pos: base, input_len: input_len)
  }
 diff --git a/ingots/std/src/abi/sol/ints.fe b/ingots/std/src/abi/sol/ints.fe
-index 14c044319..dbf05239a 100644
+index ee55d01ad..dbf05239a 100644
 --- a/ingots/std/src/abi/sol/ints.fe
 +++ b/ingots/std/src/abi/sol/ints.fe
 @@ -1,7 +1,7 @@
  use core::abi::{Abi, AbiDecoder, AbiSize, AbiSpan, ByteInput, Decode, Encode, store_word}
  use core::num::IntDowncast
  use core::ops::{WrappingAdd, WrappingMul, WrappingSub}
--use ingot::evm::{TopicValue, ops::{revert_empty, signextend}}
+-use ingot::evm::{SolPacked, StorageKey, TopicValue, ops::{revert_empty, signextend}}
 +use ingot::evm::{EncodePacked, Packed, RawMem, SolPacked, StorageKey, packed::write_word_prefix, TopicValue, ops::{revert_empty, signextend}}
  
  use super::types::{SolCompat, StaticAbiElement, StaticAbiElementSeal}
  
-@@ -89,6 +89,8 @@ fn decode_int_i256(word: u256, bits: u256) -> i256 {
+@@ -1585,6 +1585,23 @@ impl<T: SolWordRepr + SolInt> StorageKey for T {
+     }
  }
  
- pub trait SolWordRepr {
-+    /// Solidity bit width of the type.
-+    const BITS: u256
-     fn canonical_word(self) -> u256
- }
- 
-@@ -178,6 +180,7 @@ impl SolCompat for Uint24 {
- }
- impl SolWordRepr for Uint24 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 24) }
-+    const BITS: u256 = 24
- }
- 
- // Unsigned newtypes wrapping u64
-@@ -188,6 +191,7 @@ impl SolCompat for Uint40 {
- }
- impl SolWordRepr for Uint40 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 40) }
-+    const BITS: u256 = 40
- }
- pub struct Uint48 { pub val: u64 }
- impl SolCompat for Uint48 {
-@@ -196,6 +200,7 @@ impl SolCompat for Uint48 {
- }
- impl SolWordRepr for Uint48 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 48) }
-+    const BITS: u256 = 48
- }
- pub struct Uint56 { pub val: u64 }
- impl SolCompat for Uint56 {
-@@ -204,6 +209,7 @@ impl SolCompat for Uint56 {
- }
- impl SolWordRepr for Uint56 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 56) }
-+    const BITS: u256 = 56
- }
- 
- // Unsigned newtypes wrapping u128
-@@ -214,6 +220,7 @@ impl SolCompat for Uint72 {
- }
- impl SolWordRepr for Uint72 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 72) }
-+    const BITS: u256 = 72
- }
- pub struct Uint80 { pub val: u128 }
- impl SolCompat for Uint80 {
-@@ -222,6 +229,7 @@ impl SolCompat for Uint80 {
- }
- impl SolWordRepr for Uint80 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 80) }
-+    const BITS: u256 = 80
- }
- pub struct Uint88 { pub val: u128 }
- impl SolCompat for Uint88 {
-@@ -230,6 +238,7 @@ impl SolCompat for Uint88 {
- }
- impl SolWordRepr for Uint88 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 88) }
-+    const BITS: u256 = 88
- }
- pub struct Uint96 { pub val: u128 }
- impl SolCompat for Uint96 {
-@@ -238,6 +247,7 @@ impl SolCompat for Uint96 {
- }
- impl SolWordRepr for Uint96 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 96) }
-+    const BITS: u256 = 96
- }
- pub struct Uint104 { pub val: u128 }
- impl SolCompat for Uint104 {
-@@ -246,6 +256,7 @@ impl SolCompat for Uint104 {
- }
- impl SolWordRepr for Uint104 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 104) }
-+    const BITS: u256 = 104
- }
- pub struct Uint112 { pub val: u128 }
- impl SolCompat for Uint112 {
-@@ -254,6 +265,7 @@ impl SolCompat for Uint112 {
- }
- impl SolWordRepr for Uint112 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 112) }
-+    const BITS: u256 = 112
- }
- pub struct Uint120 { pub val: u128 }
- impl SolCompat for Uint120 {
-@@ -262,6 +274,7 @@ impl SolCompat for Uint120 {
- }
- impl SolWordRepr for Uint120 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val as u256, bits: 120) }
-+    const BITS: u256 = 120
- }
- 
- // Unsigned newtypes wrapping u256
-@@ -272,6 +285,7 @@ impl SolCompat for Uint136 {
- }
- impl SolWordRepr for Uint136 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 136) }
-+    const BITS: u256 = 136
- }
- pub struct Uint144 { pub val: u256 }
- impl SolCompat for Uint144 {
-@@ -280,6 +294,7 @@ impl SolCompat for Uint144 {
- }
- impl SolWordRepr for Uint144 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 144) }
-+    const BITS: u256 = 144
- }
- pub struct Uint152 { pub val: u256 }
- impl SolCompat for Uint152 {
-@@ -288,6 +303,7 @@ impl SolCompat for Uint152 {
- }
- impl SolWordRepr for Uint152 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 152) }
-+    const BITS: u256 = 152
- }
- pub struct Uint160 { pub val: u256 }
- impl SolCompat for Uint160 {
-@@ -296,6 +312,7 @@ impl SolCompat for Uint160 {
- }
- impl SolWordRepr for Uint160 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 160) }
-+    const BITS: u256 = 160
- }
- pub struct Uint168 { pub val: u256 }
- impl SolCompat for Uint168 {
-@@ -304,6 +321,7 @@ impl SolCompat for Uint168 {
- }
- impl SolWordRepr for Uint168 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 168) }
-+    const BITS: u256 = 168
- }
- pub struct Uint176 { pub val: u256 }
- impl SolCompat for Uint176 {
-@@ -312,6 +330,7 @@ impl SolCompat for Uint176 {
- }
- impl SolWordRepr for Uint176 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 176) }
-+    const BITS: u256 = 176
- }
- pub struct Uint184 { pub val: u256 }
- impl SolCompat for Uint184 {
-@@ -320,6 +339,7 @@ impl SolCompat for Uint184 {
- }
- impl SolWordRepr for Uint184 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 184) }
-+    const BITS: u256 = 184
- }
- pub struct Uint192 { pub val: u256 }
- impl SolCompat for Uint192 {
-@@ -328,6 +348,7 @@ impl SolCompat for Uint192 {
- }
- impl SolWordRepr for Uint192 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 192) }
-+    const BITS: u256 = 192
- }
- pub struct Uint200 { pub val: u256 }
- impl SolCompat for Uint200 {
-@@ -336,6 +357,7 @@ impl SolCompat for Uint200 {
- }
- impl SolWordRepr for Uint200 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 200) }
-+    const BITS: u256 = 200
- }
- pub struct Uint208 { pub val: u256 }
- impl SolCompat for Uint208 {
-@@ -344,6 +366,7 @@ impl SolCompat for Uint208 {
- }
- impl SolWordRepr for Uint208 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 208) }
-+    const BITS: u256 = 208
- }
- pub struct Uint216 { pub val: u256 }
- impl SolCompat for Uint216 {
-@@ -352,6 +375,7 @@ impl SolCompat for Uint216 {
- }
- impl SolWordRepr for Uint216 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 216) }
-+    const BITS: u256 = 216
- }
- pub struct Uint224 { pub val: u256 }
- impl SolCompat for Uint224 {
-@@ -360,6 +384,7 @@ impl SolCompat for Uint224 {
- }
- impl SolWordRepr for Uint224 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 224) }
-+    const BITS: u256 = 224
- }
- pub struct Uint232 { pub val: u256 }
- impl SolCompat for Uint232 {
-@@ -368,6 +393,7 @@ impl SolCompat for Uint232 {
- }
- impl SolWordRepr for Uint232 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 232) }
-+    const BITS: u256 = 232
- }
- pub struct Uint240 { pub val: u256 }
- impl SolCompat for Uint240 {
-@@ -376,6 +402,7 @@ impl SolCompat for Uint240 {
- }
- impl SolWordRepr for Uint240 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 240) }
-+    const BITS: u256 = 240
- }
- pub struct Uint248 { pub val: u256 }
- impl SolCompat for Uint248 {
-@@ -384,6 +411,7 @@ impl SolCompat for Uint248 {
- }
- impl SolWordRepr for Uint248 {
-     fn canonical_word(self) -> u256 { canonical_unsigned_word(word: self.val, bits: 248) }
-+    const BITS: u256 = 248
- }
- 
- // Signed newtypes wrapping i32
-@@ -394,6 +422,7 @@ impl SolCompat for Int24 {
- }
- impl SolWordRepr for Int24 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 24) }
-+    const BITS: u256 = 24
- }
- 
- // Signed newtypes wrapping i64
-@@ -404,6 +433,7 @@ impl SolCompat for Int40 {
- }
- impl SolWordRepr for Int40 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 40) }
-+    const BITS: u256 = 40
- }
- pub struct Int48 { pub val: i64 }
- impl SolCompat for Int48 {
-@@ -412,6 +442,7 @@ impl SolCompat for Int48 {
- }
- impl SolWordRepr for Int48 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 48) }
-+    const BITS: u256 = 48
- }
- pub struct Int56 { pub val: i64 }
- impl SolCompat for Int56 {
-@@ -420,6 +451,7 @@ impl SolCompat for Int56 {
- }
- impl SolWordRepr for Int56 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 56) }
-+    const BITS: u256 = 56
- }
- 
- // Signed newtypes wrapping i128
-@@ -430,6 +462,7 @@ impl SolCompat for Int72 {
- }
- impl SolWordRepr for Int72 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 72) }
-+    const BITS: u256 = 72
- }
- pub struct Int80 { pub val: i128 }
- impl SolCompat for Int80 {
-@@ -438,6 +471,7 @@ impl SolCompat for Int80 {
- }
- impl SolWordRepr for Int80 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 80) }
-+    const BITS: u256 = 80
- }
- pub struct Int88 { pub val: i128 }
- impl SolCompat for Int88 {
-@@ -446,6 +480,7 @@ impl SolCompat for Int88 {
- }
- impl SolWordRepr for Int88 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 88) }
-+    const BITS: u256 = 88
- }
- pub struct Int96 { pub val: i128 }
- impl SolCompat for Int96 {
-@@ -454,6 +489,7 @@ impl SolCompat for Int96 {
- }
- impl SolWordRepr for Int96 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 96) }
-+    const BITS: u256 = 96
- }
- pub struct Int104 { pub val: i128 }
- impl SolCompat for Int104 {
-@@ -462,6 +498,7 @@ impl SolCompat for Int104 {
- }
- impl SolWordRepr for Int104 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 104) }
-+    const BITS: u256 = 104
- }
- pub struct Int112 { pub val: i128 }
- impl SolCompat for Int112 {
-@@ -470,6 +507,7 @@ impl SolCompat for Int112 {
- }
- impl SolWordRepr for Int112 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 112) }
-+    const BITS: u256 = 112
- }
- pub struct Int120 { pub val: i128 }
- impl SolCompat for Int120 {
-@@ -478,6 +516,7 @@ impl SolCompat for Int120 {
- }
- impl SolWordRepr for Int120 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 120) }
-+    const BITS: u256 = 120
- }
- 
- // Signed newtypes wrapping i256
-@@ -488,6 +527,7 @@ impl SolCompat for Int136 {
- }
- impl SolWordRepr for Int136 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 136) }
-+    const BITS: u256 = 136
- }
- pub struct Int144 { pub val: i256 }
- impl SolCompat for Int144 {
-@@ -496,6 +536,7 @@ impl SolCompat for Int144 {
- }
- impl SolWordRepr for Int144 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 144) }
-+    const BITS: u256 = 144
- }
- pub struct Int152 { pub val: i256 }
- impl SolCompat for Int152 {
-@@ -504,6 +545,7 @@ impl SolCompat for Int152 {
- }
- impl SolWordRepr for Int152 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 152) }
-+    const BITS: u256 = 152
- }
- pub struct Int160 { pub val: i256 }
- impl SolCompat for Int160 {
-@@ -512,6 +554,7 @@ impl SolCompat for Int160 {
- }
- impl SolWordRepr for Int160 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 160) }
-+    const BITS: u256 = 160
- }
- pub struct Int168 { pub val: i256 }
- impl SolCompat for Int168 {
-@@ -520,6 +563,7 @@ impl SolCompat for Int168 {
- }
- impl SolWordRepr for Int168 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 168) }
-+    const BITS: u256 = 168
- }
- pub struct Int176 { pub val: i256 }
- impl SolCompat for Int176 {
-@@ -528,6 +572,7 @@ impl SolCompat for Int176 {
- }
- impl SolWordRepr for Int176 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 176) }
-+    const BITS: u256 = 176
- }
- pub struct Int184 { pub val: i256 }
- impl SolCompat for Int184 {
-@@ -536,6 +581,7 @@ impl SolCompat for Int184 {
- }
- impl SolWordRepr for Int184 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 184) }
-+    const BITS: u256 = 184
- }
- pub struct Int192 { pub val: i256 }
- impl SolCompat for Int192 {
-@@ -544,6 +590,7 @@ impl SolCompat for Int192 {
- }
- impl SolWordRepr for Int192 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 192) }
-+    const BITS: u256 = 192
- }
- pub struct Int200 { pub val: i256 }
- impl SolCompat for Int200 {
-@@ -552,6 +599,7 @@ impl SolCompat for Int200 {
- }
- impl SolWordRepr for Int200 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 200) }
-+    const BITS: u256 = 200
- }
- pub struct Int208 { pub val: i256 }
- impl SolCompat for Int208 {
-@@ -560,6 +608,7 @@ impl SolCompat for Int208 {
- }
- impl SolWordRepr for Int208 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 208) }
-+    const BITS: u256 = 208
- }
- pub struct Int216 { pub val: i256 }
- impl SolCompat for Int216 {
-@@ -568,6 +617,7 @@ impl SolCompat for Int216 {
- }
- impl SolWordRepr for Int216 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 216) }
-+    const BITS: u256 = 216
- }
- pub struct Int224 { pub val: i256 }
- impl SolCompat for Int224 {
-@@ -576,6 +626,7 @@ impl SolCompat for Int224 {
- }
- impl SolWordRepr for Int224 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 224) }
-+    const BITS: u256 = 224
- }
- pub struct Int232 { pub val: i256 }
- impl SolCompat for Int232 {
-@@ -584,6 +635,7 @@ impl SolCompat for Int232 {
- }
- impl SolWordRepr for Int232 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 232) }
-+    const BITS: u256 = 232
- }
- pub struct Int240 { pub val: i256 }
- impl SolCompat for Int240 {
-@@ -592,6 +644,7 @@ impl SolCompat for Int240 {
- }
- impl SolWordRepr for Int240 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 240) }
-+    const BITS: u256 = 240
- }
- pub struct Int248 { pub val: i256 }
- impl SolCompat for Int248 {
-@@ -600,6 +653,7 @@ impl SolCompat for Int248 {
- }
- impl SolWordRepr for Int248 {
-     fn canonical_word(self) -> u256 { canonical_custom_signed_word(word: self.val.downcast_unchecked(), bits: 248) }
-+    const BITS: u256 = 248
- }
- 
- impl SolWrappingInt for Uint24 {
-@@ -1519,6 +1573,46 @@ impl<T: SolInt, A: Abi> AbiSpan<A> for T {
-     fn payload_end<I: core::abi::ByteInput>(_: I, base: u256, pos: u256) -> u256 { pos + 32 }
- }
- 
-+// Mapping keys encode like `abi.encode` (sign-extended for signed widths),
-+// matching Solidity's `mapping(intN => V)` slot derivation.
-+impl<T: SolWordRepr + SolInt> StorageKey for T {
-+    fn encoded_len(self) -> u256 {
-+        32
-+    }
-+
-+    fn write_key(ptr: *u8, self) {
-+        store_word(ptr: ptr, value: self.canonical_word())
-+    }
-+}
-+
 +// `abi.encodePacked` uses the type's exact byte width, e.g. 3 bytes for int24.
 +impl<T: SolWordRepr + SolInt> EncodePacked for T {
 +    #[inline(always)]
@@ -9237,19 +6745,8 @@ index 14c044319..dbf05239a 100644
  impl<T: SolWordRepr + SolInt> TopicValue for T {
      fn as_topic(self) -> u256 { self.canonical_word() }
  }
-+
-+// Solidity packs custom-width ints into `BITS` bits of a storage slot.
-+impl<T: SolWordRepr + SolWrappingInt + SolInt> SolPacked for T {
-+    const BITS: u256 = T::BITS
-+    fn to_packed(own self) -> u256 {
-+        self.canonical_word()
-+    }
-+    fn from_packed(_ bits: u256) -> Self {
-+        T::from_wrapping_word(bits)
-+    }
-+}
 diff --git a/ingots/std/src/abi/sol/types.fe b/ingots/std/src/abi/sol/types.fe
-index 51c2bc9a0..ed3089169 100644
+index 99688099a..ed3089169 100644
 --- a/ingots/std/src/abi/sol/types.fe
 +++ b/ingots/std/src/abi/sol/types.fe
 @@ -42,6 +42,22 @@ pub(ingot) trait StaticAbiElementSeal {}
@@ -9298,41 +6795,18 @@ index 51c2bc9a0..ed3089169 100644
  impl<const N: usize> StaticAbiElementSeal for FixedBytes<N> {}
  
  impl<const N: usize> StaticAbiElement for FixedBytes<N> {}
-@@ -524,3 +549,22 @@ impl TopicValue for bool {
- impl<const N: usize> TopicValue for FixedBytes<N> {
-     fn as_topic(self) -> u256 { self.word() }
- }
-+
-+impl<const N: usize> ingot::evm::SolPacked for FixedBytes<N> {
-+    const BITS: u256 = N as u256 * 8
-+    fn to_packed(own self) -> u256 {
-+        checked_fixed_bytes(value: self.val, len: N as u256)
-+    }
-+    fn from_packed(_ bits: u256) -> Self {
-+        FixedBytes { val: checked_fixed_bytes(value: bits, len: N as u256) }
-+    }
-+}
-+
-+// `value` if it is a valid right-aligned `bytes{len}`; reverts otherwise,
-+// like `FixedBytes::word`.
-+fn checked_fixed_bytes(value: u256, len: u256) -> u256 {
-+    if len == 0 || len > 32 || (len < 32 && value >> (len * 8) != 0) {
-+        revert_empty()
-+    }
-+    value
-+}
 diff --git a/ingots/std/src/evm.fe b/ingots/std/src/evm.fe
-index a3c12f7ad..b1ff6c890 100644
+index f074156a9..b1ff6c890 100644
 --- a/ingots/std/src/evm.fe
 +++ b/ingots/std/src/evm.fe
-@@ -1,17 +1,18 @@
-+pub use address::{self, checksum_address}
+@@ -1,4 +1,5 @@
+ pub use address::{self, checksum_address}
 +pub use clones::{self}
  pub use calldata::{self, *}
  pub use crypto::{self, *}
  pub use effects::{self, *}
- pub use erc20::{self}
-+pub use erc165::{self}
+@@ -6,11 +7,7 @@ pub use erc20::{self}
+ pub use erc165::{self}
  pub use event::{self, *}
  pub use panic::{self, *}
 -pub use ops::{
@@ -9344,92 +6818,6 @@ index a3c12f7ad..b1ff6c890 100644
  pub use target::{self, *}
  pub use intrinsic::{code_region_len, code_region_offset, contract_field_slot}
  pub use mutex::{self, *}
-+pub use mapping::SolMapping
-+pub use sol_slot::{SolPacked, SolSlot}
- pub use packed::{self, *}
- pub use ssz::{self, *}
- pub use storage_bytes::{self, *}
-@@ -19,3 +20,4 @@ pub use storage_map::{StorageKey, StorageMap}
- pub use storage_packed_array::{PackedBits, StoragePackedArray, ValidPackedBits}
- pub use units::{self, *}
- pub use word::{self, *}
-+pub use calls::{self}
-diff --git a/ingots/std/src/evm/address.fe b/ingots/std/src/evm/address.fe
-new file mode 100644
-index 000000000..2a3e13c60
---- /dev/null
-+++ b/ingots/std/src/evm/address.fe
-@@ -0,0 +1,31 @@
-+//! Ethereum address formatting.
-+use core::abi::DynString
-+use core::ptr
-+use core::text
-+use super::effects::{Address, revert}
-+use super::crypto::keccak256
-+
-+/// Format a canonical address as `0x` and 40 ERC-55 checksum-cased hex digits.
-+/// This is the chain-independent ERC-55 encoding, not the ERC-1191 variant.
-+/// Rejects noncanonical Address values with high bits set, without truncation.
-+/// Specification: https://eips.ethereum.org/EIPS/eip-55
-+pub fn checksum_address(_ address: Address) -> DynString {
-+    if address.inner >> 160 != 0 {
-+        revert(())
-+    }
-+    let lower = text::hex(address.inner, 20)
-+    let hash = keccak256(lower.payload_span())
-+    let data = ptr::alloc_bytes(42)
-+    *data = 48
-+    *ptr::offset_bytes(data, 1) = 120
-+    let digits = ptr::offset_bytes(data, 2)
-+    let mut i: u256 = 0
-+    while i < 40 {
-+        let digit = lower.byte_at(i)
-+        let uppercase = digit >= 97 && ((hash >> ((63 - i) * 4)) & 15) >= 8
-+        let cased = if uppercase { digit - 32 } else { digit }
-+        *ptr::offset_bytes(digits, i) = cased
-+        i += 1
-+    }
-+    DynString::from_payload(source: ptr::MemSpan::from_raw_parts(ptr: data, len: 42))
-+}
-diff --git a/ingots/std/src/evm/calls.fe b/ingots/std/src/evm/calls.fe
-new file mode 100644
-index 000000000..04b31c402
---- /dev/null
-+++ b/ingots/std/src/evm/calls.fe
-@@ -0,0 +1,33 @@
-+//! Gas-budget admission for EIP-150 calls.
-+//! This uses a conservative 40,000 gas overhead allowance: 36,600 for a
-+//! cold CALL sending value to a new account under Berlin and later schedules,
-+//! and 3,400 for helper execution. Memory expansion must already be paid.
-+//! Gas repricing or unusually expensive generated helper code requires
-+//! revisiting this allowance. Use Call::call_with_min_gas to keep the check
-+//! adjacent to the call and prepay input memory; a standalone check becomes
-+//! stale as soon as the caller performs further work.
-+
-+#[must_use]
-+pub struct InsufficientGas {}
-+
-+/// Whether available >= ceil(minimum * 64 / 63) + reserved + 40,000.
-+/// Implements the conservative EIP-150 inequality without multiplication or
-+/// addition overflow, including arbitrary u256 inputs. The reserve is extra
-+/// gas beyond the 1/64 retained by EIP-150. This checks gas only, not balance,
-+/// call depth, target code, or the success of callee execution.
-+pub fn has_min_gas(_ available: u256, _ minimum: u256, _ reserved: u256) -> bool {
-+    if available < 40000 {
-+        return false
-+    }
-+    let after_overhead = available - 40000
-+    if reserved > after_overhead {
-+        return false
-+    }
-+    let budget = after_overhead - reserved
-+    if minimum > budget {
-+        return false
-+    }
-+    let remainder = budget - minimum
-+    let extra = minimum / 63 + if minimum % 63 == 0 { 0 } else { 1 }
-+    remainder >= extra
-+}
 diff --git a/ingots/std/src/evm/clones.fe b/ingots/std/src/evm/clones.fe
 new file mode 100644
 index 000000000..0594d9a88
@@ -9552,7 +6940,7 @@ index 9249a5d86..5449cd743 100644
  pub fn sha256(_ data: MemSpan) -> Result<PrecompileError, u256> {
      staticcall_word(addr: SHA256_ADDRESS, args: data)
 diff --git a/ingots/std/src/evm/effects.fe b/ingots/std/src/evm/effects.fe
-index 9087b3dd7..6a1686dfe 100644
+index 203303dad..6a1686dfe 100644
 --- a/ingots/std/src/evm/effects.fe
 +++ b/ingots/std/src/evm/effects.fe
 @@ -9,6 +9,7 @@ use core::abi::{
@@ -9563,163 +6951,7 @@ index 9087b3dd7..6a1686dfe 100644
      encode_single_root_alloc,
      store_word,
  }
-@@ -44,6 +45,12 @@ impl Address {
-     pub fn zero() -> Self {
-         Address { inner: 0 }
-     }
-+
-+    /// The address in the low 160 bits of `word`, like Solidity's
-+    /// `address(uint160(word))`. Higher bits are discarded.
-+    pub fn from_word_truncate(_ word: u256) -> Self {
-+        Address { inner: word & 0xffffffffffffffffffffffffffffffffffffffff }
-+    }
- }
- 
- impl core::ops::Eq for Address {
-@@ -593,6 +600,41 @@ pub trait Call: EvmCapabilitySeal {
-         finish_raw_call(success, mut ret)
-     }
- 
-+    /// Call with an explicit gas allotment and a caller reserve. An Err means
-+    /// the budget was insufficient and no external call was made. Ok contains
-+    /// EVM success/failure; it does not imply target code exists.
-+    ///
-+    /// Input is copied before measuring gas to pay memory expansion up front.
-+    /// No returndata is copied, so an adversarial return cannot consume the
-+    /// reserve. The outcome reports its full length. Revert data is not bubbled.
-+    ///
-+    /// See calls::has_min_gas for the EIP-150 admission rule and gas-schedule
-+    /// assumptions. The requested gas is forwarded exactly (plus the EVM's
-+    /// value stipend); admission is conservative and may reject feasible calls.
-+    fn call_with_min_gas(
-+        mut self,
-+        addr: Address,
-+        minimum: u256,
-+        reserved: u256,
-+        value: u256,
-+        args: MemSpan,
-+    ) -> Result<super::calls::InsufficientGas, RawCallOutcome> {
-+        let input = MemBuffer::from_span(args)
-+        let mut output = MemBuffer::empty()
-+        if !super::calls::has_min_gas(ops::gas(), minimum, reserved) {
-+            return Result::Err(super::calls::InsufficientGas {})
-+        }
-+        Result::Ok(
-+            self.raw_call(
-+                addr,
-+                gas: minimum,
-+                value,
-+                args: input.span(),
-+                ret: mut output,
-+            ),
-+        )
-+    }
-+
-     /// Low-level `STATICCALL` opcode with explicit input and output buffers.
-     ///
-     /// The output buffer receives at most its capacity; the outcome retains
-@@ -637,6 +679,15 @@ pub trait Call: EvmCapabilitySeal {
-         finish_raw_call(success, mut ret)
-     }
- 
-+    /// `CALL` with pre-encoded calldata without bubbling failure.
-+    ///
-+    /// The returned owner contains the complete success or revert payload.
-+    fn try_call_raw(mut self, addr: own Address, gas: u256, value: u256, args: MemSpan) -> CallOutcome {
-+        let mut ret = MemBuffer::empty()
-+        let raw = self.raw_call(addr, gas, value, args, ret: mut ret)
-+        copy_call_outcome(raw)
-+    }
-+
-     /// Perform a typed `CALL` without bubbling failure.
-     ///
-     /// The returned owner contains the complete success or revert payload.
-@@ -656,7 +707,7 @@ pub trait Call: EvmCapabilitySeal {
-     }
- 
-     /// Perform a typed `STATICCALL` without bubbling failure.
--    fn try_static<M>(mut self, addr: own Address, gas: u256, message: own M) -> CallOutcome
-+    fn try_static<M>(self, addr: own Address, gas: u256, message: own M) -> CallOutcome
-     where M: MsgVariant<Sol> + Encode<Sol>
-     {
-         let args = encode_calldata(<M as MsgVariant<Sol>>::SELECTOR, message)
-@@ -665,6 +716,48 @@ pub trait Call: EvmCapabilitySeal {
-         copy_call_outcome(raw)
-     }
- 
-+    /// Send `value` wei to `addr` with empty calldata (Solidity
-+    /// `addr.call{value: value}("")`), without copying returndata or
-+    /// bubbling failure.
-+    fn send_value(mut self, addr: own Address, gas: u256, value: u256) -> RawCallOutcome {
-+        let mut ret = MemBuffer::empty()
-+        self.raw_call(addr, gas, value, args: MemSpan::empty(), ret: mut ret)
-+    }
-+
-+    /// Perform a typed `CALL`, copying at most `ret.capacity()` bytes of
-+    /// returndata into `ret` without bubbling failure.
-+    ///
-+    /// Bounding the copy protects against callees that return oversized data.
-+    /// The outcome still reports the full returndata length.
-+    fn try_call_into<M>(
-+        mut self,
-+        addr: own Address,
-+        gas: u256,
-+        value: u256,
-+        message: own M,
-+        ret: mut MemBuffer,
-+    ) -> RawCallOutcome
-+    where M: MsgVariant<Sol> + Encode<Sol>
-+    {
-+        let args = encode_calldata(<M as MsgVariant<Sol>>::SELECTOR, message)
-+        self.raw_call(addr, gas, value, args: args.span(), ret: mut ret)
-+    }
-+
-+    /// Perform a typed `STATICCALL`, copying at most `ret.capacity()` bytes of
-+    /// returndata into `ret` without bubbling failure.
-+    fn try_static_into<M>(
-+        self,
-+        addr: own Address,
-+        gas: u256,
-+        message: own M,
-+        ret: mut MemBuffer,
-+    ) -> RawCallOutcome
-+    where M: MsgVariant<Sol> + Encode<Sol>
-+    {
-+        let args = encode_calldata(<M as MsgVariant<Sol>>::SELECTOR, message)
-+        self.raw_staticcall(addr, gas, args: args.span(), ret: mut ret)
-+    }
-+
-     /// Perform a typed `DELEGATECALL` without bubbling failure.
-     fn try_delegate<M>(mut self, addr: own Address, gas: u256, message: own M) -> CallOutcome
-     where M: MsgVariant<Sol> + Encode<Sol>
-@@ -706,7 +799,7 @@ pub trait Call: EvmCapabilitySeal {
-         outcome.decode()
-     }
- 
--    fn static<M>(mut self, addr: own Address, gas: u256, message: own M) -> M::Return
-+    fn static<M>(self, addr: own Address, gas: u256, message: own M) -> M::Return
-     where M: MsgVariant<Sol> + Encode<Sol>, M::Return: Decode<Sol> + AbiSize
-     {
-         self.try_static(addr, gas, message).decode()
-@@ -733,7 +826,7 @@ impl Address {
-     ///
-     /// Forwards all available gas. Bubbles the callee's revert data on failure.
-     pub fn static<M>(self, _ message: own M) -> M::Return
--    uses (call: mut Call) where M: MsgVariant<Sol> + Encode<Sol>, M::Return: Decode<Sol> + AbiSize
-+    uses (call: Call) where M: MsgVariant<Sol> + Encode<Sol>, M::Return: Decode<Sol> + AbiSize
-     {
-         call.static(addr: self, gas: ops::gas(), message)
-     }
-@@ -749,7 +842,7 @@ impl Address {
-     /// `STATICCALL` this address with a typed message and preserve success or
-     /// revert returndata for inspection.
-     pub fn try_static<M>(self, _ message: own M) -> CallOutcome
--    uses (call: mut Call) where M: MsgVariant<Sol> + Encode<Sol>
-+    uses (call: Call) where M: MsgVariant<Sol> + Encode<Sol>
-     {
-         call.try_static(addr: self, gas: ops::gas(), message)
-     }
-@@ -1230,7 +1323,7 @@ impl ContractHost for Evm {
+@@ -1322,7 +1323,7 @@ impl ContractHost for Evm {
                  self.return_data(data: out.span())
              }
          } else {
@@ -9728,90 +6960,6 @@ index 9087b3dd7..6a1686dfe 100644
              self.return_bytes(data: out.span())
          }
      }
-diff --git a/ingots/std/src/evm/erc165.fe b/ingots/std/src/evm/erc165.fe
-new file mode 100644
-index 000000000..0d31d79a1
---- /dev/null
-+++ b/ingots/std/src/evm/erc165.fe
-@@ -0,0 +1,35 @@
-+//! ERC-165 interface detection with OpenZeppelin `ERC165Checker` semantics.
-+//!
-+//! Queries forward at most 30,000 gas and read at most one word of
-+//! returndata, so a misbehaving account cannot exhaust the caller's gas.
-+use core::ptr::MemBuffer
-+use ingot::abi::{Bytes4, sol::sol}
-+use super::effects::{Address, Call}
-+
-+const INTERFACE_ID_ERC165: u32 = 0x01ffc9a7
-+const INTERFACE_ID_INVALID: u32 = 0xffffffff
-+
-+msg Erc165Msg {
-+    #[selector = sol("supportsInterface(bytes4)")]
-+    SupportsInterface { interfaceId: Bytes4 } -> bool,
-+}
-+
-+/// `supportsInterface(interface_id)` without checking ERC-165 support first:
-+/// true for a successful call returning at least one nonzero word.
-+pub fn supports_interface_unchecked(_ account: Address, interface_id: u32) -> bool uses (call: Call) {
-+    let mut ret = MemBuffer::with_capacity(32)
-+    let message = Erc165Msg::SupportsInterface { interfaceId: Bytes4 { val: interface_id as u256 } }
-+    let outcome = call.try_static_into(addr: account, gas: 30000, message, ret: mut ret)
-+    outcome.success() && outcome.returndata_len() >= 32 && ret.span().word_at(0) != 0
-+}
-+
-+/// Whether `account` implements ERC-165 itself.
-+pub fn supports_erc165(_ account: Address) -> bool uses (call: Call) {
-+    supports_interface_unchecked(account, interface_id: INTERFACE_ID_ERC165)
-+        && !supports_interface_unchecked(account, interface_id: INTERFACE_ID_INVALID)
-+}
-+
-+/// Whether `account` implements ERC-165 and `interface_id`.
-+pub fn supports_interface(_ account: Address, interface_id: u32) -> bool uses (call: Call) {
-+    supports_erc165(account) && supports_interface_unchecked(account, interface_id)
-+}
-diff --git a/ingots/std/src/evm/mapping.fe b/ingots/std/src/evm/mapping.fe
-new file mode 100644
-index 000000000..0720f024b
---- /dev/null
-+++ b/ingots/std/src/evm/mapping.fe
-@@ -0,0 +1,37 @@
-+//! Solidity `mapping` storage slots at a runtime root.
-+//!
-+//! `StorageMap` binds a mapping to a compile-time slot. `SolMapping` derives
-+//! slots exactly like Solidity for a root known only at runtime, including
-+//! nested mappings: `mapping(K1 => mapping(K2 => V))` at slot `s` stores
-+//! `m[a][b]` at `SolMapping::at(s).nested(a).slot_of(b)`.
-+use core::ptr::{self, MemBuffer}
-+use super::crypto::keccak256
-+use super::ops::mstore
-+use super::storage_map::StorageKey
-+
-+pub struct SolMapping {
-+    pub slot: u256,
-+}
-+
-+impl Copy for SolMapping {}
-+
-+impl SolMapping {
-+    /// The mapping stored at `slot`.
-+    pub fn at(_ slot: u256) -> Self {
-+        SolMapping { slot }
-+    }
-+
-+    /// Storage slot of `mapping[key]`: `keccak256(abi.encode(key, slot))`.
-+    pub fn slot_of<K: StorageKey>(self, _ key: K) -> u256 {
-+        let key_len = K::encoded_len(key)
-+        let preimage = MemBuffer::alloc(key_len + 32)
-+        K::write_key(ptr: preimage.ptr(), key)
-+        mstore(addr: ptr::offset_bytes(preimage.ptr(), key_len), value: self.slot)
-+        keccak256(preimage.span())
-+    }
-+
-+    /// The nested mapping stored at `mapping[key]`.
-+    pub fn nested<K: StorageKey>(self, _ key: K) -> SolMapping {
-+        SolMapping { slot: self.slot_of(key) }
-+    }
-+}
 diff --git a/ingots/std/src/evm/packed.fe b/ingots/std/src/evm/packed.fe
 index e66c4e3ed..0adf860b2 100644
 --- a/ingots/std/src/evm/packed.fe
@@ -10397,295 +7545,6 @@ index e66c4e3ed..0adf860b2 100644
      fn packed_width(self) -> u256 {
          self.0.packed_width() + self.1.packed_width() + self.2.packed_width()
              + self.3.packed_width() + self.4.packed_width() + self.5.packed_width()
-diff --git a/ingots/std/src/evm/sol_slot.fe b/ingots/std/src/evm/sol_slot.fe
-new file mode 100644
-index 000000000..737155ed6
---- /dev/null
-+++ b/ingots/std/src/evm/sol_slot.fe
-@@ -0,0 +1,283 @@
-+//! Solidity-packed state variables in a storage slot.
-+//!
-+//! Solidity packs consecutive small state variables into one slot, each at a
-+//! byte offset counted from the low end of the word. `SolSlot` reads and
-+//! writes one such field without disturbing its neighbours:
-+//!
-+//! ```fe
-+//! // `address owner; bool paused;` share slot 0: owner at byte 0, paused at 20.
-+//! let owner: Address = SolSlot::at(0).read(offset: 0)
-+//! SolSlot::at(0).write(offset: 20, value: true)
-+//! ```
-+//!
-+//! `read_bytes`/`write_bytes` (and the `string` variants) use Solidity's
-+//! layout for a `bytes` or `string` state variable in the slot.
-+use core::abi::{ByteInput, Bytes, DynString, store_word}
-+use core::num::IntDowncast
-+use core::ptr::{self, MemBuffer, MemSpan}
-+use super::crypto::keccak256
-+use super::effects::{Address, RawStorage, revert_error}
-+use super::ops::{mstore, revert_empty, signextend}
-+use super::panic::{PANIC_STORAGE_ENCODING, Panic}
-+
-+/// A value with a fixed-width Solidity storage representation.
-+///
-+/// `to_packed` returns the low `BITS` bits of the stored field and
-+/// `from_packed` rebuilds the value from them (sign-extending signed types).
-+pub trait SolPacked {
-+    const BITS: u256
-+    fn to_packed(own self) -> u256
-+    fn from_packed(_ bits: u256) -> Self
-+}
-+
-+pub struct SolSlot {
-+    pub slot: u256,
-+}
-+
-+impl Copy for SolSlot {}
-+
-+impl SolSlot {
-+    /// The storage slot `slot`.
-+    pub fn at(_ slot: u256) -> Self {
-+        SolSlot { slot }
-+    }
-+
-+    /// Reads the `T` stored `offset` bytes above the low end of the slot.
-+    /// Reverts if the field does not fit in the slot.
-+    pub fn read<T: SolPacked>(self, offset: u256) -> T uses (storage: RawStorage) {
-+        let shift = field_shift(offset, bits: T::BITS)
-+        T::from_packed((storage.sload(self.slot) >> shift) & field_mask(T::BITS))
-+    }
-+
-+    /// Writes `value` `offset` bytes above the low end of the slot, keeping
-+    /// the other bytes of the slot. Reverts if the field does not fit in the
-+    /// slot.
-+    pub fn write<T: SolPacked>(self, offset: u256, value: own T) uses (storage: mut RawStorage) {
-+        let shift = field_shift(offset, bits: T::BITS)
-+        let mask = field_mask(T::BITS) << shift
-+        let bits = (value.to_packed() << shift) & mask
-+        storage.sstore(slot: self.slot, value: (storage.sload(self.slot) & !mask) | bits)
-+    }
-+}
-+
-+// Solidity `bytes`/`string` storage: a short value (< 32 bytes) lives in the
-+// slot's high bytes with `2 * len` in the low byte; a long one stores
-+// `2 * len + 1` in the slot and its words from `keccak256(slot)` on.
-+impl SolSlot {
-+    /// Reads the Solidity `bytes` stored in this slot.
-+    pub fn read_bytes(self) -> Bytes uses (storage: RawStorage) {
-+        let (data, len, size) = self.load_payload()
-+        Bytes::from_abi_tail(data, len, size)
-+    }
-+
-+    /// Reads the Solidity `string` stored in this slot.
-+    pub fn read_string(self) -> DynString uses (storage: RawStorage) {
-+        let (data, len, size) = self.load_payload()
-+        DynString::from_abi_tail(data, len, size)
-+    }
-+
-+    /// Assigns Solidity `bytes` to this slot, clearing words a previous,
-+    /// longer value left behind.
-+    pub fn write_bytes(self, _ value: Bytes) uses (storage: mut RawStorage) {
-+        self.store_payload(value.payload_span())
-+    }
-+
-+    /// Assigns a Solidity `string` to this slot; see `write_bytes`.
-+    pub fn write_string(self, _ value: DynString) uses (storage: mut RawStorage) {
-+        self.store_payload(value.payload_span())
-+    }
-+
-+    fn load_payload(self) -> (*u8, u256, u256) uses (storage: RawStorage) {
-+        let head = storage.sload(self.slot)
-+        let len = stored_len(head)
-+        let size = 32 + word_count(len) * 32
-+        let data = ptr::alloc_bytes(size)
-+        store_word(ptr: data, value: len)
-+        // Only the `len` data bytes are kept, so the ABI padding is zero.
-+        if head & 1 == 0 {
-+            if len != 0 {
-+                store_word(ptr: ptr::offset_bytes(data, 32), value: leading_bytes(head, count: len))
-+            }
-+        } else {
-+            let base = data_slot(self.slot)
-+            let mut i: u256 = 0
-+            while i < word_count(len) {
-+                let word = leading_bytes(storage.sload(base + i), count: len - i * 32)
-+                store_word(ptr: ptr::offset_bytes(data, 32 + i * 32), value: word)
-+                i += 1
-+            }
-+        }
-+        (data, len, size)
-+    }
-+
-+    fn store_payload(self, _ payload: MemSpan) uses (storage: mut RawStorage) {
-+        let old = storage.sload(self.slot)
-+        let old_len = stored_len(old)
-+        let old_words = if old & 1 == 0 { 0 } else { word_count(old_len) }
-+        let len = payload.len()
-+        let mut words: u256 = 0
-+        if len < 32 {
-+            storage.sstore(slot: self.slot, value: payload_word(payload, 0) | (len * 2))
-+        } else {
-+            storage.sstore(slot: self.slot, value: len * 2 + 1)
-+            let base = data_slot(self.slot)
-+            words = word_count(len)
-+            let mut i: u256 = 0
-+            while i < words {
-+                storage.sstore(slot: base + i, value: payload_word(payload, i * 32))
-+                i += 1
-+            }
-+        }
-+        if old_words > words {
-+            let base = data_slot(self.slot)
-+            let mut i = words
-+            while i < old_words {
-+                storage.sstore(slot: base + i, value: 0)
-+                i += 1
-+            }
-+        }
-+    }
-+}
-+
-+// First data slot of a long value: `keccak256(abi.encode(slot))`.
-+fn data_slot(_ slot: u256) -> u256 {
-+    let buffer = MemBuffer::alloc(32)
-+    mstore(addr: buffer.ptr(), value: slot)
-+    keccak256(buffer.span())
-+}
-+
-+// Panics like Solidity (0x22) on a head whose length contradicts its
-+// short/long discriminator.
-+fn stored_len(_ head: u256) -> u256 {
-+    let long = head & 1 == 1
-+    let len = if long { head / 2 } else { (head & 0xff) / 2 }
-+    if long == (len < 32) {
-+        revert_error(Panic::from(PANIC_STORAGE_ENCODING))
-+    }
-+    len
-+}
-+
-+fn word_count(_ len: u256) -> u256 {
-+    (len + 31) / 32
-+}
-+
-+// The payload word at `offset`, with bytes past the end of `payload` zeroed.
-+fn payload_word(_ payload: MemSpan, _ offset: u256) -> u256 {
-+    if offset >= payload.len() {
-+        return 0
-+    }
-+    leading_bytes(payload.word_at(offset), count: payload.len() - offset)
-+}
-+
-+// The first `count` bytes of `word`, with the rest zeroed.
-+fn leading_bytes(_ word: u256, count: u256) -> u256 {
-+    if count >= 32 { word } else { word & !(u256::max() >> (count * 8)) }
-+}
-+
-+// The bit shift of a `bits`-wide field `offset` bytes above the low end of a
-+// slot; reverts unless the field lies within the slot.
-+fn field_shift(_ offset: u256, bits: u256) -> u256 {
-+    if offset >= 32 || bits > 256 - offset * 8 {
-+        revert_empty()
-+    }
-+    offset * 8
-+}
-+
-+fn field_mask(_ bits: u256) -> u256 {
-+    if bits >= 256 { u256::max() } else { ((1 as u256) << bits) - 1 }
-+}
-+
-+fn sign_extended(_ bits: u256, width: u256) -> u256 {
-+    signextend(byte: width / 8 - 1, value: bits)
-+}
-+
-+impl SolPacked for bool {
-+    const BITS: u256 = 8
-+    fn to_packed(own self) -> u256 { if self { 1 } else { 0 } }
-+    fn from_packed(_ bits: u256) -> Self { bits != 0 }
-+}
-+
-+impl SolPacked for Address {
-+    const BITS: u256 = 160
-+    // `inner` is public; reject bits above the low 160 like the ABI and
-+    // packed encoders instead of letting the field mask drop them.
-+    fn to_packed(own self) -> u256 {
-+        if self.inner >> 160 != 0 {
-+            revert_empty()
-+        }
-+        self.inner
-+    }
-+    fn from_packed(_ bits: u256) -> Self { Address { inner: bits } }
-+}
-+
-+impl SolPacked for u8 {
-+    const BITS: u256 = 8
-+    fn to_packed(own self) -> u256 { self as u256 }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
-+
-+impl SolPacked for u16 {
-+    const BITS: u256 = 16
-+    fn to_packed(own self) -> u256 { self as u256 }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
-+
-+impl SolPacked for u32 {
-+    const BITS: u256 = 32
-+    fn to_packed(own self) -> u256 { self as u256 }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
-+
-+impl SolPacked for u64 {
-+    const BITS: u256 = 64
-+    fn to_packed(own self) -> u256 { self as u256 }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
-+
-+impl SolPacked for u128 {
-+    const BITS: u256 = 128
-+    fn to_packed(own self) -> u256 { self as u256 }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
-+
-+impl SolPacked for u256 {
-+    const BITS: u256 = 256
-+    fn to_packed(own self) -> u256 { self }
-+    fn from_packed(_ bits: u256) -> Self { bits }
-+}
-+
-+impl SolPacked for i8 {
-+    const BITS: u256 = 8
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { sign_extended(bits, width: 8).downcast_truncate() }
-+}
-+
-+impl SolPacked for i16 {
-+    const BITS: u256 = 16
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { sign_extended(bits, width: 16).downcast_truncate() }
-+}
-+
-+impl SolPacked for i32 {
-+    const BITS: u256 = 32
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { sign_extended(bits, width: 32).downcast_truncate() }
-+}
-+
-+impl SolPacked for i64 {
-+    const BITS: u256 = 64
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { sign_extended(bits, width: 64).downcast_truncate() }
-+}
-+
-+impl SolPacked for i128 {
-+    const BITS: u256 = 128
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { sign_extended(bits, width: 128).downcast_truncate() }
-+}
-+
-+impl SolPacked for i256 {
-+    const BITS: u256 = 256
-+    fn to_packed(own self) -> u256 { self.downcast_unchecked() }
-+    fn from_packed(_ bits: u256) -> Self { bits.downcast_truncate() }
-+}
 diff --git a/newsfragments/+abi-struct-sol-compat.feature.md b/newsfragments/+abi-struct-sol-compat.feature.md
 new file mode 100644
 index 000000000..2e395d8a3
@@ -10700,20 +7559,6 @@ index 000000000..152cbd47e
 +++ b/newsfragments/+abi-struct.feature.md
 @@ -0,0 +1 @@
 +Added the `#[abi]` struct attribute. An `#[abi]` struct gets `AbiSize`, `AbiSpan<Sol>`, `Encode<Sol>` and `Decode<Sol>` implementations that encode it like the Solidity tuple of its fields, so Solidity structs such as `PoolKey` can be used in `msg` fields and return types, in arrays and inside other `#[abi]` structs without hand-written codecs.
-diff --git a/newsfragments/+address-checksum.feature.md b/newsfragments/+address-checksum.feature.md
-new file mode 100644
-index 000000000..fe6528a7c
---- /dev/null
-+++ b/newsfragments/+address-checksum.feature.md
-@@ -0,0 +1 @@
-+Add `std::evm::checksum_address` for ERC-55 checksummed address formatting. Expand regression coverage of the existing `core::num::isqrt` across power-of-two and maximum-square boundaries.
-diff --git a/newsfragments/+borrowck-entry-instance-sharing.performance.md b/newsfragments/+borrowck-entry-instance-sharing.performance.md
-new file mode 100644
-index 000000000..aa8291a9f
---- /dev/null
-+++ b/newsfragments/+borrowck-entry-instance-sharing.performance.md
-@@ -0,0 +1 @@
-+`fe check` no longer borrow checks a function once for every entry point that reaches it. Functions called from several entry functions through a trait-keyed effect such as `uses (ops: mut RawOps)`, or from several receive arms of the same contract, now share one checked instance. Checking a Seaport port with many entry points went from about 6.5 to 2.5 minutes.
 diff --git a/newsfragments/+dyn-array-composite-elements.feature.md b/newsfragments/+dyn-array-composite-elements.feature.md
 new file mode 100644
 index 000000000..acf3c6c01
@@ -10721,13 +7566,6 @@ index 000000000..acf3c6c01
 +++ b/newsfragments/+dyn-array-composite-elements.feature.md
 @@ -0,0 +1 @@
 +`DynArray::get` now works for every ABI element type, including multi-word static structs and tuples and dynamic elements such as `Bytes`. `MemVec` accepts any static ABI element type. The new `std::abi::dyn_array_from([..])` builds a `DynArray` from a fixed array of any element type (for example a `bytes[]`), and `std::abi::canonical_dyn_array` re-encodes a decoded array in canonical layout.
-diff --git a/newsfragments/+dynamic-text.feature.md b/newsfragments/+dynamic-text.feature.md
-new file mode 100644
-index 000000000..22d8eef02
---- /dev/null
-+++ b/newsfragments/+dynamic-text.feature.md
-@@ -0,0 +1 @@
-+Add `core::text::concat_slice` for runtime-length string slices and `TextBuilder` for incremental byte-preserving text construction, also available through `std::text`.
 diff --git a/newsfragments/+embedded-contract-bytecode-consistency.bugfix.md b/newsfragments/+embedded-contract-bytecode-consistency.bugfix.md
 new file mode 100644
 index 000000000..8aa3fc5b1
@@ -10749,13 +7587,6 @@ index 000000000..2a237563e
 +++ b/newsfragments/+fixed-bytes-copy.bugfix.md
 @@ -0,0 +1 @@
 +`FixedBytes<N>` (`Bytes1` through `Bytes32`) now implements `Copy`, so a `bytesN` value such as a conduit key can be read from a view parameter or used more than once without a move conflict.
-diff --git a/newsfragments/+minimum-gas-calls.feature.md b/newsfragments/+minimum-gas-calls.feature.md
-new file mode 100644
-index 000000000..73581e1f7
---- /dev/null
-+++ b/newsfragments/+minimum-gas-calls.feature.md
-@@ -0,0 +1 @@
-+Add overflow-safe EIP-150 gas-budget admission and Call::call_with_min_gas, with a caller reserve, prepaid input memory and no automatic returndata copy.
 diff --git a/newsfragments/+pointer-loop-offset-hang.bugfix.md b/newsfragments/+pointer-loop-offset-hang.bugfix.md
 new file mode 100644
 index 000000000..ce5aa1a9d
@@ -10784,13 +7615,6 @@ index 000000000..ae931dafd
 +++ b/newsfragments/+sol-selector-signature-validation.bugfix.md
 @@ -0,0 +1 @@
 +Report malformed `sol("...")` selector signatures on msg variants (unbalanced parentheses, invalid or empty function names, empty argument types, whitespace) as `fe check` errors instead of silently using the keccak of the malformed string as the selector and failing only later during JSON ABI emission.
-diff --git a/newsfragments/+std-call-helpers.feature.md b/newsfragments/+std-call-helpers.feature.md
-new file mode 100644
-index 000000000..530e83cba
---- /dev/null
-+++ b/newsfragments/+std-call-helpers.feature.md
-@@ -0,0 +1 @@
-+Added `Call::try_call_into` and `Call::try_static_into`, which copy at most the capacity of a caller-provided buffer so oversized returndata cannot force a large copy, plus `Call::send_value` for plain value transfers and `Call::try_call_raw` for forwarding raw calldata. `Call::static`, `Call::try_static` and `Address::static` now only need a read-only `Call` effect. Added `std::evm::erc165` with OpenZeppelin `ERC165Checker` semantics and `Address::from_word_truncate`.
 diff --git a/newsfragments/+std-keccak-helpers.feature.md b/newsfragments/+std-keccak-helpers.feature.md
 new file mode 100644
 index 000000000..1d73c348b
@@ -10798,13 +7622,6 @@ index 000000000..1d73c348b
 +++ b/newsfragments/+std-keccak-helpers.feature.md
 @@ -0,0 +1 @@
 +Added `std::evm::keccak_words([..])` for hashing a fixed list of words and `std::evm::create2_address(deployer, salt, init_code_hash)`. `keccak_packed` and `encode_packed` now write each value directly at its packed width instead of going through the `Packed` builder, which makes them about four times cheaper, and custom-width Solidity ints (`sol::Int24` etc.) now implement `EncodePacked`.
-diff --git a/newsfragments/+std-sol-storage.feature.md b/newsfragments/+std-sol-storage.feature.md
-new file mode 100644
-index 000000000..5b4b925f7
---- /dev/null
-+++ b/newsfragments/+std-sol-storage.feature.md
-@@ -0,0 +1 @@
-+Added `std::evm::SolSlot` for Solidity storage layouts at runtime slots: `read`/`write` access a packed state variable at a byte offset without touching its neighbours (for `bool`, `Address`, all integer widths including `sol::Int24` etc., and `FixedBytes<N>`), and `read_bytes`/`read_string`/`write_bytes`/`write_string` use Solidity's `bytes`/`string` storage layout. Also added `std::evm::SolMapping`, which derives `mapping` slots like Solidity for a runtime root, including nested mappings. Custom-width Solidity ints now implement `StorageKey`.
 diff --git a/newsfragments/+temporary-pointer-field.bugfix.md b/newsfragments/+temporary-pointer-field.bugfix.md
 new file mode 100644
 index 000000000..50a4ebfe7

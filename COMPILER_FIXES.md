@@ -1,27 +1,64 @@
 # Compiler integration and fixes
 
 The port is compiled with `toolchain/fe`, branch `seaport-integration`:
-Fe `upstream/master` (`06f7889d2`) with all open pull requests by cburgdorf
-merged in this order.
+Fe `upstream/master` (`342048ea5`, after PR #1618 "Share runtime instances
+across call sites" and the compiler performance PRs #1619 and #1621) with
+the open pull requests by cburgdorf merged in this order, followed by the
+fix commits below.
 
 | PR | Branch | Head |
 | --- | --- | --- |
-| [#1616](https://github.com/argotorg/fe/pull/1616) | `feat/address-checksum-and-integer-sqrt` | `f1a46198b` |
-| [#1615](https://github.com/argotorg/fe/pull/1615) | `feat/dynamic-text-concat` | `64bbee73a` |
-| [#1614](https://github.com/argotorg/fe/pull/1614) | `feat/minimum-gas-calls` | `bb3863621` |
 | [#1606](https://github.com/argotorg/fe/pull/1606) | `feat/abi-structs` | `df6b13fe2` |
-| [#1605](https://github.com/argotorg/fe/pull/1605) | `feat/std-sol-storage` | `2904b5e5b` |
-| [#1601](https://github.com/argotorg/fe/pull/1601) | `feat/std-call-helpers` | `08aa4443b` |
 | [#1523](https://github.com/argotorg/fe/pull/1523) | `fe_fmt_fix` (cburgdorf/fe) | `24d8e35d3` |
 | [#1613](https://github.com/argotorg/fe/pull/1613) | `feat/erc1167-clone-helpers` | `95fdd1a7a` |
 | [#1604](https://github.com/argotorg/fe/pull/1604) | `feat/std-keccak-helpers` | `c84bd2ef1` |
 
-Two merges needed conflict resolutions, both keeping both sides:
+#1601, #1605, #1614, #1615 and #1616 have been merged upstream in the
+meantime. Two merges needed conflict resolutions, both keeping both sides:
 
-- #1613 and #1616 both add re-exports at the top of `ingots/std/src/evm.fe`.
+- #1613 adds a re-export at the top of `ingots/std/src/evm.fe` next to the
+  one #1616 added.
 - #1604 and #1605 both add an impl for `SolWordRepr + SolInt` integers in
   `ingots/std/src/abi/sol/ints.fe` (`EncodePacked` and `StorageKey`) and
   extend the same import list.
+
+Fix commits on `seaport-integration`, in order:
+
+| Commit | Fix branch |
+| --- | --- |
+| `e7db40e98`, `e484e28a3` | `fix/abi-struct-sol-compat` |
+| `a9feaff2d` | `fix/temporary-pointer-field-projection` |
+| `48d2ccc70`, `ecf734480` | `fix/pointer-loop-reassign-hang` |
+| `1532e59a4` | `fix/fixed-bytes-copy` |
+| `591f84eb1` | `fix/borrowck-param-overwrite-scaling` |
+| `30c384565` | `fix/zero-field-event-emit` |
+| `c0247ad51` | `fix/sol-selector-signature-validation` |
+| `23100a873` | `fix/tuple-return-abi-params` |
+| `6d8f898a8` | `fix/embedded-contract-bytecode-consistency` |
+| `71173789d` | uitest snapshot line numbers after the tuple return fix |
+
+`fix/borrowck-entry-instance-sharing` is not part of the current
+integration: upstream #1618/#1619/#1621 address the same per-entry
+duplication (for code generation as well), conflict with it, and make it
+unnecessary (`fe check` on the port: 129 s without it). The earlier
+integration on base `06f7889d2` is kept as branch `seaport-integration-v1`;
+the "cherry-picked as" hashes below refer to that branch.
+
+Effect of the rebase on the port (runtime bytes, `-O 1`):
+
+| Contract | v1 (`06f7889d2`) | current | Solidity |
+| --- | --- | --- | --- |
+| `Seaport` | 154,867 | 65,222 | 23,963 |
+| `Consideration` | 154,475 | 65,228 | 23,969 |
+| `ConduitController` | 9,511 | 7,514 | 7,298 |
+| `Conduit` | 5,809 | 3,911 | 2,850 |
+| `TransferHelper` | 4,218 | 4,218 | 3,712 |
+| `PausableZone` | 8,021 | 7,819 | 6,162 |
+| `PausableZoneController` | 15,081 | 14,722 | 12,730 |
+| `SeaportRouter` | 10,594 | 10,447 | 6,759 |
+
+`fix/borrowck-param-overwrite-scaling` is still needed on the new base:
+`fe check` takes 129 s with it and 374 s without it.
 
 ## Fixes made for the port
 
@@ -155,7 +192,7 @@ snapshots regenerated in `782082291`).
   updated harness tests.
 - Newsfragment: `newsfragments/+tuple-return-abi-params.bugfix.md`.
 
-### `fix/borrowck-entry-instance-sharing` (ISSUES.md #9)
+### `fix/borrowck-entry-instance-sharing` (ISSUES.md #9), superseded
 
 Base: `seaport-integration` `aa4758dd3` (builds on
 `fix/borrowck-param-overwrite-scaling`); cherry-picked as `00b485111`.

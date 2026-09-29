@@ -219,7 +219,7 @@ affected too.
 
 ## 13. Runtime code is far above EIP-170
 
-Status: open
+Status: open; reduced from 154 KB to 65 KB by rebasing onto upstream PR #1618
 
 With `-O 1` the Fe `Seaport` runtime is about 154 KB (Solidity: just under
 24 KB), `Consideration` 144 KB, `ConduitController` 9.4 KB. The port cannot
@@ -227,7 +227,13 @@ be deployed on mainnet as is. The test scripts disable the size limit
 (Foundry `FOUNDRY_DISABLE_CODE_SIZE_LIMIT`, Hardhat
 `allowUnlimitedContractSize`).
 
-Analysis of the Sonatina IR of `Seaport` (417 functions, about 40,500
+After rebasing the compiler onto `upstream/master` with PR #1618 (shared
+runtime instances across call sites), `Seaport` is 65,222 bytes and
+`Consideration` 65,228; the duplication described next is gone, and what
+remains is mostly per-arm ABI decoding and general code generation
+overhead.
+
+Analysis before the rebase: of the Sonatina IR of `Seaport` (417 functions, about 40,500
 instructions): about 44% are additional copies of the same source function,
 because functions with effect parameters are specialized per entry point
 (`prepare_available_order` 4 times, `validate_order` 5 times,
