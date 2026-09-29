@@ -94,7 +94,18 @@ order entry points and the conduit batch functions use numeric selectors
   do that.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. Tests that pin gas budgets pass, but absolute costs are
-  higher.
+  higher. The same calls in the same Foundry test (`test_fuzzCoverage_x`):
+
+  | Call | Solidity | Fe |
+  | --- | --- | --- |
+  | `getCounter` (cold) | 2,677 | 5,754 |
+  | `getOrderStatus` (cold) | 2,465 | 5,825 |
+  | `getOrderHash` (1 consideration item) | 1,736 | 13,577 |
+  | `fulfillAdvancedOrder`, native consideration | 21,653 | 43,736 |
+
+  Most of the difference is fixed cost per call: ABI decoding into the
+  in-memory order model and memory management, where seaport-core works on
+  calldata pointers directly.
 - The SeaportValidator and SeaportNavigator helpers (off-chain view
   contracts in `contracts/helpers/`) are not ported; the Foundry tests that
   use them deploy the Solidity versions.
