@@ -9,12 +9,30 @@
     "base": "06f7889d2",
     "branch": "seaport-integration",
     "patch": "compiler/seaport-integration.patch",
-    "patch_sha256": "",
-    "merged_prs": [1601, 1604, 1605, 1606, 1613, 1614, 1615, 1616, 1523],
+    "patch_sha256": "741e590635a73d01483de9675b95a204011b515433eb5be07e35fe57fa05e834",
+    "merged_prs": [
+      1601,
+      1604,
+      1605,
+      1606,
+      1613,
+      1614,
+      1615,
+      1616,
+      1523
+    ],
     "fix_branches": [
       "fix/abi-struct-sol-compat",
       "fix/temporary-pointer-field-projection",
-      "fix/pointer-loop-reassign-hang"
-    ]
+      "fix/pointer-loop-reassign-hang",
+      "fix/fixed-bytes-copy",
+      "fix/borrowck-param-overwrite-scaling",
+      "fix/zero-field-event-emit",
+      "fix/sol-selector-signature-validation",
+      "fix/tuple-return-abi-params",
+      "fix/borrowck-entry-instance-sharing",
+      "fix/embedded-contract-bytecode-consistency"
+    ],
+    "head": "02cfdf211"
   }
 }

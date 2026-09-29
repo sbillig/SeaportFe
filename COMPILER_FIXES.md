@@ -154,3 +154,45 @@ snapshots regenerated in `782082291`).
   `tuple_return_emits_one_output_per_element` in `crates/fe/src/abi.rs`,
   updated harness tests.
 - Newsfragment: `newsfragments/+tuple-return-abi-params.bugfix.md`.
+
+### `fix/borrowck-entry-instance-sharing` (ISSUES.md #9)
+
+Base: `seaport-integration` `aa4758dd3` (builds on
+`fix/borrowck-param-overwrite-scaling`); cherry-picked as `00b485111`.
+
+- `b4685566e` Share borrow-check instances across entry points: every callee
+  reached through an effect carried the identity of the entry point (hidden
+  provider type parameter, `UsesParam` site, normalization scope and
+  assumptions, recv arm root provider), so a function reachable from N entry
+  points was normalized and borrow-checked N times. Identity instances now
+  use a placeholder provider per trait, recv arms are rooted at the
+  contract, and `share_callee_key` re-roots callee keys that descend from
+  these roots. Code-generation keys are unchanged, so emitted code is
+  identical.
+- Regression tests: two unit tests in `borrowck/check.rs` (entry functions
+  with differently ordered `uses` lists share the callee; two recv arms
+  share it while codegen roots stay separate).
+- Newsfragment: `newsfragments/+borrowck-entry-instance-sharing.performance.md`.
+- Effect on the port: `fe check` from about 396 s to 153 s, `fe build -O 1`
+  from about 386 s to 161 s (measured without other load).
+
+### `fix/embedded-contract-bytecode-consistency` (ISSUES.md #15)
+
+Base: `upstream/master` `342048ea5`; cherry-picked as `f23bd6955`.
+
+- `7e6a7ce4d` Embed created contracts as their standalone bytecode: all
+  objects of a module were lowered into one Sonatina module and optimized
+  together, so a child embedded by `create2<Child>` was compiled with the
+  parent's functions (symbol renaming changed the layout, shared helpers
+  changed inlining, and the parent used up the module-wide inlining budget).
+  Each root object is now compiled in its own module; embedded objects are
+  compiled first and placed as constant data, so `Contract::init_code_*`
+  point at exactly the child's artifact. A contract's bytecode also no
+  longer depends on the other contracts in the same file.
+- Not yet moved over: `fe trace`, `--emit ir` and contracts created in
+  `fe test` still use the single-module compile.
+- Regression test: `crates/fe/tests/embedded_contract_bytecode.rs` with the
+  ingot `crates/fe/tests/fixtures/embedded_contract_bytecode/` (checks
+  containment and that the deployed address equals CREATE2 over
+  `keccak(Child.bin)`).
+- Newsfragment: `newsfragments/+embedded-contract-bytecode-consistency.bugfix.md`.

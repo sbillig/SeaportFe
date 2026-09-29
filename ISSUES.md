@@ -143,7 +143,7 @@ with this stricter policy, so the fix for #3 exempts the generated
 
 ## 9. Borrow checking cost explodes on pointer-heavy loops
 
-Status: compiler performance problem, partly fixed (see COMPILER_FIXES.md)
+Status: fixed by two compiler branches plus restructuring (see COMPILER_FIXES.md)
 
 Fe's semantic borrow checker tracks the provenance of raw pointers through
 every raw write: a write that might overlap a cell holding a pointer
@@ -172,13 +172,17 @@ the analysis tractable:
 - Loop bodies are separate functions, and a loop writes through only one
   parameter-derived pointer where possible.
 
-Current state: with the restructuring above, `fe check` on the whole port
-finishes in about 28 minutes. No single function dominates any more; the
+State after the restructuring, before the compiler fixes below: `fe check`
+on the whole port finished in about 28 minutes. No single function dominates any more; the
 cost is that borrow summaries are cached per semantic instance, and the
 large entry points (`validate_orders_and_prepare_to_fulfill` about 15 s,
 `perform_final_checks_and_execute_orders` about 11 s) are solved again for
 each caller context (both contracts, `fulfillAvailable*` and `match*`, plus
 provisional passes in call cycles).
+
+With `fix/borrowck-param-overwrite-scaling` (about 6 minutes) and
+`fix/borrowck-entry-instance-sharing` (about 2.5 minutes) the whole port
+now checks in about 150 s and builds in about 160 s without other load.
 
 ## 10. `FixedBytes<N>` is not `Copy`
 
@@ -236,7 +240,7 @@ artifacts' `methodIdentifiers`.
 
 ## 15. Embedded child contract code differs from its standalone artifact
 
-Status: under investigation (`fix/embedded-contract-bytecode-consistency`)
+Status: fixed on `fix/embedded-contract-bytecode-consistency`
 
 `ConduitController` deploys conduits with `create.create2<Conduit>`. The
 init code it embeds (creation code hash `0x4b4e…71bc`, deployed runtime

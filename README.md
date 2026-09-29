@@ -62,3 +62,54 @@ Seaport's own test suites run against the Fe bytecode:
   `--both` also replaces the reference implementation.
 - `scripts/hardhat_suite.py` runs the Hardhat suite (`test/*.spec.ts`) with
   the Fe bytecode in the Hardhat artifacts of all ported contracts.
+- `scripts/compare_abi.py` compares the Fe JSON ABIs with the Solidity
+  artifacts (functions with outputs and mutability, events, errors).
+
+Results with the current build (`seaport-integration` at the head recorded
+in `reference_manifest.json`, `fe build -O 1`):
+
+| Suite | Solidity (pinned reference) | Fe |
+| --- | --- | --- |
+| Foundry, `upstream_suite.py` | 482 passed | 482 passed |
+| Hardhat, `hardhat_suite.py` | 402 passing, 1 pending | 402 passing, 1 pending |
+| Foundry, `upstream_suite.py --both` | 482 passed | 480 passed |
+
+The two `--both` failures are expected: `testRevertErc20Transfer` and
+`testMatchAuthRevertAndInvMagicValue` assert behavior that differs on
+purpose between the reference and the optimized implementation, and the
+port follows the optimized one.
+
+The ABIs match except for listings: Solidity lists every error of the
+inherited interfaces and the shared events of `PausableZone` and its
+controller, Fe lists the errors a contract can raise (plus `Panic`), and Fe
+marks `PausableZone.supportsInterface` as `pure`, not `view`. The basic
+order entry points and the conduit batch functions use numeric selectors
+(their calldata is read raw), so they have no ABI entry.
+
+## Limitations
+
+- Code size: the Fe `Seaport` runtime is about 154 KB, far above the
+  24 KB EIP-170 limit that the Solidity build just meets (ISSUES.md #13).
+  The contracts deploy only with the size limit lifted; both test scripts
+  do that.
+- Gas: Fe code uses more gas than the hand-optimized assembly of
+  seaport-core. Tests that pin gas budgets pass, but absolute costs are
+  higher.
+- The SeaportValidator and SeaportNavigator helpers (off-chain view
+  contracts in `contracts/helpers/`) are not ported; the Foundry tests that
+  use them deploy the Solidity versions.
+
+## Setup
+
+```
+scripts/bootstrap.py              # reference checkout, compiler, Fe build
+scripts/upstream_suite.py
+scripts/hardhat_suite.py
+```
+
+`bootstrap.py` clones the pinned Seaport revision, builds its Foundry and
+Hardhat artifacts, clones Fe at the pinned base and applies
+`compiler/seaport-integration.patch` (the full difference of the
+`seaport-integration` branch, checked against `reference_manifest.json`),
+then builds the compiler and the Fe contracts into `build/fe`. Required
+tools: git, Rust, Node with yarn, Foundry.
