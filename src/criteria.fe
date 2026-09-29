@@ -12,50 +12,48 @@ use super::errors::{
     UnresolvedConsiderationCriteria,
     UnresolvedOfferCriteria,
 }
-use super::model::{Item, OrderState, Resolver}
+use super::model::{Book, Item, OrderState, Resolver, Resolvers}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
-pub fn apply_criteria_resolvers(_ orders: Arr<OrderState>, _ resolvers: Arr<Resolver>) {
-    let total_orders = orders.len()
+pub fn apply_criteria_resolvers(_ book: Book, _ resolvers: Resolvers) {
+    let total_orders = book.orders.len()
     let mut i: u256 = 0
-    while i < resolvers.len() {
-        let resolver = *resolvers.at(i)
+    while i < resolvers.list.len() {
+        let resolver = *resolvers.list.at(i)
         if resolver.order_index >= total_orders {
             revert_error(OrderCriteriaResolverOutOfRange { side: resolver.side.downcast_truncate() })
         }
-        let order = orders.at(resolver.order_index)
+        let order = book.order(resolver.order_index)
         if order.numerator != 0 {
             if resolver.side != OFFER as u256 {
-                if resolver.index >= order.consideration.len() {
+                if resolver.index >= order.consideration_len {
                     revert_error(ConsiderationCriteriaResolverOutOfRange {})
                 }
-                update_criteria_item(order.consideration, resolver)
+                update_criteria_item(book.consideration_item(order, resolver.index), resolver, proofs: resolvers.proofs)
             } else {
-                if resolver.index >= order.offer.len() {
+                if resolver.index >= order.offer_len {
                     revert_error(OfferCriteriaResolverOutOfRange {})
                 }
-                update_criteria_item(order.offer, resolver)
+                update_criteria_item(book.offer_item(order, resolver.index), resolver, proofs: resolvers.proofs)
             }
         }
         i += 1
     }
     i = 0
     while i < total_orders {
-        let order = orders.at(i)
+        let order = book.order(i)
         if order.numerator != 0 {
-            let consideration = order.consideration
             let mut j: u256 = 0
-            while j < consideration.len() {
-                if requires_resolution(consideration.at(j), order.order_type) {
+            while j < order.consideration_len {
+                if requires_resolution(book.consideration_item(order, j), order.order_type) {
                     revert_error(UnresolvedConsiderationCriteria { orderIndex: i, considerationIndex: j })
                 }
                 j += 1
             }
-            let offer = order.offer
             j = 0
-            while j < offer.len() {
-                if requires_resolution(offer.at(j), order.order_type) {
+            while j < order.offer_len {
+                if requires_resolution(book.offer_item(order, j), order.order_type) {
                     revert_error(UnresolvedOfferCriteria { orderIndex: i, offerIndex: j })
                 }
                 j += 1
@@ -70,14 +68,13 @@ fn requires_resolution(_ item: *Item, _ order_type: u256) -> bool {
     item.item_type > 3 && (order_type != CONTRACT as u256 || item.identifier != 0)
 }
 
-fn update_criteria_item(_ items: Arr<Item>, _ resolver: Resolver) {
-    let item = items.at(resolver.index)
+fn update_criteria_item(_ item: *Item, _ resolver: Resolver, proofs: Arr<u256>) {
     if item.item_type <= 3 {
         revert_error(CriteriaNotEnabledForItem {})
     }
     if item.identifier != 0 {
-        verify_proof(leaf: resolver.identifier, root: item.identifier, proof: resolver.proof)
-    } else if resolver.proof.len() != 0 {
+        verify_proof(leaf: resolver.identifier, root: item.identifier, proofs, start: resolver.proof_start, len: resolver.proof_len)
+    } else if resolver.proof_len != 0 {
         revert_error(InvalidProof {})
     }
     item.item_type = item.item_type - 2
@@ -85,11 +82,11 @@ fn update_criteria_item(_ items: Arr<Item>, _ resolver: Resolver) {
 }
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
-pub fn verify_proof(leaf: u256, root: u256, proof: Arr<u256>) {
+pub fn verify_proof(leaf: u256, root: u256, proofs: Arr<u256>, start: u256, len: u256) {
     let mut computed = keccak_words([leaf])
     let mut i: u256 = 0
-    while i < proof.len() {
-        let element = *proof.at(i)
+    while i < len {
+        let element = *proofs.at(start + i)
         computed = if computed > element {
             keccak_words([element, computed])
         } else {

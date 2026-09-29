@@ -20,6 +20,7 @@ use super::executor::{
     call_conduit,
     CONDUIT_EXECUTE_SELECTOR,
     new_accumulator,
+    transfer_buffer,
     perform_erc1155_transfer,
     perform_erc721_transfer,
     transfer_erc1155,
@@ -147,18 +148,19 @@ pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool uses (ctx: Ctx, call
         transfer_individual_721_or_1155_item(env, item_type: offered_item_type, conduit_key)
         transfer_native_tokens_and_finalize()
     } else {
-        let acc = new_accumulator()
-        if route == 2 {
-            transfer_erc721(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc, env)
+        let buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
+        let empty = new_accumulator()
+        let acc = if route == 2 {
+            transfer_erc721(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc: empty, buf, env)
         } else if route == 3 {
-            transfer_erc1155(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc, env)
+            transfer_erc1155(token: cd_address(OFFER_TOKEN), from: cd_address(OFFERER), to: ctx.caller(), identifier: cd(OFFER_IDENTIFIER), amount: cd(OFFER_AMOUNT), conduit_key, acc: empty, buf, env)
         } else if route == 4 {
-            transfer_erc721(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc, env)
+            transfer_erc721(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc: empty, buf, env)
         } else {
-            transfer_erc1155(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc, env)
+            transfer_erc1155(token: cd_address(CONSIDERATION_TOKEN), from: ctx.caller(), to: cd_address(OFFERER), identifier: cd(CONSIDERATION_IDENTIFIER), amount: cd(CONSIDERATION_AMOUNT), conduit_key, acc: empty, buf, env)
         }
-        transfer_erc20_and_finalize(env, from_offerer: offer_type_is_additional_recipients_type, acc)
-        trigger_if_armed(acc, env)
+        let finalized = transfer_erc20_and_finalize(env, from_offerer: offer_type_is_additional_recipients_type, acc, buf)
+        let _ = trigger_if_armed(finalized, buf, env)
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
         call_basic_order_zone(order_hash, selector: VALIDATE_ORDER_SELECTOR)
@@ -444,7 +446,7 @@ fn transfer_native_tokens_and_finalize() uses (ctx: Ctx, call: mut Call, ops: Ra
 
 /// `_transferERC20AndFinalize`: the ERC20 side of the order, split between
 /// the additional recipients and the counterparty.
-fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: *Accumulator) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: Accumulator, buf: *u8) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
     let mut from = ctx.caller()
     let mut to = cd_address(OFFERER)
     let mut token = cd_address(CONSIDERATION_TOKEN)
@@ -462,6 +464,7 @@ fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: *Accumulator
     }
     let conduit_key = if from_offerer { cd(OFFERER_CONDUIT_KEY) } else { cd(FULFILLER_CONDUIT_KEY) }
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
+    let mut current = acc
     let mut i: u256 = 0
     while i < total_recipients {
         let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
@@ -469,8 +472,8 @@ fn transfer_erc20_and_finalize(_ env: Env, from_offerer: bool, acc: *Accumulator
         if from_offerer {
             amount = amount - additional_amount
         }
-        transfer_erc20(token, from, to: recipient, amount: additional_amount, conduit_key, acc, env)
+        current = transfer_erc20(token, from, to: recipient, amount: additional_amount, conduit_key, acc: current, buf, env)
         i += 1
     }
-    transfer_erc20(token, from, to, amount, conduit_key, acc, env)
+    transfer_erc20(token, from, to, amount, conduit_key, acc: current, buf, env)
 }

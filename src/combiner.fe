@@ -13,16 +13,17 @@ use super::errors::{
     NoSpecifiedOrdersAvailable,
     OrdersMatched,
 }
-use super::executor::{Transfer, new_accumulator, transfer, transfer_native_tokens, trigger_if_armed}
+use super::executor::{Accumulator, Transfer, new_accumulator, transfer, transfer_buffer, transfer_native_tokens, trigger_if_armed}
 use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
-use super::model::{Component, FulfillmentState, Item, OrderState, Resolver}
+use super::model::{Book, Groups, Item, OrderState, Resolvers}
 use super::status::{clear_reentrancy_guard, set_reentrancy_guard, update_status}
 use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER, ReceivedItem}
 use super::zone::{
     assert_restricted_advanced_order_validity,
     check_restricted_advanced_order_authorization,
-    get_generated_order,
+    generate_order,
+    install_generated_order,
 }
 
 /// Current amount of `item` for the fraction; rounds up for consideration.
@@ -43,52 +44,30 @@ uses (ctx: Ctx)
 /// `_validateOrdersAndPrepareToFulfill`: validate every order, derive the
 /// current amounts, resolve criteria, authorize with zones or generate
 /// contract orders, update statuses and emit `OrderFulfilled`. Returns the
-/// order hashes (zero for skipped orders) and whether any order is
+/// book, the order hashes (zero for skipped orders) and whether any order is
 /// restricted or a contract order.
 pub fn validate_orders_and_prepare_to_fulfill(
     _ env: Env,
-    orders: Arr<OrderState>,
-    resolvers: Arr<Resolver>,
+    book: Book,
+    resolvers: Resolvers,
     revert_on_invalid: bool,
     maximum_fulfilled: u256,
     recipient: Address,
     non_match: bool,
-) -> (Arr<u256>, bool) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
+) -> (Book, Arr<u256>, bool) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
     set_reentrancy_guard(env, accept_native_tokens: true)
-    let total_orders = orders.len()
+    let total_orders = book.orders.len()
     let order_hashes = Arr<u256>::alloc(total_orders)
     let mut contains_non_open = false
     let mut invalid_native_offer_item = false
     let mut i: u256 = 0
     while i < total_orders {
-        *order_hashes.at(i) = 0
-        let order = orders.at(i)
-        let (order_hash, numerator, denominator) = validate_order(env, order, revert_on_invalid)
-        order.numerator = numerator
-        if numerator != 0 {
-            order.denominator = denominator
-            *order_hashes.at(i) = order_hash
-            let is_non_contract = order.order_type < 4
-            if order.order_type > 1 {
-                contains_non_open = true
-            }
-            let offer = order.offer
-            let mut j: u256 = 0
-            while j < offer.len() {
-                let item = offer.at(j)
-                if item.item_type == NATIVE as u256 && is_non_contract {
-                    invalid_native_offer_item = true
-                }
-                prepare_item(item, numerator, denominator, start_time: order.start_time, end_time: order.end_time, round_up: false)
-                j += 1
-            }
-            let consideration = order.consideration
-            j = 0
-            while j < consideration.len() {
-                let item = consideration.at(j)
-                prepare_item(item, numerator, denominator, start_time: order.start_time, end_time: order.end_time, round_up: true)
-                j += 1
-            }
+        let (order_is_non_open, order_has_native_offer) = validate_and_prepare_order(env, book, order_hashes, index: i, revert_on_invalid)
+        if order_is_non_open {
+            contains_non_open = true
+        }
+        if order_has_native_offer {
+            invalid_native_offer_item = true
         }
         i += 1
     }
@@ -97,19 +76,17 @@ pub fn validate_orders_and_prepare_to_fulfill(
         revert_error(InvalidNativeOfferItem {})
     }
 
-    apply_criteria_resolvers(orders, resolvers)
+    apply_criteria_resolvers(book, resolvers)
 
+    let mut current = book
     let mut remaining = maximum_fulfilled
     let mut some_order_available = false
     i = 0
     while i < total_orders {
-        let order_hash = *order_hashes.at(i)
-        if order_hash != 0 {
-            let order = orders.at(i)
-            if remaining == 0 {
-                *order_hashes.at(i) = 0
-                order.numerator = 0
-            } else if prepare_available_order(env, order, order_hashes, order_hash, index: i, revert_on_invalid, recipient) {
+        if *order_hashes.at(i) != 0 {
+            let (updated, available) = prepare_available_order(env, book: current, order_hashes, index: i, remaining, revert_on_invalid, recipient)
+            current = updated
+            if available {
                 remaining = remaining - 1
                 some_order_available = true
             }
@@ -119,43 +96,108 @@ pub fn validate_orders_and_prepare_to_fulfill(
     if !some_order_available {
         revert_error(NoSpecifiedOrdersAvailable {})
     }
-    (order_hashes, contains_non_open)
+    (current, order_hashes, contains_non_open)
 }
 
-/// Authorize and record, or generate, one order; false if it gets skipped.
+/// Validate order `index` and derive its current amounts. Returns whether it
+/// is restricted or a contract order, and whether a non-contract order
+/// offers native tokens. Unavailable orders get a zero hash and numerator.
+fn validate_and_prepare_order(
+    _ env: Env,
+    book: Book,
+    order_hashes: Arr<u256>,
+    index: u256,
+    revert_on_invalid: bool,
+) -> (bool, bool) uses (ctx: Ctx, call: Call, ops: RawOps) {
+    *order_hashes.at(index) = 0
+    let order = book.order(index)
+    let (order_hash, numerator, denominator) = validate_order(env, book, order, revert_on_invalid)
+    order.numerator = numerator
+    if numerator == 0 {
+        return (false, false)
+    }
+    order.denominator = denominator
+    *order_hashes.at(index) = order_hash
+    let is_non_contract = order.order_type < 4
+    let mut native_offer = false
+    let mut j: u256 = 0
+    while j < order.offer_len {
+        let item = book.offer_item(order, j)
+        if item.item_type == NATIVE as u256 && is_non_contract {
+            native_offer = true
+        }
+        prepare_item(item, numerator, denominator, start_time: order.start_time, end_time: order.end_time, round_up: false)
+        j += 1
+    }
+    j = 0
+    while j < order.consideration_len {
+        let item = book.consideration_item(order, j)
+        prepare_item(item, numerator, denominator, start_time: order.start_time, end_time: order.end_time, round_up: true)
+        j += 1
+    }
+    (order.order_type > 1, native_offer)
+}
+
+/// Authorize and record, or generate, order `index` if fulfillments remain.
+/// Returns the book (a generated order moves the item pool) and whether the
+/// order is available.
 fn prepare_available_order(
     _ env: Env,
-    order: *OrderState,
+    book: Book,
+    order_hashes: Arr<u256>,
+    index: u256,
+    remaining: u256,
+    revert_on_invalid: bool,
+    recipient: Address,
+) -> (Book, bool) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
+    let order_hash = *order_hashes.at(index)
+    let order = book.order(index)
+    if remaining == 0 {
+        *order_hashes.at(index) = 0
+        order.numerator = 0
+        return (book, false)
+    }
+    if order.order_type != CONTRACT as u256 {
+        let available = authorize_and_record(book, order_hashes, order_hash, index, revert_on_invalid)
+        if available {
+            emit_order_fulfilled(order_hash, book, order, recipient)
+        }
+        return (book, available)
+    }
+    let generated = generate_order(book, order_index: index, revert_on_invalid)
+    *order_hashes.at(index) = generated.order_hash
+    if generated.order_hash == 0 {
+        order.numerator = 0
+        return (book, false)
+    }
+    let installed = install_generated_order(book, order_index: index, generated)
+    emit_order_fulfilled(order_hash: generated.order_hash, book: installed, order: installed.order(index), recipient)
+    (installed, true)
+}
+
+/// Authorize a restricted order with its zone and record the fill; false if
+/// the order gets skipped.
+fn authorize_and_record(
+    _ book: Book,
     order_hashes: Arr<u256>,
     order_hash: u256,
     index: u256,
     revert_on_invalid: bool,
-    recipient: Address,
-) -> bool uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
-    let mut hash = order_hash
-    if order.order_type != CONTRACT as u256 {
-        let authorized = check_restricted_advanced_order_authorization(order, order_hashes, order_hash, order_index: index, revert_on_invalid)
-        if !authorized
-            || !update_status(
-                order_hash,
-                numerator: order.numerator,
-                denominator: order.denominator,
-                revert_on_invalid: revert_on_failed_update(order, revert_on_invalid),
-            )
-        {
-            *order_hashes.at(index) = 0
-            order.numerator = 0
-            return false
-        }
-    } else {
-        hash = get_generated_order(order, revert_on_invalid)
-        *order_hashes.at(index) = hash
-        if hash == 0 {
-            order.numerator = 0
-            return false
-        }
+) -> bool uses (ctx: Ctx, call: mut Call, ops: mut RawOps) {
+    let order = book.order(index)
+    let authorized = check_restricted_advanced_order_authorization(book, order, order_hashes, order_hash, order_index: index, revert_on_invalid)
+    if !authorized
+        || !update_status(
+            order_hash,
+            numerator: order.numerator,
+            denominator: order.denominator,
+            revert_on_invalid: revert_on_failed_update(order, revert_on_invalid),
+        )
+    {
+        *order_hashes.at(index) = 0
+        order.numerator = 0
+        return false
     }
-    emit_order_fulfilled(order_hash: hash, order, recipient)
     true
 }
 
@@ -168,147 +210,106 @@ fn revert_on_failed_update(_ order: *OrderState, _ revert_on_invalid: bool) -> b
 /// `_fulfillAvailableAdvancedOrders`
 pub fn fulfill_available_advanced_orders(
     _ env: Env,
-    orders: Arr<OrderState>,
-    resolvers: Arr<Resolver>,
-    offer_fulfillments: Arr<Arr<Component>>,
-    consideration_fulfillments: Arr<Arr<Component>>,
+    book: Book,
+    resolvers: Resolvers,
+    offer_fulfillments: Groups,
+    consideration_fulfillments: Groups,
     fulfiller_conduit_key: u256,
     recipient: Address,
     maximum_fulfilled: u256,
 ) -> (DynArray<bool>, DynArray<Execution>) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
-    let (order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
+    let (prepared, order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
         env,
-        orders,
+        book,
         resolvers,
         revert_on_invalid: false,
         maximum_fulfilled,
         recipient,
         non_match: true,
     )
-    let total_offer = offer_fulfillments.len()
-    let executions = Arr<ExecutionState>::alloc(total_offer + consideration_fulfillments.len())
+    let total_offer = offer_fulfillments.list.len()
+    let executions = Arr<ExecutionState>::alloc(total_offer + consideration_fulfillments.list.len())
     let mut i: u256 = 0
     while i < total_offer {
-        *executions.at(i) = aggregate_available(orders, side: OFFER, components: *offer_fulfillments.at(i), fulfiller_conduit_key, recipient)
+        *executions.at(i) = aggregate_available(prepared, side: OFFER, groups: offer_fulfillments, index: i, fulfiller_conduit_key, recipient)
         i += 1
     }
     i = 0
-    while i < consideration_fulfillments.len() {
+    while i < consideration_fulfillments.list.len() {
         *executions.at(total_offer + i) = aggregate_available(
-            orders,
+            prepared,
             side: CONSIDERATION,
-            components: *consideration_fulfillments.at(i),
+            groups: consideration_fulfillments,
+            index: i,
             fulfiller_conduit_key,
             recipient: Address::zero(),
         )
         i += 1
     }
-    let available = perform_final_checks_and_execute_orders(env, orders, executions, order_hashes, recipient, contains_non_open)
+    let available = perform_final_checks_and_execute_orders(env, book: prepared, executions, order_hashes, recipient, contains_non_open)
     (bool_array(available), execution_array(executions))
 }
 
 /// `_matchAdvancedOrders`
 pub fn match_advanced_orders(
     _ env: Env,
-    orders: Arr<OrderState>,
-    resolvers: Arr<Resolver>,
-    fulfillments: Arr<FulfillmentState>,
+    book: Book,
+    resolvers: Resolvers,
+    fulfillments: Groups,
     recipient: Address,
 ) -> DynArray<Execution> uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
-    let (order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
+    let (prepared, order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
         env,
-        orders,
+        book,
         resolvers,
         revert_on_invalid: true,
-        maximum_fulfilled: orders.len(),
+        maximum_fulfilled: book.orders.len(),
         recipient,
         non_match: false,
     )
     log.emit(OrdersMatched { orderHashes: hash_array(order_hashes) })
-    let executions = Arr<ExecutionState>::alloc(fulfillments.len())
+    let total_fulfillments = fulfillments.list.len() / 2
+    let executions = Arr<ExecutionState>::alloc(total_fulfillments)
     let mut i: u256 = 0
-    while i < fulfillments.len() {
-        let fulfillment = *fulfillments.at(i)
-        *executions.at(i) = apply_fulfillment(
-            orders,
-            offer_components: fulfillment.offer,
-            consideration_components: fulfillment.consideration,
-            fulfillment_index: i,
-        )
+    while i < total_fulfillments {
+        *executions.at(i) = apply_fulfillment(prepared, groups: fulfillments, fulfillment_index: i)
         i += 1
     }
-    perform_final_checks_and_execute_orders(env, orders, executions, order_hashes, recipient, contains_non_open)
+    let _ = perform_final_checks_and_execute_orders(env, book: prepared, executions, order_hashes, recipient, contains_non_open)
     execution_array(executions)
 }
 
 /// `_performFinalChecksAndExecuteOrders`: run the executions, transfer
 /// unspent offer items to the recipient, require all consideration to be
 /// met, refund native tokens and call zones and contract offerers.
+///
+/// Loop bodies are separate functions throughout: Fe's borrow checker is
+/// much cheaper on a loop that makes one call than on the same work inline
+/// (ISSUES.md #9).
 fn perform_final_checks_and_execute_orders(
     _ env: Env,
-    orders: Arr<OrderState>,
+    book: Book,
     executions: Arr<ExecutionState>,
     order_hashes: Arr<u256>,
     recipient: Address,
     contains_non_open: bool,
 ) -> Arr<bool> uses (ctx: Ctx, call: mut Call, ops: mut RawOps) {
-    let total_orders = orders.len()
+    let total_orders = book.orders.len()
     let available = Arr<bool>::alloc(total_orders)
-    let acc = new_accumulator()
+    // Executions plus unspent offer items bound the number of transfers.
+    let buf = transfer_buffer(executions.len() + book.used)
+    let mut acc = new_accumulator()
     let mut i: u256 = 0
     while i < executions.len() {
-        let execution = *executions.at(i)
-        if execution.amount != 0 {
-            if execution.item_type == NATIVE as u256 && execution.amount > ctx.selfbalance() {
-                revert_error(InsufficientNativeTokensSupplied {})
-            }
-            let item = Transfer {
-                item_type: execution.item_type,
-                token: execution.token,
-                identifier: execution.identifier,
-                amount: execution.amount,
-                recipient: execution.recipient,
-            }
-            transfer(item, from: execution.offerer, conduit_key: execution.conduit_key, acc, env)
-        }
+        acc = run_execution(env, executions, index: i, acc, buf)
         i += 1
     }
     i = 0
     while i < total_orders {
-        let order = orders.at(i)
-        *available.at(i) = order.numerator != 0
-        if order.numerator != 0 {
-            let offer = order.offer
-            let mut j: u256 = 0
-            while j < offer.len() {
-                let item = offer.at(j)
-                if item.amount != 0 {
-                    let unspent = Transfer {
-                        item_type: item.item_type,
-                        token: item.token,
-                        identifier: item.identifier,
-                        amount: item.amount,
-                        recipient,
-                    }
-                    transfer(unspent, from: order.offerer, conduit_key: order.conduit_key, acc, env)
-                }
-                item.amount = item.original
-                j += 1
-            }
-            let consideration = order.consideration
-            j = 0
-            while j < consideration.len() {
-                let item = consideration.at(j)
-                if item.amount != 0 {
-                    revert_error(ConsiderationNotMet { orderIndex: i, considerationIndex: j, shortfallAmount: item.amount })
-                }
-                item.amount = item.original
-                j += 1
-            }
-        }
+        acc = settle_order(env, book, available, index: i, recipient, acc, buf)
         i += 1
     }
-    trigger_if_armed(acc, env)
+    let _ = trigger_if_armed(acc, buf, env)
     let balance = ctx.selfbalance()
     if balance != 0 {
         transfer_native_tokens(to: ctx.caller(), amount: balance)
@@ -316,14 +317,91 @@ fn perform_final_checks_and_execute_orders(
     if contains_non_open {
         i = 0
         while i < total_orders {
-            if *available.at(i) {
-                assert_restricted_advanced_order_validity(orders.at(i), order_hashes, order_hash: *order_hashes.at(i))
-            }
+            validate_available_order(book, available, order_hashes, index: i)
             i += 1
         }
     }
     clear_reentrancy_guard(env)
     available
+}
+
+fn run_execution(_ env: Env, executions: Arr<ExecutionState>, index: u256, acc: Accumulator, buf: *u8) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    let execution = *executions.at(index)
+    if execution.amount == 0 {
+        return acc
+    }
+    if execution.item_type == NATIVE as u256 && execution.amount > ctx.selfbalance() {
+        revert_error(InsufficientNativeTokensSupplied {})
+    }
+    let item = Transfer {
+        item_type: execution.item_type,
+        token: execution.token,
+        identifier: execution.identifier,
+        amount: execution.amount,
+        recipient: execution.recipient,
+    }
+    transfer(item, from: execution.offerer, conduit_key: execution.conduit_key, acc, buf, env)
+}
+
+/// Transfer the unspent offer items of an available order to the recipient
+/// and require its consideration to be met; restores the original amounts.
+fn settle_order(_ env: Env, book: Book, available: Arr<bool>, index: u256, recipient: Address, acc: Accumulator, buf: *u8) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    let order = book.order(index)
+    *available.at(index) = order.numerator != 0
+    if order.numerator == 0 {
+        return acc
+    }
+    let mut current = acc
+    let mut j: u256 = 0
+    while j < order.offer_len {
+        current = settle_offer_item(env, book, order, index: j, recipient, acc: current, buf)
+        j += 1
+    }
+    j = 0
+    while j < order.consideration_len {
+        check_consideration_item(book, order, order_index: index, index: j)
+        j += 1
+    }
+    current
+}
+
+fn settle_offer_item(_ env: Env, book: Book, order: *OrderState, index: u256, recipient: Address, acc: Accumulator, buf: *u8) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    let item = book.offer_item(order, index)
+    let mut current = acc
+    if item.amount != 0 {
+        let unspent = Transfer {
+            item_type: item.item_type,
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient,
+        }
+        current = transfer(unspent, from: order.offerer, conduit_key: order.conduit_key, acc, buf, env)
+    }
+    item.amount = item.original
+    current
+}
+
+fn check_consideration_item(_ book: Book, order: *OrderState, order_index: u256, index: u256) {
+    let item = book.consideration_item(order, index)
+    if item.amount != 0 {
+        revert_error(ConsiderationNotMet { orderIndex: order_index, considerationIndex: index, shortfallAmount: item.amount })
+    }
+    item.amount = item.original
+}
+
+fn validate_available_order(_ book: Book, available: Arr<bool>, order_hashes: Arr<u256>, index: u256)
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    if *available.at(index) {
+        assert_restricted_advanced_order_validity(book, order: book.order(index), order_hashes, order_hash: *order_hashes.at(index))
+    }
 }
 
 fn bool_array(_ values: Arr<bool>) -> DynArray<bool> {

@@ -43,20 +43,26 @@ pub struct Transfer {
 
 impl Copy for Transfer {}
 
-/// Conduit transfers collected for a single `execute` call.
+/// Conduit transfers collected for a single `execute` call. The transfers
+/// themselves (ConduitTransfer structs, six words each) are written to a
+/// buffer the caller allocates for the most transfers the operation can
+/// make; the accumulator holds no pointer and is passed by value
+/// (ISSUES.md #9).
 pub struct Accumulator {
     pub armed: bool,
     pub conduit_key: u256,
     pub count: u256,
-    pub capacity: u256,
-    /// ConduitTransfer structs, six words each.
-    pub items: *u8,
 }
 
-pub fn new_accumulator() -> *Accumulator {
-    let acc = ptr::alloc<Accumulator>()
-    *acc = Accumulator { armed: false, conduit_key: 0, count: 0, capacity: 0, items: ptr::alloc_bytes(0) }
-    acc
+impl Copy for Accumulator {}
+
+pub fn new_accumulator() -> Accumulator {
+    Accumulator { armed: false, conduit_key: 0, count: 0 }
+}
+
+/// A transfer buffer for up to `transfers` conduit transfers.
+pub fn transfer_buffer(_ transfers: u256) -> *u8 {
+    ptr::alloc_bytes(transfers * 0xc0)
 }
 
 fn calldata_with_selector(_ selector: u256, _ words: u256) -> *u8 {
@@ -70,7 +76,7 @@ fn set_arg(_ data: *u8, _ index: u256, _ value: u256) {
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
-pub fn transfer(_ item: Transfer, from: Address, conduit_key: u256, acc: *Accumulator, env: Env)
+pub fn transfer(_ item: Transfer, from: Address, conduit_key: u256, acc: Accumulator, buf: *u8, env: Env) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if item.item_type == NATIVE as u256 {
@@ -78,16 +84,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             revert_error(UnusedItemParameters {})
         }
         transfer_native_tokens(to: item.recipient, amount: item.amount)
-    } else if item.item_type == ERC20 as u256 {
+        return acc
+    }
+    if item.item_type == ERC20 as u256 {
         if item.identifier != 0 {
             revert_error(UnusedItemParameters {})
         }
-        transfer_erc20(token: item.token, from, to: item.recipient, amount: item.amount, conduit_key, acc, env)
-    } else if item.item_type == ERC721 as u256 {
-        transfer_erc721(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, env)
-    } else {
-        transfer_erc1155(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, env)
+        return transfer_erc20(token: item.token, from, to: item.recipient, amount: item.amount, conduit_key, acc, buf, env)
     }
+    if item.item_type == ERC721 as u256 {
+        return transfer_erc721(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, buf, env)
+    }
+    transfer_erc1155(token: item.token, from, to: item.recipient, identifier: item.identifier, amount: item.amount, conduit_key, acc, buf, env)
 }
 
 pub fn assert_non_zero_amount(_ amount: u256) {
@@ -113,16 +121,17 @@ pub fn transfer_erc20(
     to: Address,
     amount: u256,
     conduit_key: u256,
-    acc: *Accumulator,
+    acc: Accumulator,
+    buf: *u8,
     env: Env,
-) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
     assert_non_zero_amount(amount)
-    trigger_if_armed_and_not_accumulatable(acc, conduit_key, env)
+    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc20_transfer(token, from, to, amount)
-    } else {
-        insert(acc, conduit_key, item_type: CONDUIT_ERC20, token, from, to, identifier: 0, amount)
+        return acc
     }
+    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC20, token, from, to, identifier: 0, amount)
 }
 
 pub fn transfer_erc721(
@@ -132,18 +141,19 @@ pub fn transfer_erc721(
     identifier: u256,
     amount: u256,
     conduit_key: u256,
-    acc: *Accumulator,
+    acc: Accumulator,
+    buf: *u8,
     env: Env,
-) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
-    trigger_if_armed_and_not_accumulatable(acc, conduit_key, env)
+) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         if amount != 1 {
             revert_error(InvalidERC721TransferAmount { amount })
         }
         perform_erc721_transfer(token, from, to, identifier)
-    } else {
-        insert(acc, conduit_key, item_type: CONDUIT_ERC721, token, from, to, identifier, amount)
+        return acc
     }
+    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC721, token, from, to, identifier, amount)
 }
 
 pub fn transfer_erc1155(
@@ -153,30 +163,32 @@ pub fn transfer_erc1155(
     identifier: u256,
     amount: u256,
     conduit_key: u256,
-    acc: *Accumulator,
+    acc: Accumulator,
+    buf: *u8,
     env: Env,
-) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
     assert_non_zero_amount(amount)
-    trigger_if_armed_and_not_accumulatable(acc, conduit_key, env)
+    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc1155_transfer(token, from, to, identifier, amount)
-    } else {
-        insert(acc, conduit_key, item_type: CONDUIT_ERC1155, token, from, to, identifier, amount)
+        return acc
     }
+    insert(acc, buf, conduit_key, item_type: CONDUIT_ERC1155, token, from, to, identifier, amount)
 }
 
-fn trigger_if_armed_and_not_accumulatable(_ acc: *Accumulator, _ conduit_key: u256, _ env: Env)
+fn trigger_if_armed_and_not_accumulatable(_ acc: Accumulator, _ buf: *u8, _ conduit_key: u256, _ env: Env) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if acc.conduit_key != conduit_key {
-        trigger_if_armed(acc, env)
+        return trigger_if_armed(acc, buf, env)
     }
+    acc
 }
 
 /// Execute the accumulated conduit transfers, if any.
-pub fn trigger_if_armed(_ acc: *Accumulator, _ env: Env) uses (ctx: Ctx, call: mut Call, ops: RawOps) {
+pub fn trigger_if_armed(_ acc: Accumulator, _ buf: *u8, _ env: Env) -> Accumulator uses (ctx: Ctx, call: mut Call, ops: RawOps) {
     if !acc.armed {
-        return
+        return acc
     }
     let count = acc.count
     let size = 0x44 + count * 0xc0
@@ -184,9 +196,11 @@ pub fn trigger_if_armed(_ acc: *Accumulator, _ env: Env) uses (ctx: Ctx, call: m
     store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
     store_word(ptr::offset_bytes(data, 4), 0x20)
     store_word(ptr::offset_bytes(data, 0x24), count)
-    ptr::copy_raw(dest: ptr::offset_bytes(data, 0x44), source: acc.items, len: count * 0xc0)
+    ptr::copy_raw(dest: ptr::offset_bytes(data, 0x44), source: buf, len: count * 0xc0)
     call_conduit(env, conduit_key: acc.conduit_key, args: MemSpan::from_raw_parts(ptr: data, len: size))
-    acc.armed = false
+    let mut disarmed = acc
+    disarmed.armed = false
+    disarmed
 }
 
 /// `_callConduitUsingOffsets`: call the conduit and require the `execute`
@@ -206,7 +220,8 @@ pub fn call_conduit(_ env: Env, conduit_key: u256, args: MemSpan) uses (ctx: Ctx
 }
 
 fn insert(
-    _ acc: *Accumulator,
+    _ previous: Accumulator,
+    _ buf: *u8,
     _ conduit_key: u256,
     item_type: u256,
     token: Address,
@@ -214,20 +229,14 @@ fn insert(
     to: Address,
     identifier: u256,
     amount: u256,
-) {
+) -> Accumulator {
+    let mut acc = previous
     if !acc.armed {
         acc.armed = true
         acc.conduit_key = conduit_key
         acc.count = 0
     }
-    if acc.count == acc.capacity {
-        let capacity = if acc.capacity == 0 { 4 } else { acc.capacity * 2 }
-        let items = ptr::alloc_bytes(capacity * 0xc0)
-        ptr::copy_raw(dest: items, source: acc.items, len: acc.count * 0xc0)
-        acc.items = items
-        acc.capacity = capacity
-    }
-    let at = ptr::offset_bytes(acc.items, acc.count * 0xc0)
+    let at = ptr::offset_bytes(buf, acc.count * 0xc0)
     store_word(at, item_type)
     store_word(ptr::offset_bytes(at, 0x20), token.inner)
     store_word(ptr::offset_bytes(at, 0x40), from.inner)
@@ -235,6 +244,7 @@ fn insert(
     store_word(ptr::offset_bytes(at, 0x80), identifier)
     store_word(ptr::offset_bytes(at, 0xa0), amount)
     acc.count = acc.count + 1
+    acc
 }
 
 /// `_performERC20Transfer`: succeed on `true` or on empty returndata from a

@@ -11,16 +11,15 @@ use super::fulfill::validate_and_fulfill_advanced_order
 use super::hashing::{Env, derive_domain_separator, derive_order_hash}
 use super::manage::{cancel, validate}
 use super::model::{
-    Resolver,
     advanced_orders,
+    no_resolvers,
+    components_book,
     fulfillments,
-    from_advanced,
-    from_components,
-    from_order,
     nested_components,
     orders_as_advanced,
     resolvers,
-    single,
+    single_advanced,
+    single_order,
 }
 use super::arr::Arr
 use super::signature::domain_separator
@@ -157,8 +156,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     validate_and_fulfill_advanced_order(
         env,
-        orders: single(from_order(order)),
-        resolvers: Arr<Resolver>::empty(),
+        book: single_order(order),
+        resolvers: no_resolvers(),
         fulfiller_conduit_key: fulfiller_conduit_key.val,
         recipient: ctx.caller(),
     )
@@ -173,7 +172,7 @@ pub fn fulfill_advanced_order(
 ) -> bool uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
     validate_and_fulfill_advanced_order(
         env,
-        orders: single(from_advanced(advanced_order)),
+        book: single_advanced(advanced_order),
         resolvers: resolvers(criteria_resolvers),
         fulfiller_conduit_key: fulfiller_conduit_key.val,
         recipient: caller_if_zero(recipient),
@@ -190,8 +189,8 @@ pub fn fulfill_available_orders(
 ) -> (DynArray<bool>, DynArray<Execution>) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
     fulfill_available_advanced_orders(
         env,
-        orders: orders_as_advanced(orders),
-        resolvers: Arr<Resolver>::empty(),
+        book: orders_as_advanced(orders),
+        resolvers: no_resolvers(),
         offer_fulfillments: nested_components(offer_fulfillments),
         consideration_fulfillments: nested_components(consideration_fulfillments),
         fulfiller_conduit_key: fulfiller_conduit_key.val,
@@ -212,7 +211,7 @@ pub fn fulfill_available_advanced(
 ) -> (DynArray<bool>, DynArray<Execution>) uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
     fulfill_available_advanced_orders(
         env,
-        orders: advanced_orders(orders),
+        book: advanced_orders(orders),
         resolvers: resolvers(criteria_resolvers),
         offer_fulfillments: nested_components(offer_fulfillments),
         consideration_fulfillments: nested_components(consideration_fulfillments),
@@ -227,8 +226,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     match_advanced_orders(
         env,
-        orders: orders_as_advanced(orders),
-        resolvers: Arr<Resolver>::empty(),
+        book: orders_as_advanced(orders),
+        resolvers: no_resolvers(),
         fulfillments: fulfillments(fulfillments_in),
         recipient: ctx.caller(),
     )
@@ -243,7 +242,7 @@ pub fn match_advanced(
 ) -> DynArray<Execution> uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log) {
     match_advanced_orders(
         env,
-        orders: advanced_orders(orders),
+        book: advanced_orders(orders),
         resolvers: resolvers(criteria_resolvers),
         fulfillments: fulfillments(fulfillments_in),
         recipient: caller_if_zero(recipient),
@@ -251,8 +250,8 @@ pub fn match_advanced(
 }
 
 pub fn get_order_hash(_ order: OrderComponents) -> Bytes32 uses (ops: RawOps) {
-    let (state, counter) = from_components(order)
-    Bytes32 { val: derive_order_hash(state, counter) }
+    let (book, counter) = components_book(order)
+    Bytes32 { val: derive_order_hash(book, order: book.order(0), counter) }
 }
 
 pub fn get_order_status(_ order_hash: Bytes32) -> (bool, bool, u256, u256) uses (ops: RawOps) {

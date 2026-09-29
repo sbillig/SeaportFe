@@ -10,7 +10,7 @@ use super::errors::{
     MissingItemAmount,
     OfferAndConsiderationRequiredOnFulfillment,
 }
-use super::model::{Component, Item, OrderState}
+use super::model::{Book, Component, Group, Groups, Item, OrderState}
 use super::types::OFFER
 
 /// An `Execution`: a `ReceivedItem` plus the source and conduit key.
@@ -49,23 +49,23 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 
 /// `_aggregateValidFulfillmentOfferItems`: sum the referenced offer items of
 /// available orders, zeroing them. All of them must share type, token,
-/// identifier, offerer and conduit key. The first used component is moved to
-/// index 0.
-pub fn aggregate_offer_items(_ orders: Arr<OrderState>, components: Arr<Component>, recipient: Address) -> ExecutionState {
+/// identifier, offerer and conduit key. Also returns the index of the first
+/// used component, which seaport-core moves to the front of the array.
+pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipient: Address) -> (ExecutionState, u256) {
     let mut execution = empty_execution()
+    let mut first_used: u256 = 0
     let mut amount: u256 = 0
     let mut error_buffer: u256 = 0
     let mut data_hash: u256 = 0
     let mut k: u256 = 0
-    while k < components.len() {
-        let component = *components.at(k)
-        if component.order_index >= orders.len() {
+    while k < group.len {
+        let component = *groups.components.at(group.start + k)
+        if component.order_index >= book.orders.len() {
             revert_error(InvalidFulfillmentComponentData {})
         }
-        let order = orders.at(component.order_index)
-        let offer = order.offer
-        if component.item_index < offer.len() && order.numerator != 0 {
-            let item = offer.at(component.item_index)
+        let order = book.order(component.order_index)
+        if component.item_index < order.offer_len && order.numerator != 0 {
+            let item = book.offer_item(order, component.item_index)
             let new_amount = amount.wrapping_add(item.amount)
             if new_amount < amount {
                 error_buffer = error_buffer | 2
@@ -83,10 +83,7 @@ pub fn aggregate_offer_items(_ orders: Arr<OrderState>, components: Arr<Componen
                 execution.offerer = order.offerer
                 execution.conduit_key = order.conduit_key
                 data_hash = keccak_words([item.item_type, item.token.inner, item.identifier])
-                if k != 0 {
-                    let first = components.at(0)
-                    *first = component
-                }
+                first_used = k
             } else if order.offerer != execution.offerer
                 || order.conduit_key != execution.conduit_key
                 || data_hash != keccak_words([item.item_type, item.token.inner, item.identifier])
@@ -98,31 +95,32 @@ pub fn aggregate_offer_items(_ orders: Arr<OrderState>, components: Arr<Componen
     }
     execution.amount = amount
     raise_aggregation_errors(error_buffer)
-    execution
+    (execution, first_used)
 }
 
 /// `_aggregateValidFulfillmentConsiderationItems`: like the offer side, but
 /// items must also share the recipient; offerer and conduit key are given.
 pub fn aggregate_consideration_items(
-    _ orders: Arr<OrderState>,
-    components: Arr<Component>,
+    _ book: Book,
+    groups: Groups,
+    group: Group,
     offerer: Address,
     conduit_key: u256,
-) -> ExecutionState {
+) -> (ExecutionState, u256) {
     let mut execution = empty_execution()
+    let mut first_used: u256 = 0
     let mut amount: u256 = 0
     let mut error_buffer: u256 = 0
     let mut data_hash: u256 = 0
     let mut k: u256 = 0
-    while k < components.len() {
-        let component = *components.at(k)
-        if component.order_index >= orders.len() {
+    while k < group.len {
+        let component = *groups.components.at(group.start + k)
+        if component.order_index >= book.orders.len() {
             revert_error(InvalidFulfillmentComponentData {})
         }
-        let order = orders.at(component.order_index)
-        let consideration = order.consideration
-        if component.item_index < consideration.len() && order.numerator != 0 {
-            let item = consideration.at(component.item_index)
+        let order = book.order(component.order_index)
+        if component.item_index < order.consideration_len && order.numerator != 0 {
+            let item = book.consideration_item(order, component.item_index)
             let new_amount = amount.wrapping_add(item.amount)
             if new_amount < amount {
                 error_buffer = error_buffer | 2
@@ -141,10 +139,7 @@ pub fn aggregate_consideration_items(
                 execution.offerer = offerer
                 execution.conduit_key = conduit_key
                 data_hash = item_hash
-                if k != 0 {
-                    let first = components.at(0)
-                    *first = component
-                }
+                first_used = k
             } else if data_hash != item_hash {
                 revert_error(InvalidFulfillmentComponentData {})
             }
@@ -153,25 +148,28 @@ pub fn aggregate_consideration_items(
     }
     execution.amount = amount
     raise_aggregation_errors(error_buffer)
-    execution
+    (execution, first_used)
 }
 
 /// `_applyFulfillment`: match aggregated offer items against aggregated
-/// consideration items; the unmatched rest stays on the first component.
+/// consideration items; the unmatched rest stays on the first used
+/// component.
 pub fn apply_fulfillment(
-    _ orders: Arr<OrderState>,
-    offer_components: Arr<Component>,
-    consideration_components: Arr<Component>,
+    _ book: Book,
+    groups: Groups,
     fulfillment_index: u256,
 ) -> ExecutionState {
-    if offer_components.len() == 0 || consideration_components.len() == 0 {
+    let offer_group = *groups.list.at(2 * fulfillment_index)
+    let consideration_group = *groups.list.at(2 * fulfillment_index + 1)
+    if offer_group.len == 0 || consideration_group.len == 0 {
         revert_error(OfferAndConsiderationRequiredOnFulfillment {})
     }
-    let consideration = aggregate_consideration_items(orders, components: consideration_components, offerer: Address::zero(), conduit_key: 0)
+    let (consideration, consideration_first) = aggregate_consideration_items(book, groups, group: consideration_group, offerer: Address::zero(), conduit_key: 0)
     if consideration.amount == 0 {
         return consideration
     }
-    let mut execution = aggregate_offer_items(orders, components: offer_components, recipient: consideration.recipient)
+    let (offered, offer_first) = aggregate_offer_items(book, groups, group: offer_group, recipient: consideration.recipient)
+    let mut execution = offered
     if execution.item_type != consideration.item_type
         || execution.token != consideration.token
         || execution.identifier != consideration.identifier
@@ -179,14 +177,14 @@ pub fn apply_fulfillment(
         revert_error(MismatchedFulfillmentOfferAndConsiderationComponents { fulfillmentIndex: fulfillment_index })
     }
     if consideration.amount > execution.amount {
-        let target = *consideration_components.at(0)
-        let order = orders.at(target.order_index)
-        let item = order.consideration.at(target.item_index)
+        let target = *groups.components.at(consideration_group.start + consideration_first)
+        let order = book.order(target.order_index)
+        let item = book.consideration_item(order, target.item_index)
         item.amount = consideration.amount - execution.amount
     } else {
-        let target = *offer_components.at(0)
-        let order = orders.at(target.order_index)
-        let item = order.offer.at(target.item_index)
+        let target = *groups.components.at(offer_group.start + offer_first)
+        let order = book.order(target.order_index)
+        let item = book.offer_item(order, target.item_index)
         item.amount = execution.amount - consideration.amount
         execution.amount = consideration.amount
     }
@@ -195,18 +193,21 @@ pub fn apply_fulfillment(
 
 /// `_aggregateAvailable`
 pub fn aggregate_available(
-    _ orders: Arr<OrderState>,
+    _ book: Book,
     side: u8,
-    components: Arr<Component>,
+    groups: Groups,
+    index: u256,
     fulfiller_conduit_key: u256,
     recipient: Address,
 ) -> ExecutionState uses (ctx: Ctx) {
-    if components.len() == 0 {
+    let group = *groups.list.at(index)
+    if group.len == 0 {
         revert_error(MissingFulfillmentComponentOnAggregation { side })
     }
     if side == OFFER {
-        aggregate_offer_items(orders, components, recipient)
-    } else {
-        aggregate_consideration_items(orders, components, offerer: ctx.caller(), conduit_key: fulfiller_conduit_key)
+        let (execution, _) = aggregate_offer_items(book, groups, group, recipient)
+        return execution
     }
+    let (execution, _) = aggregate_consideration_items(book, groups, group, offerer: ctx.caller(), conduit_key: fulfiller_conduit_key)
+    execution
 }
