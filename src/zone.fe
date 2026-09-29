@@ -380,43 +380,18 @@ pub fn install_generated_order(_ book: Book, order_index: u256, generated: Gener
     let items = Arr<Item>::alloc(used)
     let mut i: u256 = 0
     while i < start {
-        *items.at(i) = *book.items.at(i)
+        copy_item(items, source: book.items, index: i)
         i += 1
     }
     i = 0
     while i < offer_length {
-        let base = generated.offer_offset + 32 + i * 128
-        let amount = returndata_word(base + 96)
-        *items.at(start + i) = Item {
-            item_type: returndata_word(base),
-            token: Address { inner: returndata_word(base + 32) },
-            identifier: returndata_word(base + 64),
-            start_amount: amount,
-            end_amount: amount,
-            recipient: Address::zero(),
-            amount,
-            receiver: Address::zero(),
-            original: amount,
-        }
+        write_generated_offer_item(items, slot: start + i, base: generated.offer_offset + 32 + i * 128)
         i += 1
     }
     let consideration_start = start + offer_length
     i = 0
     while i < consideration_length {
-        let base = generated.consideration_offset + 32 + i * 160
-        let amount = returndata_word(base + 96)
-        let recipient = Address { inner: returndata_word(base + 128) }
-        *items.at(consideration_start + i) = Item {
-            item_type: returndata_word(base),
-            token: Address { inner: returndata_word(base + 32) },
-            identifier: returndata_word(base + 64),
-            start_amount: amount,
-            end_amount: amount,
-            recipient,
-            amount,
-            receiver: recipient,
-            original: amount,
-        }
+        write_generated_consideration_item(items, slot: consideration_start + i, base: generated.consideration_offset + 32 + i * 160)
         i += 1
     }
     let order = book.order(order_index)
@@ -425,6 +400,41 @@ pub fn install_generated_order(_ book: Book, order_index: u256, generated: Gener
     order.consideration_start = consideration_start
     order.consideration_len = consideration_length
     Book { orders: book.orders, items, used, blob: book.blob }
+}
+
+fn copy_item(_ items: Arr<Item>, source: Arr<Item>, index: u256) {
+    *items.at(index) = *source.at(index)
+}
+
+fn write_generated_offer_item(_ items: Arr<Item>, slot: u256, base: u256) uses (ops: mut RawOps) {
+    let amount = returndata_word(base + 96)
+    *items.at(slot) = Item {
+        item_type: returndata_word(base),
+        token: Address { inner: returndata_word(base + 32) },
+        identifier: returndata_word(base + 64),
+        start_amount: amount,
+        end_amount: amount,
+        recipient: Address::zero(),
+        amount,
+        receiver: Address::zero(),
+        original: amount,
+    }
+}
+
+fn write_generated_consideration_item(_ items: Arr<Item>, slot: u256, base: u256) uses (ops: mut RawOps) {
+    let amount = returndata_word(base + 96)
+    let recipient = Address { inner: returndata_word(base + 128) }
+    *items.at(slot) = Item {
+        item_type: returndata_word(base),
+        token: Address { inner: returndata_word(base + 32) },
+        identifier: returndata_word(base + 64),
+        start_amount: amount,
+        end_amount: amount,
+        recipient,
+        amount,
+        receiver: recipient,
+        original: amount,
+    }
 }
 
 /// `compareItems`: a wildcard criteria item matches any identifier of the

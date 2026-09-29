@@ -140,3 +140,34 @@ const X: <One as SolCompat>::S = <One as SolCompat>::SOL_TYPE
 `TOPIC0`s built from it are correct). Generated impl consts are validated
 with this stricter policy, so the fix for #3 exempts the generated
 `SolCompat::SOL_TYPE` (a compile-time-only type name) instead.
+
+## 9. Borrow checking cost explodes on pointer-heavy loops
+
+Status: compiler performance problem, partly fixed (see COMPILER_FIXES.md)
+
+Fe's semantic borrow checker tracks the provenance of raw pointers through
+every raw write: a write that might overlap a cell holding a pointer
+replaces that pointer with a conditional "overwritten" handle, one condition
+per write site. With several writes per loop iteration, or callees that
+return pointer-carrying values through many paths, these alternatives
+multiply per fixed-point sweep. The first natural design of the port
+(orders holding `Arr<Item>` handles, an accumulator growing its own buffer)
+made `fe check` run for hours. Measured examples:
+
+- A loop calling a function that writes through two `Arr` fields of a
+  struct loaded via a pointer: 22 to 52 s for ten lines of code.
+- `validate_orders_and_prepare_to_fulfill`: loop header states of 13 to
+  50 MB (Debug size), 20 to 100 s per sweep, not converging.
+
+Compiler fixes on `fix/pointer-loop-reassign-hang` bound the growth for
+pointers stored in raw memory. For the rest, the port is written to keep
+the analysis tractable:
+
+- No pointer is stored in raw memory: items, signatures/extra data, proofs
+  and fulfillment components live in pools indexed by offsets.
+- Values that carry pointers are only returned through a single path
+  (contract order generation is split into validation and installation).
+- The conduit accumulator is pointer-free; transfers go to a buffer
+  allocated up front with a bound on the number of transfers.
+- Loop bodies are separate functions, and a loop writes through only one
+  parameter-derived pointer where possible.
