@@ -69,14 +69,14 @@ and a newsfragment. Every branch was rechecked against `upstream/master`
 
 | Branch | Head | Commits on `upstream/master` |
 | --- | --- | --- |
-| `fix/temporary-pointer-field-projection` | `65f9b0865` | 1 |
-| `fix/pointer-loop-reassign-hang` | `b8ecbf67f` | 2 |
-| `fix/borrowck-param-overwrite-scaling` | `26ee8e7cf` | 3 |
-| `fix/fixed-bytes-copy` | `c384f4b5b` | 1 |
-| `fix/zero-field-event-emit` | `45b536623` | 1 |
-| `fix/sol-selector-signature-validation` | `584c81e29` | 1 |
-| `fix/tuple-return-abi-params` | `1b65ca8b1` | 1 |
-| `fix/embedded-contract-bytecode-consistency` | `7e6a7ce4d` | 1 |
+| `fix/temporary-pointer-field-projection` | `1188871b4` | 1 |
+| `fix/pointer-loop-reassign-hang` | `95773ea98` | 2 |
+| `fix/borrowck-param-overwrite-scaling` | `3e4b89ce0` | 3 |
+| `fix/fixed-bytes-copy` | `658089143` | 1 |
+| `fix/zero-field-event-emit` | `a6c36e7e9` | 1 |
+| `fix/sol-selector-signature-validation` | `71c57c456` | 1 |
+| `fix/tuple-return-abi-params` | `171f29ad2` | 1 |
+| `fix/embedded-contract-bytecode-consistency` | `c1970481a` | 1 |
 
 `fix/borrowck-param-overwrite-scaling` is stacked on
 `fix/pointer-loop-reassign-hang`, which it depends on. Its regression test
