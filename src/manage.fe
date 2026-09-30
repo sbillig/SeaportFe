@@ -9,8 +9,8 @@ use super::errors::{
     OrderValidated,
 }
 use super::fulfill::consideration_length_checked_order_hash
-use super::hashing::{Env, derive_order_hash}
-use super::model::{components_book, single_order}
+use super::hashing::{Env, derive_components_hash}
+use super::model::single_order
 use super::signature::verify_signature
 use super::status::{
     assert_non_reentrant,
@@ -30,13 +30,12 @@ uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
     let mut any_invalid = false
     let mut i: u256 = 0
     while i < orders.len() {
-        let (book, counter) = components_book(orders.get(i))
-        let order = book.order(0)
-        if order.order_type == CONTRACT as u256
+        let order = orders.get(i)
+        if order.orderType == CONTRACT
             || (ctx.caller() != order.offerer && ctx.caller() != order.zone) {
             any_invalid = true
         }
-        let order_hash = derive_order_hash(book, order, counter)
+        let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
         log.emit(
             OrderCancelled {

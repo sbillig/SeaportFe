@@ -30,7 +30,6 @@ use super::types::{
     FulfillmentComponent,
     OfferItem,
     Order,
-    OrderComponents,
     OrderParameters,
 }
 
@@ -413,47 +412,6 @@ fn single_book(
         extra_data,
     }
     book
-}
-
-/// `OrderComponents` as a one-order book: `totalOriginalConsiderationItems`
-/// is the supplied consideration length. Returns the counter too.
-pub fn components_book(_ c: OrderComponents) -> (Book, u256) {
-    let offer = c.offer
-    let consideration = c.consideration
-    let total = offer.len() + consideration.len()
-    let (writer, _) = append_bytes(blob_writer(32), ByteRef::empty())
-    let book = Book {
-        orders: Arr<OrderState>::alloc(1),
-        items: Arr<Item>::alloc(total),
-        used: total,
-        blob: writer.base,
-    }
-    fill_items(
-        book.items,
-        start: 0,
-        offer: c.offer,
-        consideration: c.consideration,
-    )
-    *book.orders.at(0) = OrderState {
-        offerer: c.offerer,
-        zone: c.zone,
-        offer_start: 0,
-        offer_len: offer.len(),
-        consideration_start: offer.len(),
-        consideration_len: consideration.len(),
-        order_type: c.orderType as u256,
-        start_time: c.startTime,
-        end_time: c.endTime,
-        zone_hash: c.zoneHash.val,
-        salt: c.salt,
-        conduit_key: c.conduitKey.val,
-        total_original: consideration.len(),
-        numerator: 1,
-        denominator: 1,
-        signature: 0,
-        extra_data: 0,
-    }
-    (book, c.counter)
 }
 
 pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {

@@ -8,12 +8,11 @@ use super::basic::{assert_decodable_basic_order_calldata, validate_and_fulfill_b
 use super::combiner::{fulfill_available_advanced_orders, match_advanced_orders}
 use super::errors::TloadTestContractDeploymentFailed
 use super::fulfill::validate_and_fulfill_advanced_order
-use super::hashing::{Env, derive_domain_separator, derive_order_hash}
+use super::hashing::{Env, derive_components_hash, derive_domain_separator}
 use super::manage::{cancel, validate}
 use super::model::{
     advanced_orders,
     no_resolvers,
-    components_book,
     fulfillments,
     nested_components,
     orders_as_advanced,
@@ -293,8 +292,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 }
 
 pub fn get_order_hash(_ order: OrderComponents) -> Bytes32 uses (ops: RawOps) {
-    let (book, counter) = components_book(order)
-    Bytes32 { val: derive_order_hash(book, order: book.order(0), counter) }
+    Bytes32 { val: derive_components_hash(order) }
 }
 
 pub fn get_order_status(_ order_hash: Bytes32) -> (bool, bool, u256, u256)

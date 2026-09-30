@@ -1,0 +1,74 @@
+use std::abi::{Bytes32, DynArray, dyn_array_from}
+use std::evm::Address
+use super::hashing::derive_components_hash
+use super::types::{ConsiderationItem, OfferItem, OrderComponents}
+
+fn hash_components(
+    offer: DynArray<OfferItem>,
+    consideration: DynArray<ConsiderationItem>,
+    counter: u256,
+) -> u256 {
+    derive_components_hash(
+        OrderComponents {
+            offerer: Address { inner: 0xabc },
+            zone: Address { inner: 0xdef },
+            offer,
+            consideration,
+            orderType: 1,
+            startTime: 7,
+            endTime: 123,
+            zoneHash: Bytes32 { val: 0x42 },
+            salt: 9,
+            conduitKey: Bytes32 { val: 0x99 },
+            counter,
+        },
+    )
+}
+
+// Expected hashes come from the deployed, pinned Solidity Seaport reference.
+#[test]
+fn components_hash_empty_item_arrays() {
+    assert(
+        hash_components(
+                offer: DynArray<OfferItem>::empty(),
+                consideration: DynArray<ConsiderationItem>::empty(),
+                counter: 0,
+            )
+            == 0x5550392b8abc641298481c4eef6a7c124628b7fa5795743525f4c55d794fe933,
+    )
+}
+
+#[test]
+fn components_hash_distinct_item_types_and_full_width_counter() {
+    let offer = dyn_array_from(
+        [
+            OfferItem {
+                itemType: 2,
+                token: Address { inner: 0x123 },
+                identifierOrCriteria: 4,
+                startAmount: 1,
+                endAmount: 1,
+            },
+        ],
+    )
+    let consideration = dyn_array_from(
+        [
+            ConsiderationItem {
+                itemType: 0,
+                token: Address { inner: 0 },
+                identifierOrCriteria: 0,
+                startAmount: 200,
+                endAmount: 200,
+                recipient: Address { inner: 0x456 },
+            },
+        ],
+    )
+    assert(
+        hash_components(
+                offer,
+                consideration,
+                counter: 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+            )
+            == 0x0ca9e35ff00c5532a165ee1148dc749e93994bd0b52dca5fff0077c0e13b8af4,
+    )
+}
