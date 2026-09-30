@@ -332,7 +332,7 @@ uses (ctx: Ctx)
 
 /// `_fulfillAvailableAdvancedOrders`
 pub fn fulfill_available_advanced_orders(
-    _ env: Env,
+    _ env: ref Env,
     book: Book,
     resolvers: Resolvers,
     offer_fulfillments: Groups,
@@ -417,7 +417,7 @@ uses (ctx: Ctx)
 
 /// `_matchAdvancedOrders`
 pub fn match_advanced_orders(
-    _ env: Env,
+    _ env: ref Env,
     book: Book,
     resolvers: Resolvers,
     fulfillments: Groups,

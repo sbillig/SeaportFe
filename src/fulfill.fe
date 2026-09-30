@@ -368,7 +368,7 @@ uses (log: mut Log)
 /// The phases are separate functions; Fe's borrow checker is much cheaper on
 /// them than on one long body (ISSUES.md #9).
 pub fn validate_and_fulfill_advanced_order(
-    _ env: Env,
+    _ env: ref Env,
     book: Book,
     resolvers: Resolvers,
     fulfiller_conduit_key: u256,
