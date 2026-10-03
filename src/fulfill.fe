@@ -167,8 +167,8 @@ uses (ctx: Ctx)
 {
     let item = book.offer_item(order, index)
     let amount = apply_fraction(
-        start_amount: item.start_amount,
-        end_amount: item.end_amount,
+        start_amount: item.amount,
+        end_amount: item.original,
         numerator,
         denominator,
         start_time: order.start_time,
@@ -177,7 +177,7 @@ uses (ctx: Ctx)
     )
     item.amount = amount
     item.original = amount
-    item.receiver = recipient
+    item.recipient = recipient
     item.item_type == NATIVE as u256
 }
 
@@ -192,8 +192,8 @@ uses (ctx: Ctx)
 {
     let item = book.consideration_item(order, index)
     let amount = apply_fraction(
-        start_amount: item.start_amount,
-        end_amount: item.end_amount,
+        start_amount: item.amount,
+        end_amount: item.original,
         numerator,
         denominator,
         start_time: order.start_time,
@@ -202,7 +202,6 @@ uses (ctx: Ctx)
     )
     item.amount = amount
     item.original = amount
-    item.receiver = item.recipient
 }
 
 pub fn item_transfer(_ item: *Item) -> Transfer {
@@ -211,7 +210,7 @@ pub fn item_transfer(_ item: *Item) -> Transfer {
         token: item.token,
         identifier: item.identifier,
         amount: item.amount,
-        recipient: item.receiver,
+        recipient: item.recipient,
     }
 }
 
@@ -229,7 +228,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let mut i: u256 = 0
     while i < order.offer_len {
         let item = book.offer_item(order, i)
-        item.receiver = recipient
+        item.recipient = recipient
         i += 1
     }
     let buf = transfer_buffer(order.offer_len + order.consideration_len)
@@ -333,7 +332,7 @@ pub fn write_fulfilled_items(
         if consideration {
             store_word(
                 ptr::offset_bytes(out, 128),
-                Address::from_word_truncate(item.receiver.inner).inner,
+                Address::from_word_truncate(item.recipient.inner).inner,
             )
         }
         i += 1

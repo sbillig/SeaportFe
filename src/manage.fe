@@ -159,8 +159,8 @@ fn event_items(_ book: ref Book, start: u256, count: u256, consideration: bool) 
         *out = item.item_type
         *ptr::offset(out, 1) = Address::from_word_truncate(item.token.inner).inner
         *ptr::offset(out, 2) = item.identifier
-        *ptr::offset(out, 3) = item.start_amount
-        *ptr::offset(out, 4) = item.end_amount
+        *ptr::offset(out, 3) = item.amount
+        *ptr::offset(out, 4) = item.original
         if consideration {
             *ptr::offset(out, 5) = Address::from_word_truncate(item.recipient.inner).inner
         }

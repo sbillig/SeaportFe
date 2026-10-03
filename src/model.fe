@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Mutable in-memory order model.
 //
-// Seaport (seaport-core 1.6) decodes calldata into memory structs and then
-// reuses struct slots for derived values: after fractions are applied an
-// item's `startAmount` slot holds the current amount, its `endAmount` slot the
-// recipient, and a consideration item's `recipient` slot the original amount.
-// The port gives each of those meanings its own field instead:
-//
-// - `amount`:   the `startAmount` slot after fraction application (the
-//               current, and later the remaining unspent/unmet amount).
-// - `receiver`: the `endAmount` slot read as `ReceivedItem.recipient`.
-// - `original`: the current amount before fulfillment aggregation.
+// Items have two phases. Before preparation, `amount` and `original` hold
+// the signed start and end amounts. Hashing and OrderValidated emission read
+// these unchanged words. Preparation runs once, after hashing, and replaces
+// both with the interpolated fill amount. Aggregation then changes `amount`
+// while `original` preserves the amount for settlement and zone calls.
+// The recipient stays in its own field throughout; offer preparation or
+// transfer assigns it when needed. Generated items start already prepared.
 //
 // All items of all orders live in one pool (`Book.items`); an order refers
 // to its offer and consideration by index ranges, and to its signature and
@@ -29,13 +26,12 @@ pub struct Item {
     pub item_type: u256,
     pub token: Address,
     pub identifier: u256,
-    pub start_amount: u256,
-    pub end_amount: u256,
-    /// `ConsiderationItem.recipient` (zero for offer items).
-    pub recipient: Address,
+    /// Signed start amount before preparation; remaining amount afterward.
     pub amount: u256,
-    pub receiver: Address,
+    /// Signed end amount before preparation; saved fill amount afterward.
     pub original: u256,
+    /// Raw consideration recipient, or the assigned offer recipient.
+    pub recipient: Address,
 }
 
 impl Copy for Item {}
@@ -145,12 +141,9 @@ fn fill_items(_ items: Arr<Item>, start: u256, input: CalldataView, consideratio
             item_type: item.word(0),
             token: Address { inner: item.word(32) },
             identifier: item.word(64),
-            start_amount: item.word(96),
-            end_amount: item.word(128),
-            recipient,
             amount: item.word(96),
-            receiver: recipient,
-            original: 0,
+            original: item.word(128),
+            recipient,
         }
         i += 1
     }

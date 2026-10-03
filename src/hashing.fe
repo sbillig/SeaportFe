@@ -148,8 +148,8 @@ fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool)
                     item.item_type,
                     item.token.inner,
                     item.identifier,
-                    item.start_amount,
-                    item.end_amount,
+                    item.amount,
+                    item.original,
                     item.recipient.inner,
                 ],
             )
@@ -160,8 +160,8 @@ fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool)
                     item.item_type,
                     item.token.inner,
                     item.identifier,
-                    item.start_amount,
-                    item.end_amount,
+                    item.amount,
+                    item.original,
                 ],
             )
         }

@@ -16,11 +16,8 @@ fn output_arrays_snapshot_model_values_and_clean_addresses() {
             item_type: 2 + i,
             token: Address { inner: (1 << 200) | (17 + i) },
             identifier: (1 << 180) + i,
-            start_amount: 1,
-            end_amount: 2,
-            recipient: Address { inner: 3 },
             amount: (1 << 160) + i,
-            receiver: Address { inner: (1 << 200) | (23 + i) },
+            recipient: Address { inner: (1 << 200) | (23 + i) },
             original: 4,
         }
         i += 1
@@ -50,7 +47,7 @@ fn output_arrays_snapshot_model_values_and_clean_addresses() {
     )
     items.at(0).amount = 0
     items.at(1).amount = 0
-    items.at(1).receiver = Address::zero()
+    items.at(1).recipient = Address::zero()
     assert(spent.len() == 2 && spent.encoded_size() == 288)
     i = 0
     while i < 2 {

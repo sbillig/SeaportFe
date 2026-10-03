@@ -135,13 +135,13 @@ pub fn aggregate_consideration_items(
             amount = new_amount
             item.amount = 0
             let item_hash = keccak_words(
-                [item.item_type, item.token.inner, item.identifier, 0, item.receiver.inner],
+                [item.item_type, item.token.inner, item.identifier, 0, item.recipient.inner],
             )
             if data_hash == 0 {
                 execution.item_type = item.item_type
                 execution.token = item.token
                 execution.identifier = item.identifier
-                execution.recipient = item.receiver
+                execution.recipient = item.recipient
                 execution.offerer = offerer
                 execution.conduit_key = conduit_key
                 data_hash = item_hash

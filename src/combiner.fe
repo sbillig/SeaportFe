@@ -5,7 +5,13 @@ use core::ptr
 use std::abi::{Bytes32, DynArray}
 use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
 use super::amount::{get_fraction, locate_current_amount}
-use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
+use super::applier::{
+    ExecutionState,
+    aggregate_available,
+    aggregate_consideration_items,
+    aggregate_offer_items,
+    apply_fulfillment,
+}
 use super::arr::{Arr, array_tail}
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
@@ -26,7 +32,7 @@ use super::executor::{
 }
 use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
-use super::model::{Book, Groups, Item, OrderState, Resolvers}
+use super::model::{Book, Component, Group, Groups, Item, OrderState, Resolvers}
 use super::status::{clear_reentrancy_guard, set_reentrancy_guard, update_status}
 use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER, ReceivedItem}
 use super::zone::{
@@ -47,15 +53,90 @@ fn prepare_item(
 )
 uses (ctx: Ctx)
 {
-    let end_amount = get_fraction(numerator, denominator, value: item.end_amount)
-    let start_amount = if item.start_amount == item.end_amount {
+    let end_amount = get_fraction(numerator, denominator, value: item.original)
+    let start_amount = if item.amount == item.original {
         end_amount
     } else {
-        get_fraction(numerator, denominator, value: item.start_amount)
+        get_fraction(numerator, denominator, value: item.amount)
     }
     let current = locate_current_amount(start_amount, end_amount, start_time, end_time, round_up)
     item.amount = current
     item.original = current
+}
+
+#[test]
+fn prepared_item_amounts_survive_aggregation_and_settlement()
+uses (ctx: Ctx)
+{
+    let items = Arr<Item>::alloc(2)
+    let recipient = Address { inner: (1 << 200) | 23 }
+    *items.at(0) = Item {
+        item_type: 1,
+        token: Address { inner: 17 },
+        identifier: 0,
+        amount: (1 << 200) + 6,
+        original: (1 << 200) + 14,
+        recipient,
+    }
+    *items.at(1) = *items.at(0)
+    let mut i: u256 = 0
+    while i < 2 {
+        prepare_item(
+            items.at(i),
+            numerator: 1,
+            denominator: 2,
+            start_time: ctx.timestamp(),
+            end_time: ctx.timestamp() + 1,
+            round_up: i != 0,
+        )
+        i += 1
+    }
+    let orders = Arr<OrderState>::alloc(1)
+    *orders.at(0) = OrderState {
+        offerer: Address { inner: 19 },
+        zone: Address::zero(),
+        offer_start: 0,
+        offer_len: 1,
+        consideration_start: 1,
+        consideration_len: 1,
+        order_type: 1,
+        start_time: 0,
+        end_time: 0,
+        zone_hash: 0,
+        salt: 0,
+        conduit_key: 0,
+        total_original: 1,
+        numerator: 1,
+        denominator: 2,
+        signature: 0,
+        extra_data: 0,
+    }
+    let book = Book { orders, items, used: 2, blob: ptr::alloc_bytes(0) }
+    let components = Arr<Component>::alloc(1)
+    *components.at(0) = Component { order_index: 0, item_index: 0 }
+    let groups = Groups { list: Arr<Group>::empty(), components }
+    let group = Group { start: 0, len: 1 }
+    let (offered, _) = aggregate_offer_items(ref book, groups, group, recipient)
+    let (received, _) = aggregate_consideration_items(
+        ref book,
+        groups,
+        group,
+        offerer: Address::zero(),
+        conduit_key: 0,
+    )
+    let filled = (1 << 199) + 3
+    assert(offered.amount == filled && received.amount == filled)
+    assert(received.recipient == recipient)
+    assert(items.at(0).amount == 0 && items.at(1).amount == 0)
+    restore_offer_amounts(ref book, order: orders.at(0))
+    check_consideration_item(ref book, order: orders.at(0), order_index: 0, index: 0)
+    assert(
+        items.at(0).amount == filled && items.at(1).amount == filled,
+    )
+    assert(
+        items.at(0).original == filled && items.at(1).original == filled,
+    )
+    assert(items.at(1).recipient == recipient)
 }
 
 /// `_validateOrdersAndPrepareToFulfill`: validate every order, derive the

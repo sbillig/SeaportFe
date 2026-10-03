@@ -78,7 +78,7 @@ fn write_received_items(_ dst: *u8, _ book: ref Book, start: u256, count: u256) 
         store_word(at(out, 32), item.token.inner)
         store_word(at(out, 64), item.identifier)
         store_word(at(out, 96), item.original)
-        store_word(at(out, 128), item.receiver.inner)
+        store_word(at(out, 128), item.recipient.inner)
         i += 1
     }
     32 + count * 160
@@ -549,8 +549,8 @@ uses (ops: mut RawOps)
         let base = consideration_offset + 32 + i * 160
         let original = book.consideration_item(order, i)
         let recipient = returndata_word(base + 128)
-        let recipient_mismatch = original.receiver.inner != 0
-            && recipient != original.receiver.inner
+        let recipient_mismatch = original.recipient.inner != 0
+            && recipient != original.recipient.inner
         bad = bad
             || items_differ(
                 original,
@@ -635,11 +635,8 @@ uses (ops: mut RawOps)
         item_type: returndata_word(base),
         token: Address { inner: returndata_word(base + 32) },
         identifier: returndata_word(base + 64),
-        start_amount: amount,
-        end_amount: amount,
         recipient: Address::zero(),
         amount,
-        receiver: Address::zero(),
         original: amount,
     }
 }
@@ -653,11 +650,8 @@ uses (ops: mut RawOps)
         item_type: returndata_word(base),
         token: Address { inner: returndata_word(base + 32) },
         identifier: returndata_word(base + 64),
-        start_amount: amount,
-        end_amount: amount,
         recipient,
         amount,
-        receiver: recipient,
         original: amount,
     }
 }
