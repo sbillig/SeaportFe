@@ -1,0 +1,70 @@
+use core::ptr
+use std::evm::Address
+use super::arr::Arr
+use super::combiner::hash_array
+use super::fulfill::{received_items, spent_items}
+use super::model::{Book, Item, OrderState}
+
+#[test]
+fn output_arrays_snapshot_model_values_and_clean_addresses() {
+    let items = Arr<Item>::alloc(2)
+    let mut i: u256 = 0
+    while i < 2 {
+        *items.at(i) = Item {
+            item_type: 2 + i,
+            token: Address { inner: (1 << 200) | (17 + i) },
+            identifier: (1 << 180) + i,
+            start_amount: 1,
+            end_amount: 2,
+            recipient: Address { inner: 3 },
+            amount: (1 << 160) + i,
+            receiver: Address { inner: (1 << 200) | (23 + i) },
+            original: 4,
+        }
+        i += 1
+    }
+    let book = Book { orders: Arr<OrderState>::empty(), items, used: 2, blob: ptr::alloc_bytes(0) }
+    let spent = spent_items(ref book, start: 0, count: 2)
+    let received = received_items(ref book, start: 1, count: 1)
+    items.at(0).amount = 0
+    items.at(1).amount = 0
+    items.at(1).receiver = Address::zero()
+    assert(spent.len() == 2 && spent.encoded_size() == 288)
+    i = 0
+    while i < 2 {
+        let item = spent.get(i)
+        assert(item.itemType as u256 == 2 + i)
+        assert(item.token.inner == 17 + i)
+        assert(item.identifier == (1 << 180) + i)
+        assert(item.amount == (1 << 160) + i)
+        i += 1
+    }
+    assert(received.len() == 1 && received.encoded_size() == 192)
+    let item = received.get(0)
+    assert(item.itemType == 3 && item.token.inner == 18)
+    assert(item.identifier == (1 << 180) + 1)
+    assert(
+        item.amount == (1 << 160) + 1 && item.recipient.inner == 24,
+    )
+    let empty = received_items(ref book, start: 2, count: 0)
+    assert(empty.len() == 0 && empty.encoded_size() == 32)
+}
+
+#[test]
+fn hash_output_preserves_full_words_in_an_independent_tail() {
+    let hashes = Arr<u256>::alloc(2)
+    *hashes.at(0) = 1 << 255
+    *hashes.at(
+            1,
+        ) = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    let output = hash_array(hashes)
+    *hashes.at(0) = 0
+    *hashes.at(1) = 0
+    assert(output.len() == 2 && output.encoded_size() == 96)
+    assert(output.get(0).val == 1 << 255)
+    assert(
+        output.get(1).val == 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+    )
+    let empty = hash_array(Arr<u256>::empty())
+    assert(empty.len() == 0 && empty.encoded_size() == 32)
+}

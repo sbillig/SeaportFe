@@ -9,6 +9,16 @@ use core::ptr
 use core::size_of
 use std::abi::Bytes
 use std::evm::{revert_error, Panic, PANIC_INDEX_OUT_OF_BOUNDS}
+use super::lowlevel::store_word
+
+/// Allocate the final ABI array tail. The caller writes every element before
+/// constructing a DynArray; no zeroed scratch array or final copy is needed.
+pub fn array_tail(_ len: u256, item_size: u256) -> (*u8, u256) {
+    let size = 32 + len * item_size
+    let data = ptr::alloc_bytes(size)
+    store_word(data, len)
+    (data, size)
+}
 
 pub struct Arr<T> { pub ptr: *T, len: u256 }
 

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
-use std::abi::{Bytes32, DynArray, MemVec}
+use core::abi::{AbiSize, Encode}
+use core::ptr
+use std::abi::{Bytes32, DynArray}
 use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
-use super::arr::Arr
+use super::arr::{Arr, array_tail}
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     ConsiderationNotMet,
@@ -679,45 +681,46 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 fn bool_array(_ values: Arr<bool>) -> DynArray<bool> {
-    let mut out = MemVec<bool>::zeroed(values.len())
+    let count = values.len()
+    let (data, size) = array_tail(count, item_size: bool::HEAD_SIZE)
     let mut i: u256 = 0
-    while i < values.len() {
-        out.set(index: i, value: *values.at(i))
+    while i < count {
+        (*values.at(i)).encode(ptr::offset_bytes(data, 32 + i * bool::HEAD_SIZE))
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_abi_tail(data, len: count, size)
 }
 
 pub fn hash_array(_ values: Arr<u256>) -> DynArray<Bytes32> {
-    let mut out = MemVec<Bytes32>::zeroed(values.len())
+    let count = values.len()
+    let (data, size) = array_tail(count, item_size: Bytes32::HEAD_SIZE)
     let mut i: u256 = 0
-    while i < values.len() {
-        out.set(index: i, value: Bytes32 { val: *values.at(i) })
+    while i < count {
+        Bytes32 { val: *values.at(i) }.encode(ptr::offset_bytes(data, 32 + i * Bytes32::HEAD_SIZE))
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_abi_tail(data, len: count, size)
 }
 
 fn execution_array(_ executions: Arr<ExecutionState>) -> DynArray<Execution> {
-    let mut out = MemVec<Execution>::zeroed(executions.len())
+    let count = executions.len()
+    let (data, size) = array_tail(count, item_size: Execution::HEAD_SIZE)
     let mut i: u256 = 0
-    while i < executions.len() {
+    while i < count {
         let e = *executions.at(i)
-        out.set(
-            index: i,
-            value: Execution {
-                item: ReceivedItem {
-                    itemType: e.item_type.downcast_truncate(),
-                    token: e.token,
-                    identifier: e.identifier,
-                    amount: e.amount,
-                    recipient: e.recipient,
-                },
-                offerer: e.offerer,
-                conduitKey: Bytes32 { val: e.conduit_key },
+        Execution {
+            item: ReceivedItem {
+                itemType: e.item_type.downcast_truncate(),
+                token: e.token,
+                identifier: e.identifier,
+                amount: e.amount,
+                recipient: e.recipient,
             },
-        )
+            offerer: e.offerer,
+            conduitKey: Bytes32 { val: e.conduit_key },
+        }
+            .encode(ptr::offset_bytes(data, 32 + i * Execution::HEAD_SIZE))
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_abi_tail(data, len: count, size)
 }

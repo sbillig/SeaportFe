@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
 use core::ptr
-use std::abi::{Bytes32, DynArray, MemVec}
+use core::abi::{AbiSize, Encode}
+use std::abi::{Bytes32, DynArray}
 use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
 use super::amount::apply_fraction
-use super::arr::Arr
+use super::arr::{Arr, array_tail}
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     BadFraction,
@@ -307,42 +308,38 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 pub fn spent_items(_ book: ref Book, start: u256, count: u256) -> DynArray<SpentItem> {
-    let mut out = MemVec<SpentItem>::zeroed(count)
+    let (data, size) = array_tail(count, item_size: SpentItem::HEAD_SIZE)
     let mut i: u256 = 0
     while i < count {
         let item = book.items.at(start + i)
-        out.set(
-            index: i,
-            value: SpentItem {
-                itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
-                token: Address::from_word_truncate(item.token.inner),
-                identifier: item.identifier,
-                amount: item.amount,
-            },
-        )
+        SpentItem {
+            itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
+            token: Address::from_word_truncate(item.token.inner),
+            identifier: item.identifier,
+            amount: item.amount,
+        }
+            .encode(ptr::offset_bytes(data, 32 + i * SpentItem::HEAD_SIZE))
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_abi_tail(data, len: count, size)
 }
 
 pub fn received_items(_ book: ref Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
-    let mut out = MemVec<ReceivedItem>::zeroed(count)
+    let (data, size) = array_tail(count, item_size: ReceivedItem::HEAD_SIZE)
     let mut i: u256 = 0
     while i < count {
         let item = book.items.at(start + i)
-        out.set(
-            index: i,
-            value: ReceivedItem {
-                itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
-                token: Address::from_word_truncate(item.token.inner),
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient: Address::from_word_truncate(item.receiver.inner),
-            },
-        )
+        ReceivedItem {
+            itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
+            token: Address::from_word_truncate(item.token.inner),
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient: Address::from_word_truncate(item.receiver.inner),
+        }
+            .encode(ptr::offset_bytes(data, 32 + i * ReceivedItem::HEAD_SIZE))
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_abi_tail(data, len: count, size)
 }
 
 pub fn emit_order_fulfilled(

@@ -3,9 +3,10 @@
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
 use core::ptr::{self, MemSpan}
-use std::abi::{Bytes32, DynArray, MemVec}
+use core::abi::{AbiSize, Encode}
+use std::abi::{Bytes32, DynArray}
 use std::evm::{Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
-use super::arr::{Arr, ByteRef}
+use super::arr::{Arr, ByteRef, array_tail}
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
@@ -266,18 +267,16 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
             ],
         ),
     )
-    let mut received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
-    received
-        .set(
-            index: 0,
-            value: ReceivedItem {
-                itemType: received_item_type.downcast_truncate(),
-                token: cd_address(CONSIDERATION_TOKEN),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                recipient: offerer,
-            },
-        )
+    let received_count = total_recipients + 1
+    let (received, received_size) = array_tail(received_count, item_size: ReceivedItem::HEAD_SIZE)
+    ReceivedItem {
+        itemType: received_item_type.downcast_truncate(),
+        token: cd_address(CONSIDERATION_TOKEN),
+        identifier: cd(CONSIDERATION_IDENTIFIER),
+        amount: cd(CONSIDERATION_AMOUNT),
+        recipient: offerer,
+    }
+        .encode(ptr::offset_bytes(received, 32))
     let mut combined_recipients: u256 = 0
     let mut i: u256 = 0
     while i < total_recipients {
@@ -300,16 +299,15 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
             )
         }
         combined_recipients = combined_recipients | recipient
-        received
-            .set(
-                index: i + 1,
-                value: ReceivedItem {
-                    itemType: additional_recipients_item_type.downcast_truncate(),
-                    token: additional_recipients_token,
-                    identifier: 0,
-                    amount,
-                    recipient: Address { inner: recipient },
-                },
+        ReceivedItem {
+            itemType: additional_recipients_item_type.downcast_truncate(),
+            token: additional_recipients_token,
+            identifier: 0,
+            amount,
+            recipient: Address { inner: recipient },
+        }
+            .encode(
+                ptr::offset_bytes(received, 32 + (i + 1) * ReceivedItem::HEAD_SIZE),
             )
         i += 1
     }
@@ -347,19 +345,20 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         ],
     )
 
-    let mut spent = MemVec<SpentItem>::zeroed(1)
-    spent
-        .set(
-            index: 0,
-            value: SpentItem {
-                itemType: offered_item_type.downcast_truncate(),
-                token: cd_address(OFFER_TOKEN),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-            },
-        )
-    let offer_items = spent.to_dyn_array()
-    let consideration_items = received.to_dyn_array()
+    let (spent, spent_size) = array_tail(1, item_size: SpentItem::HEAD_SIZE)
+    SpentItem {
+        itemType: offered_item_type.downcast_truncate(),
+        token: cd_address(OFFER_TOKEN),
+        identifier: cd(OFFER_IDENTIFIER),
+        amount: cd(OFFER_AMOUNT),
+    }
+        .encode(ptr::offset_bytes(spent, 32))
+    let offer_items = DynArray<SpentItem>::from_abi_tail(data: spent, len: 1, size: spent_size)
+    let consideration_items = DynArray<ReceivedItem>::from_abi_tail(
+        data: received,
+        len: received_count,
+        size: received_size,
+    )
     log.emit(
         OrderFulfilled {
             orderHash: Bytes32 { val: order_hash },
