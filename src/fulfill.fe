@@ -25,7 +25,7 @@ use super::executor::{
     trigger_if_armed,
 }
 use super::hashing::{Env, derive_order_hash}
-use super::model::{Book, Item, OrderState, Resolvers}
+use super::model::{Book, Item, OrderState, Resolvers, checked_enum}
 use super::signature::verify_signature
 use super::status::{
     adjust_fill_fraction,
@@ -85,7 +85,8 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     }
     let numerator = order.numerator
     let denominator = order.denominator
-    if order.order_type == CONTRACT as u256 {
+    let order_type = checked_enum(order.order_type, variants: 5)
+    if order_type == CONTRACT as u256 {
         if numerator * denominator != 1 {
             revert_error(BadFraction {})
         }
@@ -94,7 +95,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     if numerator > denominator || numerator == 0 {
         revert_error(BadFraction {})
     }
-    if numerator < denominator && order.order_type & 1 == 0 {
+    if numerator < denominator && order_type & 1 == 0 {
         revert_error(PartialFillsNotEnabledForOrder {})
     }
     let order_hash = consideration_length_checked_order_hash(book, order)
@@ -313,8 +314,8 @@ pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem
         out.set(
             index: i,
             value: SpentItem {
-                itemType: item.item_type.downcast_truncate(),
-                token: item.token,
+                itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
+                token: Address::from_word_truncate(item.token.inner),
                 identifier: item.identifier,
                 amount: item.amount,
             },
@@ -332,11 +333,11 @@ pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<Receiv
         out.set(
             index: i,
             value: ReceivedItem {
-                itemType: item.item_type.downcast_truncate(),
-                token: item.token,
+                itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
+                token: Address::from_word_truncate(item.token.inner),
                 identifier: item.identifier,
                 amount: item.amount,
-                recipient: item.receiver,
+                recipient: Address::from_word_truncate(item.receiver.inner),
             },
         )
         i += 1
@@ -350,8 +351,8 @@ uses (log: mut Log)
     log.emit(
         OrderFulfilled {
             orderHash: Bytes32 { val: order_hash },
-            offerer: order.offerer,
-            zone: order.zone,
+            offerer: Address::from_word_truncate(order.offerer.inner),
+            zone: Address::from_word_truncate(order.zone.inner),
             recipient,
             offer: spent_items(book, start: order.offer_start, count: order.offer_len),
             consideration: received_items(
@@ -376,7 +377,7 @@ pub fn validate_and_fulfill_advanced_order(
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let order_type = book.order(0).order_type
+    let order_type = checked_enum(book.order(0).order_type, variants: 5)
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
     if order_type != CONTRACT as u256 {
         fulfill_single_order(env, book, resolvers, fulfiller_conduit_key, recipient)

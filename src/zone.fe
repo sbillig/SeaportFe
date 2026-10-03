@@ -31,7 +31,7 @@ const MAX_RETURNED_ARRAY_LENGTH: u256 = 0xffff
 pub fn is_restricted_and_caller_not_zone(_ order_type: u256, _ zone: Address) -> bool
 uses (ctx: Ctx)
 {
-    order_type < 4 && order_type > 1 && ctx.caller() != zone
+    order_type < 4 && order_type > 1 && ctx.caller() != Address::from_word_truncate(zone.inner)
 }
 
 fn at(_ base: *u8, _ offset: u256) -> *u8 {

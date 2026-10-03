@@ -10,7 +10,7 @@ use core::size_of
 use std::abi::Bytes
 use std::evm::{revert_error, Panic, PANIC_INDEX_OUT_OF_BOUNDS}
 
-pub struct Arr<T> { ptr: *T, len: u256 }
+pub struct Arr<T> { pub ptr: *T, len: u256 }
 
 impl<T> Copy for Arr<T> {}
 
@@ -19,11 +19,9 @@ impl<T> Arr<T> {
     pub fn alloc(_ len: u256) -> Self {
         Arr { ptr: ptr::cast<u8, T>(ptr::alloc_bytes(len * size_of<T>())), len }
     }
-
     pub fn empty() -> Self {
         Arr::alloc(0)
     }
-
     pub fn len(self) -> u256 {
         self.len
     }
@@ -46,15 +44,12 @@ impl ByteRef {
     pub fn of(_ bytes: Bytes) -> Self {
         ByteRef { data: bytes.encoded_span().ptr(), len: bytes.len(), size: bytes.encoded_size() }
     }
-
     pub fn empty() -> Self {
         ByteRef::of(Bytes::empty())
     }
-
     pub fn to_bytes(self) -> Bytes {
         Bytes::from_abi_tail(data: self.data, len: self.len, size: self.size)
     }
-
     pub fn payload(self) -> *u8 {
         ptr::offset_bytes(self.data, 32)
     }

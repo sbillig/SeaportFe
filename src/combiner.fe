@@ -327,7 +327,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 fn revert_on_failed_update(_ order: *OrderState, _ revert_on_invalid: bool) -> bool
 uses (ctx: Ctx)
 {
-    revert_on_invalid || (order.order_type > 1 && ctx.caller() != order.zone)
+    revert_on_invalid
+        || (order.order_type > 1 && ctx.caller() != Address::from_word_truncate(order.zone.inner))
 }
 
 /// `_fulfillAvailableAdvancedOrders`

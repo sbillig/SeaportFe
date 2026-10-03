@@ -4,7 +4,7 @@
 // their name, which also enters the EIP-712 domain separator.
 use std::abi::{Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallData, Create, Ctx, Log, RawOps, revert_error}
-use super::abi_view::ComponentsView
+use super::abi_view::{CalldataView, ComponentsView}
 use super::basic::{assert_decodable_basic_order_calldata, validate_and_fulfill_basic_order}
 use super::combiner::{fulfill_available_advanced_orders, match_advanced_orders}
 use super::errors::TloadTestContractDeploymentFailed
@@ -12,13 +12,11 @@ use super::fulfill::validate_and_fulfill_advanced_order
 use super::hashing::{Env, derive_components_hash, derive_domain_separator}
 use super::manage::{cancel, validate}
 use super::model::{
-    advanced_orders,
     no_resolvers,
     fulfillments,
     nested_components,
-    orders_as_advanced,
+    orders_book,
     resolvers,
-    single_advanced,
     single_order,
 }
 use super::arr::Arr
@@ -182,112 +180,104 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     validate_and_fulfill_basic_order(env)
 }
 
-pub fn fulfill_order(_ env: ref Env, order: Order, fulfiller_conduit_key: Bytes32) -> bool
+pub fn fulfill_order(_ env: ref Env) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(64)
+    let order = args.struct_argument(offset: 0, size: 64)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_order(order),
+        book: single_order(order, advanced: false),
         resolvers: no_resolvers(),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        fulfiller_conduit_key: args.word(32),
         recipient: ctx.caller(),
     )
 }
 
-pub fn fulfill_advanced_order(
-    _ env: ref Env,
-    advanced_order: AdvancedOrder,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    fulfiller_conduit_key: Bytes32,
-    recipient: Address,
-) -> bool
+pub fn fulfill_advanced_order(_ env: ref Env) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(128)
+    let order = args.struct_argument(offset: 0, size: 160)
+    let criteria = args.array_argument(32)
+    let recipient = args.address_argument(96)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_advanced(advanced_order),
-        resolvers: resolvers(criteria_resolvers),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        book: single_order(order, advanced: true),
+        resolvers: resolvers(criteria),
+        fulfiller_conduit_key: args.word(64),
         recipient: caller_if_zero(recipient),
     )
 }
 
-pub fn fulfill_available_orders(
-    _ env: ref Env,
-    orders: DynArray<Order>,
-    offer_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    consideration_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    fulfiller_conduit_key: Bytes32,
-    maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+pub fn fulfill_available_orders(_ env: ref Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(160)
+    let orders = args.array_argument(0)
+    let offer = args.array_argument(32)
+    let consideration = args.array_argument(64)
     fulfill_available_advanced_orders(
         env,
-        book: orders_as_advanced(orders),
+        book: orders_book(orders, advanced: false),
         resolvers: no_resolvers(),
-        offer_fulfillments: nested_components(offer_fulfillments),
-        consideration_fulfillments: nested_components(consideration_fulfillments),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        offer_fulfillments: nested_components(offer),
+        consideration_fulfillments: nested_components(consideration),
+        fulfiller_conduit_key: args.word(96),
         recipient: ctx.caller(),
-        maximum_fulfilled,
+        maximum_fulfilled: args.word(128),
     )
 }
 
-pub fn fulfill_available_advanced(
-    _ env: ref Env,
-    orders: DynArray<AdvancedOrder>,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    offer_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    consideration_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    fulfiller_conduit_key: Bytes32,
-    recipient: Address,
-    maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+pub fn fulfill_available_advanced(_ env: ref Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(224)
+    let orders = args.array_argument(0)
+    let criteria = args.array_argument(32)
+    let offer = args.array_argument(64)
+    let consideration = args.array_argument(96)
+    let recipient = args.address_argument(160)
     fulfill_available_advanced_orders(
         env,
-        book: advanced_orders(orders),
-        resolvers: resolvers(criteria_resolvers),
-        offer_fulfillments: nested_components(offer_fulfillments),
-        consideration_fulfillments: nested_components(consideration_fulfillments),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        book: orders_book(orders, advanced: true),
+        resolvers: resolvers(criteria),
+        offer_fulfillments: nested_components(offer),
+        consideration_fulfillments: nested_components(consideration),
+        fulfiller_conduit_key: args.word(128),
         recipient: caller_if_zero(recipient),
-        maximum_fulfilled,
+        maximum_fulfilled: args.word(192),
     )
 }
 
-pub fn match_orders(
-    _ env: ref Env,
-    orders: DynArray<Order>,
-    fulfillments_in: DynArray<Fulfillment>,
-) -> DynArray<Execution>
+pub fn match_orders(_ env: ref Env) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(64)
+    let orders = args.array_argument(0)
+    let groups = args.array_argument(32)
     match_advanced_orders(
         env,
-        book: orders_as_advanced(orders),
+        book: orders_book(orders, advanced: false),
         resolvers: no_resolvers(),
-        fulfillments: fulfillments(fulfillments_in),
+        fulfillments: fulfillments(groups),
         recipient: ctx.caller(),
     )
 }
 
-pub fn match_advanced(
-    _ env: ref Env,
-    orders: DynArray<AdvancedOrder>,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    fulfillments_in: DynArray<Fulfillment>,
-    recipient: Address,
-) -> DynArray<Execution>
+pub fn match_advanced(_ env: ref Env) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let args = CalldataView::arguments(128)
+    let orders = args.array_argument(0)
+    let criteria = args.array_argument(32)
+    let groups = args.array_argument(64)
+    let recipient = args.address_argument(96)
     match_advanced_orders(
         env,
-        book: advanced_orders(orders),
-        resolvers: resolvers(criteria_resolvers),
-        fulfillments: fulfillments(fulfillments_in),
+        book: orders_book(orders, advanced: true),
+        resolvers: resolvers(criteria),
+        fulfillments: fulfillments(groups),
         recipient: caller_if_zero(recipient),
     )
 }
@@ -351,92 +341,50 @@ pub contract Seaport {
             fulfill_basic_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillOrder { order, fulfillerConduitKey } -> bool
-        uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
-        {
-            fulfill_order(ref env, order, fulfiller_conduit_key: fulfillerConduitKey)
+        #[decode(manual)]
+        SeaportMsg::FulfillOrder { .. } -> bool uses (
+            env,
+            ctx: Ctx,
+            call: mut Call,
+            ops: mut RawOps,
+            log: mut Log,
+        ) {
+            fulfill_order(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAdvancedOrder {
-            advancedOrder,
-            criteriaResolvers,
-            fulfillerConduitKey,
-            recipient,
-        } -> bool
+        #[decode(manual)]
+        SeaportMsg::FulfillAdvancedOrder { .. } -> bool
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_advanced_order(
-                ref env,
-                advanced_order: advancedOrder,
-                criteria_resolvers: criteriaResolvers,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-            )
+            fulfill_advanced_order(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableOrders {
-            orders,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        #[decode(manual)]
+        SeaportMsg::FulfillAvailableOrders { .. } -> (DynArray<bool>, DynArray<Execution>)
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_available_orders(
-                ref env,
-                orders,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_orders(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableAdvancedOrders {
-            advancedOrders,
-            criteriaResolvers,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            recipient,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        #[decode(manual)]
+        SeaportMsg::FulfillAvailableAdvancedOrders { .. } -> (DynArray<bool>, DynArray<Execution>)
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_available_advanced(
-                ref env,
-                orders: advancedOrders,
-                criteria_resolvers: criteriaResolvers,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_advanced(ref env)
         }
         #[payable]
-        SeaportMsg::MatchOrders { orders, fulfillments } -> DynArray<Execution>
+        #[decode(manual)]
+        SeaportMsg::MatchOrders { .. } -> DynArray<Execution>
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            match_orders(ref env, orders, fulfillments_in: fulfillments)
+            match_orders(ref env)
         }
         #[payable]
-        SeaportMsg::MatchAdvancedOrders {
-            orders,
-            criteriaResolvers,
-            fulfillments,
-            recipient,
-        } -> DynArray<Execution>
+        #[decode(manual)]
+        SeaportMsg::MatchAdvancedOrders { .. } -> DynArray<Execution>
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            match_advanced(
-                ref env,
-                orders,
-                criteria_resolvers: criteriaResolvers,
-                fulfillments_in: fulfillments,
-                recipient,
-            )
+            match_advanced(ref env)
         }
         #[decode(manual)]
         SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
@@ -445,14 +393,15 @@ pub contract Seaport {
                 orders: CallData::with_base(4).array_view<OrderComponents>(0),
             )
         }
-        SeaportMsg::Validate { orders } -> bool uses (
+        #[decode(manual)]
+        SeaportMsg::Validate { .. } -> bool uses (
             env,
             ctx: Ctx,
             call: Call,
             ops: mut RawOps,
             log: mut Log,
         ) {
-            validate(env, orders)
+            validate(env, orders: CalldataView::arguments(32).array_argument(0))
         }
         SeaportMsg::IncrementCounter {} -> u256 uses (
             env,
@@ -532,92 +481,50 @@ pub contract Consideration {
             fulfill_basic_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillOrder { order, fulfillerConduitKey } -> bool
-        uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
-        {
-            fulfill_order(ref env, order, fulfiller_conduit_key: fulfillerConduitKey)
+        #[decode(manual)]
+        SeaportMsg::FulfillOrder { .. } -> bool uses (
+            env,
+            ctx: Ctx,
+            call: mut Call,
+            ops: mut RawOps,
+            log: mut Log,
+        ) {
+            fulfill_order(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAdvancedOrder {
-            advancedOrder,
-            criteriaResolvers,
-            fulfillerConduitKey,
-            recipient,
-        } -> bool
+        #[decode(manual)]
+        SeaportMsg::FulfillAdvancedOrder { .. } -> bool
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_advanced_order(
-                ref env,
-                advanced_order: advancedOrder,
-                criteria_resolvers: criteriaResolvers,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-            )
+            fulfill_advanced_order(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableOrders {
-            orders,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        #[decode(manual)]
+        SeaportMsg::FulfillAvailableOrders { .. } -> (DynArray<bool>, DynArray<Execution>)
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_available_orders(
-                ref env,
-                orders,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_orders(ref env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableAdvancedOrders {
-            advancedOrders,
-            criteriaResolvers,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            recipient,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        #[decode(manual)]
+        SeaportMsg::FulfillAvailableAdvancedOrders { .. } -> (DynArray<bool>, DynArray<Execution>)
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            fulfill_available_advanced(
-                ref env,
-                orders: advancedOrders,
-                criteria_resolvers: criteriaResolvers,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_advanced(ref env)
         }
         #[payable]
-        SeaportMsg::MatchOrders { orders, fulfillments } -> DynArray<Execution>
+        #[decode(manual)]
+        SeaportMsg::MatchOrders { .. } -> DynArray<Execution>
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            match_orders(ref env, orders, fulfillments_in: fulfillments)
+            match_orders(ref env)
         }
         #[payable]
-        SeaportMsg::MatchAdvancedOrders {
-            orders,
-            criteriaResolvers,
-            fulfillments,
-            recipient,
-        } -> DynArray<Execution>
+        #[decode(manual)]
+        SeaportMsg::MatchAdvancedOrders { .. } -> DynArray<Execution>
         uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         {
-            match_advanced(
-                ref env,
-                orders,
-                criteria_resolvers: criteriaResolvers,
-                fulfillments_in: fulfillments,
-                recipient,
-            )
+            match_advanced(ref env)
         }
         #[decode(manual)]
         SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
@@ -626,14 +533,15 @@ pub contract Consideration {
                 orders: CallData::with_base(4).array_view<OrderComponents>(0),
             )
         }
-        SeaportMsg::Validate { orders } -> bool uses (
+        #[decode(manual)]
+        SeaportMsg::Validate { .. } -> bool uses (
             env,
             ctx: Ctx,
             call: Call,
             ops: mut RawOps,
             log: mut Log,
         ) {
-            validate(env, orders)
+            validate(env, orders: CalldataView::arguments(32).array_argument(0))
         }
         SeaportMsg::IncrementCounter {} -> u256 uses (
             env,

@@ -1,8 +1,20 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
 use std::abi::{ArrayView, Bytes32, DynArray}
-use super::abi_view::ComponentsView
-use std::evm::{Call, CallData, Ctx, Log, RawOps, revert_error}
+use core::ptr
+use super::abi_view::{CalldataView, ComponentsView}
+use super::arr::ByteRef
+use std::evm::{
+    Address,
+    Call,
+    CallData,
+    Ctx,
+    Log,
+    RawOps,
+    Panic,
+    PANIC_ENUM_CONVERSION,
+    revert_error,
+}
 use super::errors::{
     CannotCancelOrder,
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -11,7 +23,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::single_order
+use super::model::{Book, OrderState, checked_enum, orders_book}
 use super::signature::verify_signature
 use super::status::{
     assert_non_reentrant,
@@ -20,7 +32,7 @@ use super::status::{
     set_validated,
     verify_order_status,
 }
-use super::types::{CONTRACT, Order, OrderComponents}
+use super::types::{CONTRACT, OfferItem, ConsiderationItem, OrderComponents, OrderParameters}
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled.
@@ -53,15 +65,15 @@ uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
 
 /// `_validate`: mark signed orders as validated so that later fulfillments
 /// skip signature verification.
-pub fn validate(_ env: Env, orders: DynArray<Order>) -> bool
+pub fn validate(_ env: Env, orders: CalldataView) -> bool
 uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
 {
+    let book = orders_book(orders, advanced: false)
     assert_non_reentrant(env)
     let mut i: u256 = 0
-    while i < orders.len() {
-        let book = single_order(orders.get(i))
-        let order = book.order(0)
-        if order.order_type != CONTRACT as u256 {
+    while i < book.orders.len() {
+        let order = book.order(i)
+        if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(book, order)
             let status = read_status(order_hash)
             verify_order_status(
@@ -76,7 +88,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
                 }
                 verify_signature(
                     env,
-                    offerer: order.offerer,
+                    offerer: Address::from_word_truncate(order.offerer.inner),
                     order_hash,
                     signature: book.bytes(order.signature),
                 )
@@ -84,7 +96,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
                 log.emit(
                     OrderValidated {
                         orderHash: Bytes32 { val: order_hash },
-                        orderParameters: orders.get(i).parameters,
+                        orderParameters: validated_parameters(book, order),
                     },
                 )
             }
@@ -92,4 +104,67 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
         i += 1
     }
     true
+}
+
+/// Serialize the unchanged model for the typed OrderValidated event. This
+/// avoids decoding an owned Order merely to encode its parameters again.
+fn validated_parameters(_ book: Book, _ order: *OrderState) -> OrderParameters {
+    let offer = event_items(
+        book,
+        start: order.offer_start,
+        count: order.offer_len,
+        consideration: false,
+    )
+    let consideration = event_items(
+        book,
+        start: order.consideration_start,
+        count: order.consideration_len,
+        consideration: true,
+    )
+    OrderParameters {
+        offerer: Address::from_word_truncate(order.offerer.inner),
+        zone: Address::from_word_truncate(order.zone.inner),
+        offer: DynArray<OfferItem>::from_abi_tail(
+            data: offer.data,
+            len: offer.len,
+            size: offer.size,
+        ),
+        consideration: DynArray<ConsiderationItem>::from_abi_tail(
+            data: consideration.data,
+            len: consideration.len,
+            size: consideration.size,
+        ),
+        orderType: order.order_type.downcast_truncate(),
+        startTime: order.start_time,
+        endTime: order.end_time,
+        zoneHash: Bytes32 { val: order.zone_hash },
+        salt: order.salt,
+        conduitKey: Bytes32 { val: order.conduit_key },
+        totalOriginalConsiderationItems: order.total_original,
+    }
+}
+
+fn event_items(_ book: Book, start: u256, count: u256, consideration: bool) -> ByteRef {
+    let stride: u256 = if consideration { 192 } else { 160 }
+    let size = 32 + count * stride
+    let data = ptr::alloc_bytes(size)
+    *ptr::cast<u8, u256>(data) = count
+    let mut i: u256 = 0
+    while i < count {
+        let item = book.items.at(start + i)
+        if item.item_type > 5 {
+            revert_error(Panic::from(PANIC_ENUM_CONVERSION))
+        }
+        let out = ptr::cast<u8, u256>(ptr::offset_bytes(data, 32 + i * stride))
+        *out = item.item_type
+        *ptr::offset(out, 1) = Address::from_word_truncate(item.token.inner).inner
+        *ptr::offset(out, 2) = item.identifier
+        *ptr::offset(out, 3) = item.start_amount
+        *ptr::offset(out, 4) = item.end_amount
+        if consideration {
+            *ptr::offset(out, 5) = Address::from_word_truncate(item.recipient.inner).inner
+        }
+        i += 1
+    }
+    ByteRef { data, len: count, size }
 }

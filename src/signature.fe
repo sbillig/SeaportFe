@@ -33,6 +33,7 @@ pub fn domain_separator(_ env: Env) -> u256 uses (ctx: Ctx) {
 pub fn verify_signature(_ env: Env, offerer: Address, order_hash: u256, signature: ByteRef)
 uses (ctx: Ctx, call: Call, ops: RawOps)
 {
+    let offerer = Address::from_word_truncate(offerer.inner)
     if offerer == ctx.caller() {
         return
     }

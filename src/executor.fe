@@ -5,6 +5,7 @@
 use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use super::model::checked_enum
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -81,21 +82,25 @@ pub fn transfer(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if item.item_type == NATIVE as u256 {
-        if (item.token.inner | item.identifier) != 0 {
+    let item_type = checked_enum(item.item_type, variants: 6)
+    let token = Address::from_word_truncate(item.token.inner)
+    let from = Address::from_word_truncate(from.inner)
+    let recipient = Address::from_word_truncate(item.recipient.inner)
+    if item_type == NATIVE as u256 {
+        if (token.inner | item.identifier) != 0 {
             revert_error(UnusedItemParameters {})
         }
-        transfer_native_tokens(to: item.recipient, amount: item.amount)
+        transfer_native_tokens(to: recipient, amount: item.amount)
         return acc
     }
-    if item.item_type == ERC20 as u256 {
+    if item_type == ERC20 as u256 {
         if item.identifier != 0 {
             revert_error(UnusedItemParameters {})
         }
         return transfer_erc20(
-            token: item.token,
+            token,
             from,
-            to: item.recipient,
+            to: recipient,
             amount: item.amount,
             conduit_key,
             acc,
@@ -103,11 +108,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             env,
         )
     }
-    if item.item_type == ERC721 as u256 {
+    if item_type == ERC721 as u256 {
         return transfer_erc721(
-            token: item.token,
+            token,
             from,
-            to: item.recipient,
+            to: recipient,
             identifier: item.identifier,
             amount: item.amount,
             conduit_key,
@@ -117,9 +122,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     }
     transfer_erc1155(
-        token: item.token,
+        token,
         from,
-        to: item.recipient,
+        to: recipient,
         identifier: item.identifier,
         amount: item.amount,
         conduit_key,

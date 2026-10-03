@@ -89,3 +89,77 @@ impl ComponentItems {
         self.input.word_at(self.start + index * self.stride + offset)
     }
 }
+
+/// A pointer into Seaport's custom calldata encoding. Only argument heads
+/// use Solidity's bounds checks; nested offsets and lengths are masked to
+/// 32 bits and missing calldata is zero-filled by the EVM.
+pub struct CalldataView { pos: u256 }
+impl Copy for CalldataView {}
+
+impl CalldataView {
+    pub fn arguments(_ size: u256) -> Self {
+        checked_frame_end<Sol>(4, size, CallData::new().len())
+        Self { pos: 4 }
+    }
+    pub fn struct_argument(self, offset: u256, size: u256) -> Self {
+        let relative = self.word(offset)
+        if relative >= 0x10000000000000000 {
+            revert_empty()
+        }
+        checked_frame_end<Sol>(self.pos + relative, size, CallData::new().len())
+        self.child(offset)
+    }
+    pub fn array_argument(self, _ offset: u256) -> Self {
+        let relative = self.word(offset)
+        if relative >= 0x10000000000000000 {
+            revert_empty()
+        }
+        let pos = self.pos + relative
+        let input = CallData::new()
+        checked_frame_end<Sol>(pos, 32, input.len())
+        let len = input.word_at(pos)
+        if len >= 0x10000000000000000 {
+            revert_empty()
+        }
+        checked_frame_end<Sol>(pos + 32, len * 32, input.len())
+        self.child(offset)
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn word(self, _ offset: u256) -> u256 {
+        CallData::new().word_at(self.pos + offset)
+    }
+    pub fn address_argument(self, _ offset: u256) -> Address {
+        let inner = self.word(offset)
+        if inner >> 160 != 0 {
+            revert_empty()
+        }
+        Address { inner }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn child(self, _ offset: u256) -> Self {
+        Self { pos: self.pos + (self.word(offset) & 0xffffffff) }
+    }
+    pub fn len(self) -> u256 {
+        self.word(0) & 0xffffffff
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn element(self, index: u256, stride: u256) -> Self {
+        Self { pos: self.pos + 32 + index * stride }
+    }
+    pub fn dynamic_element(self, _ index: u256) -> Self {
+        self.element(index: 0, stride: 32).child(index * 32)
+    }
+
+    /// Seaport copies the padded tail, including any nonzero padding.
+    #[arithmetic(unchecked)]
+    pub fn byte_size(self) -> u256 {
+        32 + ((self.word(0) + 31) & 0xffffffe0)
+    }
+    pub fn copy_bytes(self, _ dest: *u8) {
+        CallData::new().copy_to_memory_unchecked(dest, src_offset: self.pos, len: self.byte_size())
+        *core::ptr::cast<u8, u256>(dest) = self.len()
+    }
+}

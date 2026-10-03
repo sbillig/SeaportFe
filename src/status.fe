@@ -24,7 +24,7 @@ use super::hashing::Env
 pub const MAX_UINT120: u256 = 0xffffffffffffffffffffffffffffff
 
 pub fn counter_slot(_ offerer: Address) -> u256 {
-    keccak_words([offerer.inner, 0])
+    keccak_words([Address::from_word_truncate(offerer.inner).inner, 0])
 }
 
 pub fn status_slot(_ order_hash: u256) -> u256 {
@@ -32,7 +32,7 @@ pub fn status_slot(_ order_hash: u256) -> u256 {
 }
 
 pub fn nonce_slot(_ offerer: Address) -> u256 {
-    keccak_words([offerer.inner, 2])
+    keccak_words([Address::from_word_truncate(offerer.inner).inner, 2])
 }
 
 pub fn get_counter(_ offerer: Address) -> u256 uses (ops: RawOps) {

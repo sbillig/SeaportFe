@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // CriteriaResolution: resolve criteria-based items to concrete identifiers
 // with Merkle proofs.
-use std::evm::{keccak_words, revert_error}
+use core::ptr
+use std::evm::{RawOps, keccak_words, revert_error}
 use super::arr::Arr
 use super::errors::{
     ConsiderationCriteriaResolverOutOfRange,
@@ -12,23 +13,27 @@ use super::errors::{
     UnresolvedConsiderationCriteria,
     UnresolvedOfferCriteria,
 }
-use super::model::{Book, Item, OrderState, Resolver, Resolvers}
+use super::model::{Book, Item, OrderState, Resolver, Resolvers, checked_enum}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
-pub fn apply_criteria_resolvers(_ book: Book, _ resolvers: Resolvers) {
+pub fn apply_criteria_resolvers(_ book: Book, _ resolvers: Resolvers)
+uses (ops: RawOps)
+{
     let total_orders = book.orders.len()
     let mut i: u256 = 0
     while i < resolvers.list.len() {
         let resolver = *resolvers.list.at(i)
         if resolver.order_index >= total_orders {
             revert_error(
-                OrderCriteriaResolverOutOfRange { side: resolver.side.downcast_truncate() },
+                OrderCriteriaResolverOutOfRange {
+                    side: checked_enum(resolver.side, variants: 2).downcast_truncate(),
+                },
             )
         }
         let order = book.order(resolver.order_index)
         if order.numerator != 0 {
-            if resolver.side != OFFER as u256 {
+            if checked_enum(resolver.side, variants: 2) != OFFER as u256 {
                 if resolver.index >= order.consideration_len {
                     revert_error(ConsiderationCriteriaResolverOutOfRange {})
                 }
@@ -77,11 +82,14 @@ pub fn apply_criteria_resolvers(_ book: Book, _ resolvers: Resolvers) {
 
 /// Criteria items stay unresolved only as wildcards of contract orders.
 fn requires_resolution(_ item: *Item, _ order_type: u256) -> bool {
-    item.item_type > 3 && (order_type != CONTRACT as u256 || item.identifier != 0)
+    checked_enum(item.item_type, variants: 6) > 3
+        && (order_type != CONTRACT as u256 || item.identifier != 0)
 }
 
-fn update_criteria_item(_ item: *Item, _ resolver: Resolver, proofs: Arr<u256>) {
-    if item.item_type <= 3 {
+fn update_criteria_item(_ item: *Item, _ resolver: Resolver, proofs: Arr<u256>)
+uses (ops: RawOps)
+{
+    if checked_enum(item.item_type, variants: 6) <= 3 {
         revert_error(CriteriaNotEnabledForItem {})
     }
     if item.identifier != 0 {
@@ -100,11 +108,19 @@ fn update_criteria_item(_ item: *Item, _ resolver: Resolver, proofs: Arr<u256>) 
 }
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
-pub fn verify_proof(leaf: u256, root: u256, proofs: Arr<u256>, start: u256, len: u256) {
+pub fn verify_proof(leaf: u256, root: u256, proofs: Arr<u256>, start: u256, len: u256)
+uses (ops: RawOps)
+{
     let mut computed = keccak_words([leaf])
     let mut i: u256 = 0
-    while i < len {
-        let element = *proofs.at(start + i)
+    // Seaport's assembly verifier shifts the raw length to a byte extent.
+    // High five bits disappear. Its raw EVM memory walk has no array bounds
+    // check; oversized surviving lengths exhaust gas instead of panicking.
+    let words = (len << 5) >> 5
+    while i < words {
+        let element = ops.mload(
+                addr: ptr::cast<u256, u8>(ptr::offset(proofs.ptr, start + i)),
+            )
         computed = if computed > element {
             keccak_words([element, computed])
         } else {

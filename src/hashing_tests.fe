@@ -250,7 +250,7 @@ fn bulk_order_typehash_preserves_default_inputs() {
     )
 }
 
-fn call_component_words<const N: usize>(
+pub fn call_component_words<const N: usize>(
     _ addr: Address,
     selector: u256,
     words: [u256; N],

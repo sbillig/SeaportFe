@@ -47,8 +47,8 @@ pub struct ConsiderationItem {
 impl Copy for ConsiderationItem {}
 
 /// Output-only (events, zone and offerer calls, return values). `itemType`
-/// is `uint8` in the event signatures; an invalid type always reverts later
-/// in the transfer, so truncating the stored word is not observable.
+/// is `uint8` in the event signatures; raw model words are checked before
+/// typed event serialization or transfer.
 #[abi]
 pub struct SpentItem {
     pub itemType: u8,
