@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
-use std::abi::{Bytes32, DynArray}
-use std::evm::{Call, Ctx, Log, RawOps, revert_error}
+use std::abi::{ArrayView, Bytes32, DynArray}
+use super::abi_view::ComponentsView
+use std::evm::{Call, CallData, Ctx, Log, RawOps, revert_error}
 use super::errors::{
     CannotCancelOrder,
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -23,26 +24,24 @@ use super::types::{CONTRACT, Order, OrderComponents}
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled.
-pub fn cancel(_ env: Env, orders: DynArray<OrderComponents>) -> bool
+pub fn cancel(_ env: Env, orders: ArrayView<CallData, OrderComponents>) -> bool
 uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
 {
     assert_non_reentrant(env)
     let mut any_invalid = false
     let mut i: u256 = 0
     while i < orders.len() {
-        let order = orders.get(i)
-        if order.orderType == CONTRACT
-            || (ctx.caller() != order.offerer && ctx.caller() != order.zone) {
+        let order = ComponentsView::element(orders, index: i)
+        let offerer = order.offerer()
+        let zone = order.zone()
+        if order.order_type() == CONTRACT as u256
+            || (ctx.caller() != offerer && ctx.caller() != zone) {
             any_invalid = true
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
         log.emit(
-            OrderCancelled {
-                orderHash: Bytes32 { val: order_hash },
-                offerer: order.offerer,
-                zone: order.zone,
-            },
+            OrderCancelled { orderHash: Bytes32 { val: order_hash }, offerer, zone },
         )
         i += 1
     }

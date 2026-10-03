@@ -5,7 +5,7 @@ use core::ptr
 use std::evm::{Address, keccak256, keccak_words, create2_address}
 use super::arr::Arr
 use super::model::{Book, Item, OrderState}
-use super::types::OrderComponents
+use super::abi_view::ComponentsView
 
 /// keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
 pub const EIP712_DOMAIN_TYPEHASH: u256 = 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f
@@ -72,41 +72,43 @@ pub fn derive_order_hash(_ book: Book, order: *OrderState, counter: u256) -> u25
 }
 
 /// Hash an order's ABI fields without building the mutable fulfillment model.
-pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
-    let offer = order.offer
+pub fn derive_components_hash(_ order: ComponentsView) -> u256 {
+    let offer = order.items(head_pos: 64, stride: 160)
     let offer_hashes = ptr::alloc_bytes(offer.len() * 32)
     let mut i: u256 = 0
     while i < offer.len() {
-        let item = offer.get(i)
         store(
             ptr::offset_bytes(offer_hashes, i * 32),
-            keccak_words([
-                OFFER_ITEM_TYPEHASH,
-                item.itemType as u256,
-                item.token.inner,
-                item.identifierOrCriteria,
-                item.startAmount,
-                item.endAmount,
-            ]),
+            keccak_words(
+                [
+                    OFFER_ITEM_TYPEHASH,
+                    offer.word(index: i, offset: 0),
+                    offer.word(index: i, offset: 32),
+                    offer.word(index: i, offset: 64),
+                    offer.word(index: i, offset: 96),
+                    offer.word(index: i, offset: 128),
+                ],
+            ),
         )
         i += 1
     }
-    let consideration = order.consideration
+    let consideration = order.items(head_pos: 96, stride: 192)
     let consideration_hashes = ptr::alloc_bytes(consideration.len() * 32)
     i = 0
     while i < consideration.len() {
-        let item = consideration.get(i)
         store(
             ptr::offset_bytes(consideration_hashes, i * 32),
-            keccak_words([
-                CONSIDERATION_ITEM_TYPEHASH,
-                item.itemType as u256,
-                item.token.inner,
-                item.identifierOrCriteria,
-                item.startAmount,
-                item.endAmount,
-                item.recipient.inner,
-            ]),
+            keccak_words(
+                [
+                    CONSIDERATION_ITEM_TYPEHASH,
+                    consideration.word(index: i, offset: 0),
+                    consideration.word(index: i, offset: 32),
+                    consideration.word(index: i, offset: 64),
+                    consideration.word(index: i, offset: 96),
+                    consideration.word(index: i, offset: 128),
+                    consideration.word(index: i, offset: 160),
+                ],
+            ),
         )
         i += 1
     }
@@ -116,20 +118,22 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     let consideration_hash = keccak256(
         ptr::MemSpan::from_raw_parts(ptr: consideration_hashes, len: consideration.len() * 32),
     )
-    keccak_words([
-        ORDER_TYPEHASH,
-        order.offerer.inner,
-        order.zone.inner,
-        offer_hash,
-        consideration_hash,
-        order.orderType as u256,
-        order.startTime,
-        order.endTime,
-        order.zoneHash.val,
-        order.salt,
-        order.conduitKey.val,
-        order.counter,
-    ])
+    keccak_words(
+        [
+            ORDER_TYPEHASH,
+            order.word(0),
+            order.word(32),
+            offer_hash,
+            consideration_hash,
+            order.word(128),
+            order.word(160),
+            order.word(192),
+            order.word(224),
+            order.word(256),
+            order.word(288),
+            order.word(320),
+        ],
+    )
 }
 
 fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool) -> u256 {

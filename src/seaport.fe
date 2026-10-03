@@ -3,7 +3,8 @@
 // ReentrancyGuard constructor). `Seaport` and `Consideration` differ only in
 // their name, which also enters the EIP-712 domain separator.
 use std::abi::{Bytes32, DynArray, DynString, sol}
-use std::evm::{Address, Call, Create, Ctx, Log, RawOps, revert_error}
+use std::evm::{Address, Call, CallData, Create, Ctx, Log, RawOps, revert_error}
+use super::abi_view::ComponentsView
 use super::basic::{assert_decodable_basic_order_calldata, validate_and_fulfill_basic_order}
 use super::combiner::{fulfill_available_advanced_orders, match_advanced_orders}
 use super::errors::TloadTestContractDeploymentFailed
@@ -291,7 +292,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     )
 }
 
-pub fn get_order_hash(_ order: OrderComponents) -> Bytes32 uses (ops: RawOps) {
+pub fn get_order_hash() -> Bytes32 {
+    let order = ComponentsView::argument(CallData::with_base(4))
     Bytes32 { val: derive_components_hash(order) }
 }
 
@@ -436,8 +438,12 @@ pub contract Seaport {
                 recipient,
             )
         }
-        SeaportMsg::Cancel { orders } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
-            cancel(env, orders)
+        #[decode(manual)]
+        SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
+            cancel(
+                env,
+                orders: CallData::with_base(4).array_view<OrderComponents>(0),
+            )
         }
         SeaportMsg::Validate { orders } -> bool uses (
             env,
@@ -457,10 +463,11 @@ pub contract Seaport {
             super::status::assert_non_reentrant(env)
             increment_counter()
         }
-        SeaportMsg::GetOrderHash { order } -> Bytes32
+        #[decode(manual)]
+        SeaportMsg::GetOrderHash { .. } -> Bytes32
         uses (ops: RawOps)
         {
-            get_order_hash(order)
+            get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)
         uses (ops: RawOps)
@@ -612,8 +619,12 @@ pub contract Consideration {
                 recipient,
             )
         }
-        SeaportMsg::Cancel { orders } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
-            cancel(env, orders)
+        #[decode(manual)]
+        SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
+            cancel(
+                env,
+                orders: CallData::with_base(4).array_view<OrderComponents>(0),
+            )
         }
         SeaportMsg::Validate { orders } -> bool uses (
             env,
@@ -633,10 +644,11 @@ pub contract Consideration {
             super::status::assert_non_reentrant(env)
             increment_counter()
         }
-        SeaportMsg::GetOrderHash { order } -> Bytes32
+        #[decode(manual)]
+        SeaportMsg::GetOrderHash { .. } -> Bytes32
         uses (ops: RawOps)
         {
-            get_order_hash(order)
+            get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)
         uses (ops: RawOps)

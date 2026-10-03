@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: MIT
+// Seaport's custom OrderComponents calldata decoder, matching seaport-core.
+use core::abi::{ByteInput, checked_frame_end}
+use core::num::IntWord
+use std::abi::{ArrayView, Sol}
+use std::evm::{Address, CallData, revert_empty}
+use super::types::OrderComponents
+
+/// Solidity validates the struct head; Seaport reads its tails with 32-bit
+/// offsets and lengths and zero-padded calldata loads. It hashes raw words,
+/// including noncanonical addresses and item/order types.
+pub struct ComponentsView { input: CallData, pos: u256 }
+impl Copy for ComponentsView {}
+
+impl ComponentsView {
+    /// Match solc 0.8.24's calldata struct-array indexing, including its
+    /// signed relative-offset bound and wrapping address calculation.
+    #[arithmetic(unchecked)]
+    pub fn element(_ orders: ArrayView<CallData, OrderComponents>, index: u256) -> Self {
+        let input = orders.input()
+        let relative = orders.head_word(index)
+        let limit = input.len() - orders.heads_pos() - 351
+        if i256::from_word(relative) >= i256::from_word(limit) {
+            revert_empty()
+        }
+        Self { input, pos: orders.heads_pos() + relative }
+    }
+    pub fn argument(_ input: CallData) -> Self {
+        checked_frame_end<Sol>(0, 32, input.len())
+        let pos = input.word_at(0)
+        // The Solidity dispatcher checks the original offset before the
+        // custom decoder resolves its low 32 bits.
+        if pos >= 0x10000000000000000 {
+            revert_empty()
+        }
+        checked_frame_end<Sol>(pos, 352, input.len())
+        Self { input, pos: pos & 0xffffffff }
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn word(self, _ offset: u256) -> u256 {
+        self.input.word_at(self.pos + offset)
+    }
+
+    /// `cancel` reads these fields through Solidity's typed calldata accessors.
+    /// Hashing uses `word` directly and does not apply their canonical checks.
+    pub fn offerer(self) -> Address {
+        self.address(0)
+    }
+    pub fn zone(self) -> Address {
+        self.address(32)
+    }
+    fn address(self, _ offset: u256) -> Address {
+        let value = self.word(offset)
+        if value >> 160 != 0 {
+            revert_empty()
+        }
+        Address { inner: value }
+    }
+    pub fn order_type(self) -> u256 {
+        let value = self.word(128)
+        if value > 4 {
+            revert_empty()
+        }
+        value
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn items(self, head_pos: u256, stride: u256) -> ComponentItems {
+        let tail = self.pos + (self.word(head_pos) & 0xffffffff)
+        ComponentItems {
+            input: self.input,
+            start: tail + 32,
+            len: self.input.word_at(tail) & 0xffffffff,
+            stride,
+        }
+    }
+}
+
+/// Item words retain the custom decoder's zero padding and full word values.
+pub struct ComponentItems { input: CallData, start: u256, len: u256, stride: u256 }
+impl Copy for ComponentItems {}
+impl ComponentItems {
+    pub fn len(self) -> u256 {
+        self.len
+    }
+    #[arithmetic(unchecked)]
+    pub fn word(self, index: u256, offset: u256) -> u256 {
+        self.input.word_at(self.start + index * self.stride + offset)
+    }
+}
