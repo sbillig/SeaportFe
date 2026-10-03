@@ -74,7 +74,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
     while i < book.orders.len() {
         let order = book.order(i)
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
-            let order_hash = consideration_length_checked_order_hash(book, order)
+            let order_hash = consideration_length_checked_order_hash(ref book, order)
             let status = read_status(order_hash)
             verify_order_status(
                 order_hash,
@@ -96,7 +96,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
                 log.emit(
                     OrderValidated {
                         orderHash: Bytes32 { val: order_hash },
-                        orderParameters: validated_parameters(book, order),
+                        orderParameters: validated_parameters(ref book, order),
                     },
                 )
             }
@@ -108,7 +108,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
 
 /// Serialize the unchanged model for the typed OrderValidated event. This
 /// avoids decoding an owned Order merely to encode its parameters again.
-fn validated_parameters(_ book: Book, _ order: *OrderState) -> OrderParameters {
+fn validated_parameters(_ book: ref Book, _ order: *OrderState) -> OrderParameters {
     let offer = event_items(
         book,
         start: order.offer_start,
@@ -144,7 +144,7 @@ fn validated_parameters(_ book: Book, _ order: *OrderState) -> OrderParameters {
     }
 }
 
-fn event_items(_ book: Book, start: u256, count: u256, consideration: bool) -> ByteRef {
+fn event_items(_ book: ref Book, start: u256, count: u256, consideration: bool) -> ByteRef {
     let stride: u256 = if consideration { 192 } else { 160 }
     let size = 32 + count * stride
     let data = ptr::alloc_bytes(size)

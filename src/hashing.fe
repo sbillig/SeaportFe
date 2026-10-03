@@ -40,7 +40,7 @@ pub fn derive_domain_separator(name_hash: u256, chain_id: u256, this: Address) -
 
 /// The EIP-712 hash of `order` with `counter`; only the first
 /// `total_original` consideration items are included.
-pub fn derive_order_hash(_ book: Book, order: *OrderState, counter: u256) -> u256 {
+pub fn derive_order_hash(_ book: ref Book, order: *OrderState, counter: u256) -> u256 {
     let offer_hash = hash_items(
         book.items,
         start: order.offer_start,

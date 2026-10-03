@@ -17,7 +17,7 @@ use super::model::{Book, Item, OrderState, Resolver, Resolvers, checked_enum}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
-pub fn apply_criteria_resolvers(_ book: Book, _ resolvers: Resolvers)
+pub fn apply_criteria_resolvers(_ book: ref Book, _ resolvers: Resolvers)
 uses (ops: RawOps)
 {
     let total_orders = book.orders.len()

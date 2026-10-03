@@ -18,7 +18,7 @@
 // fulfillment components use pools as well. Fe's borrow checker tracks
 // pointers stored in raw memory through every raw write, which explodes for
 // code like this (ISSUES.md #9), so no pointer is ever stored in raw memory:
-// pools are reached through handles passed as values.
+// pools are reached through native Book references and copyable Arr handles.
 use core::ptr
 use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION, revert_error}
 use super::abi_view::CalldataView
@@ -85,18 +85,18 @@ pub struct Book {
 impl Copy for Book {}
 
 impl Book {
-    pub fn order(self, _ index: u256) -> *OrderState {
+    pub fn order(ref self, _ index: u256) -> *OrderState {
         self.orders.at(index)
     }
-    pub fn offer_item(self, _ order: *OrderState, _ index: u256) -> *Item {
+    pub fn offer_item(ref self, _ order: *OrderState, _ index: u256) -> *Item {
         self.items.at(order.offer_start + index)
     }
-    pub fn consideration_item(self, _ order: *OrderState, _ index: u256) -> *Item {
+    pub fn consideration_item(ref self, _ order: *OrderState, _ index: u256) -> *Item {
         self.items.at(order.consideration_start + index)
     }
 
     /// The `bytes` at `offset` in the byte pool.
-    pub fn bytes(self, _ offset: u256) -> ByteRef {
+    pub fn bytes(ref self, _ offset: u256) -> ByteRef {
         let data = core::ptr::offset_bytes(self.blob, offset)
         let len = *core::ptr::cast<u8, u256>(data)
         ByteRef { data, len, size: 32 + ((len + 31) & !(31 as u256)) }

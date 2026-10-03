@@ -185,9 +185,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let args = CalldataView::arguments(64)
     let order = args.struct_argument(offset: 0, size: 64)
+    let book = single_order(order, advanced: false)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_order(order, advanced: false),
+        book: ref book,
         resolvers: no_resolvers(),
         fulfiller_conduit_key: args.word(32),
         recipient: ctx.caller(),
@@ -201,9 +202,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let order = args.struct_argument(offset: 0, size: 160)
     let criteria = args.array_argument(32)
     let recipient = args.address_argument(96)
+    let book = single_order(order, advanced: true)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_order(order, advanced: true),
+        book: ref book,
         resolvers: resolvers(criteria),
         fulfiller_conduit_key: args.word(64),
         recipient: caller_if_zero(recipient),
@@ -217,9 +219,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let orders = args.array_argument(0)
     let offer = args.array_argument(32)
     let consideration = args.array_argument(64)
+    let book = orders_book(orders, advanced: false)
     fulfill_available_advanced_orders(
         env,
-        book: orders_book(orders, advanced: false),
+        book: ref book,
         resolvers: no_resolvers(),
         offer_fulfillments: nested_components(offer),
         consideration_fulfillments: nested_components(consideration),
@@ -238,9 +241,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let offer = args.array_argument(64)
     let consideration = args.array_argument(96)
     let recipient = args.address_argument(160)
+    let book = orders_book(orders, advanced: true)
     fulfill_available_advanced_orders(
         env,
-        book: orders_book(orders, advanced: true),
+        book: ref book,
         resolvers: resolvers(criteria),
         offer_fulfillments: nested_components(offer),
         consideration_fulfillments: nested_components(consideration),
@@ -256,9 +260,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let args = CalldataView::arguments(64)
     let orders = args.array_argument(0)
     let groups = args.array_argument(32)
+    let book = orders_book(orders, advanced: false)
     match_advanced_orders(
         env,
-        book: orders_book(orders, advanced: false),
+        book: ref book,
         resolvers: no_resolvers(),
         fulfillments: fulfillments(groups),
         recipient: ctx.caller(),
@@ -273,9 +278,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let criteria = args.array_argument(32)
     let groups = args.array_argument(64)
     let recipient = args.address_argument(96)
+    let book = orders_book(orders, advanced: true)
     match_advanced_orders(
         env,
-        book: orders_book(orders, advanced: true),
+        book: ref book,
         resolvers: resolvers(criteria),
         fulfillments: fulfillments(groups),
         recipient: caller_if_zero(recipient),

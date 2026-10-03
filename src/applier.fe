@@ -51,10 +51,12 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 /// available orders, zeroing them. All of them must share type, token,
 /// identifier, offerer and conduit key. Also returns the index of the first
 /// used component, which seaport-core moves to the front of the array.
-pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipient: Address) -> (
-    ExecutionState,
-    u256,
-) {
+pub fn aggregate_offer_items(
+    _ book: ref Book,
+    groups: Groups,
+    group: Group,
+    recipient: Address,
+) -> (ExecutionState, u256) {
     let mut execution = empty_execution()
     let mut first_used: u256 = 0
     let mut amount: u256 = 0
@@ -103,7 +105,7 @@ pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipie
 /// `_aggregateValidFulfillmentConsiderationItems`: like the offer side, but
 /// items must also share the recipient; offerer and conduit key are given.
 pub fn aggregate_consideration_items(
-    _ book: Book,
+    _ book: ref Book,
     groups: Groups,
     group: Group,
     offerer: Address,
@@ -158,7 +160,11 @@ pub fn aggregate_consideration_items(
 /// `_applyFulfillment`: match aggregated offer items against aggregated
 /// consideration items; the unmatched rest stays on the first used
 /// component.
-pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) -> ExecutionState {
+pub fn apply_fulfillment(
+    _ book: ref Book,
+    groups: Groups,
+    fulfillment_index: u256,
+) -> ExecutionState {
     let offer_group = *groups.list.at(2 * fulfillment_index)
     let consideration_group = *groups.list.at(2 * fulfillment_index + 1)
     if offer_group.len == 0 || consideration_group.len == 0 {
@@ -207,7 +213,7 @@ pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) 
 
 /// `_aggregateAvailable`
 pub fn aggregate_available(
-    _ book: Book,
+    _ book: ref Book,
     side: u8,
     groups: Groups,
     index: u256,

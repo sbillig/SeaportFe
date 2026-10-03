@@ -57,7 +57,7 @@ uses (ctx: Ctx)
 }
 
 /// `_assertConsiderationLengthAndGetOrderHash`
-pub fn consideration_length_checked_order_hash(_ book: Book, order: *OrderState) -> u256
+pub fn consideration_length_checked_order_hash(_ book: ref Book, order: *OrderState) -> u256
 uses (ops: RawOps)
 {
     if order.consideration_len < order.total_original {
@@ -69,7 +69,7 @@ uses (ops: RawOps)
 /// `_validateOrder`: the order hash and the fraction that can be filled now,
 /// or a zero fraction for an order that is not fillable (only when
 /// `revert_on_invalid` is false). Contract orders yield `(1, 1, 1)`.
-pub fn validate_order(_ env: Env, book: Book, order: *OrderState, revert_on_invalid: bool) -> (
+pub fn validate_order(_ env: Env, book: ref Book, order: *OrderState, revert_on_invalid: bool) -> (
     u256,
     u256,
     u256,
@@ -128,7 +128,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
 /// `_applyFractions`: current amounts of the partial fill; offer items go to
 /// `recipient`.
 fn apply_fractions(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     numerator: u256,
     denominator: u256,
@@ -156,7 +156,7 @@ uses (ctx: Ctx)
 
 /// Returns whether the item is a native token item.
 fn apply_offer_fraction(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     index: u256,
     numerator: u256,
@@ -182,7 +182,7 @@ uses (ctx: Ctx)
 }
 
 fn apply_consideration_fraction(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     index: u256,
     numerator: u256,
@@ -219,7 +219,7 @@ pub fn item_transfer(_ item: *Item) -> Transfer {
 /// the caller, then refund any native tokens left in the contract.
 fn transfer_each(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     order: *OrderState,
     fulfiller_conduit_key: u256,
     recipient: Address,
@@ -261,7 +261,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 fn transfer_offer_item(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     order: *OrderState,
     index: u256,
     recipient: Address,
@@ -283,7 +283,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 fn transfer_consideration_item(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     order: *OrderState,
     index: u256,
     fulfiller_conduit_key: u256,
@@ -306,7 +306,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     )
 }
 
-pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem> {
+pub fn spent_items(_ book: ref Book, start: u256, count: u256) -> DynArray<SpentItem> {
     let mut out = MemVec<SpentItem>::zeroed(count)
     let mut i: u256 = 0
     while i < count {
@@ -325,7 +325,7 @@ pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem
     out.to_dyn_array()
 }
 
-pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
+pub fn received_items(_ book: ref Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
     let mut out = MemVec<ReceivedItem>::zeroed(count)
     let mut i: u256 = 0
     while i < count {
@@ -345,7 +345,12 @@ pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<Receiv
     out.to_dyn_array()
 }
 
-pub fn emit_order_fulfilled(_ order_hash: u256, book: Book, order: *OrderState, recipient: Address)
+pub fn emit_order_fulfilled(
+    _ order_hash: u256,
+    book: ref Book,
+    order: *OrderState,
+    recipient: Address,
+)
 uses (log: mut Log)
 {
     log.emit(
@@ -370,7 +375,7 @@ uses (log: mut Log)
 /// them than on one long body (ISSUES.md #9).
 pub fn validate_and_fulfill_advanced_order(
     _ env: ref Env,
-    book: Book,
+    book: ref Book,
     resolvers: Resolvers,
     fulfiller_conduit_key: u256,
     recipient: Address,
@@ -390,7 +395,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 
 fn fulfill_single_order(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     resolvers: Resolvers,
     fulfiller_conduit_key: u256,
     recipient: Address,
@@ -409,7 +414,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 
 fn fulfill_single_contract_order(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     resolvers: Resolvers,
     fulfiller_conduit_key: u256,
     recipient: Address,
@@ -418,9 +423,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let _ = prepare_single_order(env, book, resolvers, recipient)
     let generated = generate_order(book, order_index: 0, revert_on_invalid: true)
+    let installed = install_generated_order(book, order_index: 0, generated)
     finish_single_order(
         env,
-        book: install_generated_order(book, order_index: 0, generated),
+        book: ref installed,
         order_hash: generated.order_hash,
         fulfiller_conduit_key,
         recipient,
@@ -428,7 +434,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 }
 
 /// Validate the order, resolve criteria and apply the fill fraction.
-fn prepare_single_order(_ env: Env, book: Book, resolvers: Resolvers, recipient: Address) -> (
+fn prepare_single_order(_ env: Env, book: ref Book, resolvers: Resolvers, recipient: Address) -> (
     u256,
     u256,
     u256,
@@ -454,7 +460,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
 
 /// `authorizeOrder` with the zone, then record the fill.
 fn authorize_single_order(
-    _ book: Book,
+    _ book: ref Book,
     order_hash: u256,
     fill_numerator: u256,
     fill_denominator: u256,
@@ -481,7 +487,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 /// Transfers, `validateOrder` or `ratifyOrder`, and `OrderFulfilled`.
 fn finish_single_order(
     _ env: Env,
-    book: Book,
+    book: ref Book,
     order_hash: u256,
     fulfiller_conduit_key: u256,
     recipient: Address,

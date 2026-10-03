@@ -49,7 +49,7 @@ fn item_amount(_ item: *Item, _ use_original: bool) -> u256 {
 
 fn write_spent_items(
     _ dst: *u8,
-    _ book: Book,
+    _ book: ref Book,
     start: u256,
     count: u256,
     use_original: bool,
@@ -68,7 +68,7 @@ fn write_spent_items(
     32 + count * 128
 }
 
-fn write_received_items(_ dst: *u8, _ book: Book, start: u256, count: u256) -> u256 {
+fn write_received_items(_ dst: *u8, _ book: ref Book, start: u256, count: u256) -> u256 {
     store_word(dst, count)
     let mut i: u256 = 0
     while i < count {
@@ -111,7 +111,7 @@ fn write_hashes(_ dst: *u8, _ hashes: Arr<u256>, count: u256) -> u256 {
 /// parameters once, before transfers, and reuses them for `validateOrder`;
 /// the amounts then still equal the saved `original` amounts used here.
 fn encode_zone_call(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hash: u256,
     order_hashes: Arr<u256>,
@@ -237,7 +237,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_assertRestrictedAdvancedOrderAuthorization`
 pub fn assert_restricted_advanced_order_authorization(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hashes: Arr<u256>,
     order_hash: u256,
@@ -260,7 +260,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_checkRestrictedAdvancedOrderAuthorization`
 pub fn check_restricted_advanced_order_authorization(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hashes: Arr<u256>,
     order_hash: u256,
@@ -293,7 +293,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 /// `_assertRestrictedAdvancedOrderValidity`: `validateOrder` for restricted
 /// orders and `ratifyOrder` for contract orders.
 pub fn assert_restricted_advanced_order_validity(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hashes: Arr<u256>,
     order_hash: u256,
@@ -324,7 +324,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_encodeRatifyOrder`
 fn encode_ratify_order(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hash: u256,
     order_hashes: Arr<u256>,
@@ -369,7 +369,7 @@ fn encode_ratify_order(
 }
 
 /// `_encodeGenerateOrder`: offer and consideration both as `SpentItem[]`.
-fn encode_generate_order(_ book: Book, order: *OrderState) -> (*u8, u256)
+fn encode_generate_order(_ book: ref Book, order: *OrderState) -> (*u8, u256)
 uses (ctx: Ctx)
 {
     let size = 4
@@ -436,7 +436,11 @@ impl Copy for GeneratedOrder {}
 /// (reads only) from installation (one fresh pool), because every extra path
 /// returning an item pool multiplies the states Fe's borrow checker tracks
 /// in the calling loop (ISSUES.md #9).
-pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) -> GeneratedOrder
+pub fn generate_order(
+    _ book: ref Book,
+    order_index: u256,
+    revert_on_invalid: bool,
+) -> GeneratedOrder
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = book.order(order_index)
@@ -486,7 +490,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 /// the offer or increase the consideration. Returns a zero order hash for
 /// invalid returndata.
 fn validate_generate_order_returndata(
-    _ book: Book,
+    _ book: ref Book,
     order: *OrderState,
     order_hash: u256,
 ) -> GeneratedOrder
@@ -575,7 +579,11 @@ uses (ops: mut RawOps)
 
 /// `_getGeneratedOrder`, second half: copy the validated items from the
 /// returndata into a new pool and point the order at them.
-pub fn install_generated_order(_ book: Book, order_index: u256, generated: GeneratedOrder) -> Book
+pub fn install_generated_order(
+    _ book: ref Book,
+    order_index: u256,
+    generated: GeneratedOrder,
+) -> Book
 uses (ops: mut RawOps)
 {
     let start = book.used
