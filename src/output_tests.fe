@@ -1,8 +1,10 @@
 use core::ptr
 use std::evm::Address
-use super::arr::Arr
+use std::abi::DynArray
+use super::arr::{Arr, array_tail}
 use super::combiner::hash_array
-use super::fulfill::{received_items, spent_items}
+use super::fulfill::write_fulfilled_items
+use super::types::{ReceivedItem, SpentItem}
 use super::model::{Book, Item, OrderState}
 
 #[test]
@@ -24,8 +26,28 @@ fn output_arrays_snapshot_model_values_and_clean_addresses() {
         i += 1
     }
     let book = Book { orders: Arr<OrderState>::empty(), items, used: 2, blob: ptr::alloc_bytes(0) }
-    let spent = spent_items(ref book, start: 0, count: 2)
-    let received = received_items(ref book, start: 1, count: 1)
+    let (spent_data, spent_size) = array_tail(2, item_size: 128)
+    let (received_data, received_size) = array_tail(1, item_size: 160)
+    write_fulfilled_items(
+        spent_data,
+        book: ref book,
+        start: 0,
+        count: 2,
+        consideration: false,
+    )
+    write_fulfilled_items(
+        received_data,
+        book: ref book,
+        start: 1,
+        count: 1,
+        consideration: true,
+    )
+    let spent = DynArray<SpentItem>::from_abi_tail(data: spent_data, len: 2, size: spent_size)
+    let received = DynArray<ReceivedItem>::from_abi_tail(
+        data: received_data,
+        len: 1,
+        size: received_size,
+    )
     items.at(0).amount = 0
     items.at(1).amount = 0
     items.at(1).receiver = Address::zero()
@@ -46,7 +68,15 @@ fn output_arrays_snapshot_model_values_and_clean_addresses() {
     assert(
         item.amount == (1 << 160) + 1 && item.recipient.inner == 24,
     )
-    let empty = received_items(ref book, start: 2, count: 0)
+    let (empty_data, empty_size) = array_tail(0, item_size: 160)
+    write_fulfilled_items(
+        empty_data,
+        book: ref book,
+        start: 2,
+        count: 0,
+        consideration: true,
+    )
+    let empty = DynArray<ReceivedItem>::from_abi_tail(data: empty_data, len: 0, size: empty_size)
     assert(empty.len() == 0 && empty.encoded_size() == 32)
 }
 

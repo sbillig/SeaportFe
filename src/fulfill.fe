@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
 use core::ptr
-use core::abi::{AbiSize, Encode}
-use std::abi::{Bytes32, DynArray}
-use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{Address, Call, Ctx, Event, Log, RawOps, revert_error}
 use super::amount::apply_fraction
-use super::arr::{Arr, array_tail}
+use super::arr::Arr
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     BadFraction,
@@ -38,7 +36,8 @@ use super::status::{
     update_status,
     verify_order_status,
 }
-use super::types::{CONTRACT, NATIVE, ReceivedItem, SpentItem}
+use super::types::{CONTRACT, NATIVE}
+use super::lowlevel::store_word
 use super::zone::{
     assert_restricted_advanced_order_authorization,
     assert_restricted_advanced_order_validity,
@@ -307,39 +306,38 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     )
 }
 
-pub fn spent_items(_ book: ref Book, start: u256, count: u256) -> DynArray<SpentItem> {
-    let (data, size) = array_tail(count, item_size: SpentItem::HEAD_SIZE)
+/// Encode an OrderFulfilled array directly into the final event buffer.
+/// Model words are cleaned exactly as for the typed SpentItem/ReceivedItem
+/// event fields; the mutable model itself retains its original raw words.
+pub fn write_fulfilled_items(
+    _ dst: *u8,
+    book: ref Book,
+    start: u256,
+    count: u256,
+    consideration: bool,
+) {
+    store_word(dst, count)
+    let payload = ptr::offset_bytes(dst, 32)
+    let stride: u256 = if consideration { 160 } else { 128 }
     let mut i: u256 = 0
     while i < count {
         let item = book.items.at(start + i)
-        SpentItem {
-            itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
-            token: Address::from_word_truncate(item.token.inner),
-            identifier: item.identifier,
-            amount: item.amount,
+        let out = ptr::offset_bytes(payload, i * stride)
+        store_word(out, checked_enum(item.item_type, variants: 6))
+        store_word(
+            ptr::offset_bytes(out, 32),
+            Address::from_word_truncate(item.token.inner).inner,
+        )
+        store_word(ptr::offset_bytes(out, 64), item.identifier)
+        store_word(ptr::offset_bytes(out, 96), item.amount)
+        if consideration {
+            store_word(
+                ptr::offset_bytes(out, 128),
+                Address::from_word_truncate(item.receiver.inner).inner,
+            )
         }
-            .encode(ptr::offset_bytes(data, 32 + i * SpentItem::HEAD_SIZE))
         i += 1
     }
-    DynArray::from_abi_tail(data, len: count, size)
-}
-
-pub fn received_items(_ book: ref Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
-    let (data, size) = array_tail(count, item_size: ReceivedItem::HEAD_SIZE)
-    let mut i: u256 = 0
-    while i < count {
-        let item = book.items.at(start + i)
-        ReceivedItem {
-            itemType: checked_enum(item.item_type, variants: 6).downcast_truncate(),
-            token: Address::from_word_truncate(item.token.inner),
-            identifier: item.identifier,
-            amount: item.amount,
-            recipient: Address::from_word_truncate(item.receiver.inner),
-        }
-            .encode(ptr::offset_bytes(data, 32 + i * ReceivedItem::HEAD_SIZE))
-        i += 1
-    }
-    DynArray::from_abi_tail(data, len: count, size)
 }
 
 pub fn emit_order_fulfilled(
@@ -350,19 +348,33 @@ pub fn emit_order_fulfilled(
 )
 uses (log: mut Log)
 {
-    log.emit(
-        OrderFulfilled {
-            orderHash: Bytes32 { val: order_hash },
-            offerer: Address::from_word_truncate(order.offerer.inner),
-            zone: Address::from_word_truncate(order.zone.inner),
-            recipient,
-            offer: spent_items(book, start: order.offer_start, count: order.offer_len),
-            consideration: received_items(
-                book,
-                start: order.consideration_start,
-                count: order.consideration_len,
-            ),
-        },
+    // Non-indexed fields: hash, recipient, offer offset, consideration offset.
+    let consideration_at = 160 + order.offer_len * 128
+    let size = consideration_at + 32 + order.consideration_len * 160
+    let data = ptr::alloc_bytes(size)
+    store_word(data, order_hash)
+    store_word(ptr::offset_bytes(data, 32), recipient.inner)
+    store_word(ptr::offset_bytes(data, 64), 128)
+    store_word(ptr::offset_bytes(data, 96), consideration_at)
+    write_fulfilled_items(
+        ptr::offset_bytes(data, 128),
+        book,
+        start: order.offer_start,
+        count: order.offer_len,
+        consideration: false,
+    )
+    write_fulfilled_items(
+        ptr::offset_bytes(data, consideration_at),
+        book,
+        start: order.consideration_start,
+        count: order.consideration_len,
+        consideration: true,
+    )
+    log.log3(
+        data: ptr::MemSpan::from_raw_parts(ptr: data, len: size),
+        topic0: OrderFulfilled::TOPIC0,
+        topic1: Address::from_word_truncate(order.offerer.inner).inner,
+        topic2: Address::from_word_truncate(order.zone.inner).inner,
     )
 }
 
