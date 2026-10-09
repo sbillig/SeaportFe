@@ -1,5 +1,5 @@
 // Seaport 1.6 (ProjectOpenSea/seaport, seaport-core) ported to Fe.
-pub use arr
+pub use buffer
 pub use types
 pub use errors
 pub use model

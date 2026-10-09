@@ -2,16 +2,17 @@
 // ZoneInteraction, the contract order parts of OrderValidator and the zone
 // and contract offerer calldata encodings of ConsiderationEncoder and
 // ConsiderationDecoder.
-use core::ptr::{self, MemBuffer, MemSpan}
-use std::abi::Bytes32
-use std::evm::{Address, Call, Ctx, RawOps, RawStorage, revert_error}
-use super::arr::{Arr, ByteRef}
+use core::ptr::MemBuffer
+use std::abi::{Bytes, Bytes32}
+use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use core::ptr::MemArray
 use super::errors::{
     ConsiderationLengthNotEqualToTotalOriginal,
     InvalidContractOrder,
     InvalidRestrictedOrder,
 }
-use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+use super::lowlevel::revert_with_reason_if_one_is_returned
+use super::buffer::{Buffer, read_word, return_word}
 use super::model::{Book, Item, OrderState}
 use super::status::take_contract_nonce
 use super::types::CONTRACT
@@ -34,10 +35,6 @@ uses (ctx: Ctx)
     order_type < 4 && order_type > 1 && ctx.caller() != zone
 }
 
-fn at(_ base: *u8, _ offset: u256) -> *u8 {
-    ptr::offset_bytes(base, offset)
-}
-
 /// The current amount, or the amount saved before fulfillment aggregation.
 fn item_amount(_ item: Item, _ use_original: bool) -> u256 {
     if use_original {
@@ -48,63 +45,44 @@ fn item_amount(_ item: Item, _ use_original: bool) -> u256 {
 }
 
 fn write_spent_items(
-    _ dst: *u8,
+    _ dst: mut Buffer,
+    offset: u256,
     _ book: Book,
     start: u256,
     count: u256,
     use_original: bool,
 ) -> u256 {
-    unsafe {
-        store_word(dst, count)
-    }
+    dst.write(offset, value: count)
     let mut i: u256 = 0
     while i < count {
-        let item = unsafe {
-            ref *book.items.at(start + i)
-        }
-        let out = at(dst, 32 + i * 128)
-        unsafe {
-            store_word(out, item.item_type)
-        }
-        unsafe {
-            store_word(at(out, 32), item.token.inner)
-        }
-        unsafe {
-            store_word(at(out, 64), item.identifier)
-        }
-        unsafe {
-            store_word(at(out, 96), item_amount(item, use_original))
-        }
+        let item = ref book.items[(start + i) as usize]
+        let out = offset + 32 + i * 128
+        dst.write(offset: out, value: item.item_type)
+        dst.write(offset: out + 32, value: item.token.inner)
+        dst.write(offset: out + 64, value: item.identifier)
+        dst.write(offset: out + 96, value: item_amount(item, use_original))
         i += 1
     }
     32 + count * 128
 }
 
-fn write_received_items(_ dst: *u8, _ book: Book, start: u256, count: u256) -> u256 {
-    unsafe {
-        store_word(dst, count)
-    }
+fn write_received_items(
+    _ dst: mut Buffer,
+    offset: u256,
+    _ book: Book,
+    start: u256,
+    count: u256,
+) -> u256 {
+    dst.write(offset, value: count)
     let mut i: u256 = 0
     while i < count {
-        let item = unsafe {
-            ref *book.items.at(start + i)
-        }
-        let out = at(dst, 32 + i * 160)
-        unsafe {
-            store_word(out, item.item_type)
-        }
-        unsafe {
-            store_word(at(out, 32), item.token.inner)
-        }
-        unsafe {
-            store_word(at(out, 64), item.identifier)
-        }
-        unsafe {
-            store_word(at(out, 96), item.original)
-        }
-        unsafe {
-            store_word(at(out, 128), item.receiver.inner)
-        }
+        let item = ref book.items[(start + i) as usize]
+        let out = offset + 32 + i * 160
+        dst.write(offset: out, value: item.item_type)
+        dst.write(offset: out + 32, value: item.token.inner)
+        dst.write(offset: out + 64, value: item.identifier)
+        dst.write(offset: out + 96, value: item.original)
+        dst.write(offset: out + 128, value: item.receiver.inner)
         i += 1
     }
     32 + count * 160
@@ -114,29 +92,18 @@ fn padded(_ len: u256) -> u256 {
     (len + 31) & !(31 as u256)
 }
 
-fn write_bytes(_ dst: *u8, _ bytes: ByteRef) -> u256 {
-    let size = 32 + padded(bytes.len)
-    unsafe {
-        ptr::zero_bytes(dst, size)
-    }
-    unsafe {
-        store_word(dst, bytes.len)
-    }
-    unsafe {
-        ptr::copy_raw(dest: at(dst, 32), source: bytes.payload(), len: bytes.len)
-    }
+fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: Bytes) -> u256 {
+    let size = 32 + padded(bytes.len())
+    dst.write(offset, value: bytes.len())
+    dst.copy_from(offset: offset + 32, source: bytes.payload_span())
     size
 }
 
-fn write_hashes(_ dst: *u8, _ hashes: Arr<u256>, count: u256) -> u256 {
-    unsafe {
-        store_word(dst, count)
-    }
+fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
+    dst.write(offset, value: count)
     let mut i: u256 = 0
     while i < count {
-        unsafe {
-            store_word(at(dst, 32 + i * 32), *hashes.at(i))
-        }
+        dst.write(offset: offset + 32 + i * 32, value: hashes[(i) as usize])
         i += 1
     }
     32 + count * 32
@@ -150,10 +117,10 @@ fn encode_zone_call(
     _ book: Book,
     order: OrderState,
     order_hash: u256,
-    order_hashes: Arr<u256>,
+    order_hashes: MemArray<u256>,
     hashes_count: u256,
     selector: u256,
-) -> (*u8, u256)
+) -> Buffer
 uses (ctx: Ctx)
 {
     let params_size = 0x140
@@ -162,85 +129,61 @@ uses (ctx: Ctx)
         + 32
         + order.consideration_len * 160
         + 32
-        + padded(book.bytes(order.extra_data).len)
+        + padded(order.extra_data.len())
         + 32
         + hashes_count * 32
     let size = 0x24 + params_size
-    let data = ptr::alloc_bytes(size + 28)
-    unsafe {
-        store_word(data, selector << 224)
-    }
-    unsafe {
-        store_word(at(data, 4), 0x20)
-    }
-    let head = at(data, 0x24)
-    unsafe {
-        store_word(head, order_hash)
-    }
-    unsafe {
-        store_word(at(head, 0x20), ctx.caller().inner)
-    }
-    unsafe {
-        store_word(at(head, 0x40), order.offerer.inner)
-    }
+    let mut data = Buffer::new(size)
+    data.write(offset: 0, value: selector << 224)
+    data.write(offset: 4, value: 0x20)
+    let head: u256 = 0x24
+    data.write(offset: head, value: order_hash)
+    data.write(offset: head + 0x20, value: ctx.caller().inner)
+    data.write(offset: head + 0x40, value: order.offerer.inner)
     let mut tail: u256 = 0x140
-    unsafe {
-        store_word(at(head, 0x60), tail)
-    }
+    data.write(offset: head + 0x60, value: tail)
     tail = tail
         + write_spent_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.offer_start,
             count: order.offer_len,
             use_original: true,
         )
-    unsafe {
-        store_word(at(head, 0x80), tail)
-    }
+    data.write(offset: head + 0x80, value: tail)
     tail = tail
         + write_received_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.consideration_start,
             count: order.consideration_len,
         )
-    unsafe {
-        store_word(at(head, 0xa0), tail)
-    }
-    tail = tail + write_bytes(at(head, tail), book.bytes(order.extra_data))
-    unsafe {
-        store_word(at(head, 0xc0), tail)
-    }
-    write_hashes(at(head, tail), order_hashes, count: hashes_count)
-    unsafe {
-        store_word(at(head, 0xe0), order.start_time)
-    }
-    unsafe {
-        store_word(at(head, 0x100), order.end_time)
-    }
-    unsafe {
-        store_word(at(head, 0x120), order.zone_hash)
-    }
-    (data, size)
+    data.write(offset: head + 0xa0, value: tail)
+    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
+    data.write(offset: head + 0xc0, value: tail)
+    write_hashes(
+        mut data,
+        offset: head + tail,
+        order_hashes,
+        count: hashes_count,
+    )
+    data.write(offset: head + 0xe0, value: order.start_time)
+    data.write(offset: head + 0x100, value: order.end_time)
+    data.write(offset: head + 0x120, value: order.zone_hash)
+    data
 }
 
 /// `_callAndCheckStatus`: call and require the selector as return value,
 /// reverting with `InvalidRestrictedOrder` or `InvalidContractOrder`.
-fn call_and_check_status(
-    _ target: Address,
-    order_hash: u256,
-    data: *u8,
-    size: u256,
-    contract_order: bool,
-)
+fn call_and_check_status(_ target: Address, order_hash: u256, data: Buffer, contract_order: bool)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if !call_and_check_status_with_skip(
         target,
         order_hash,
         data,
-        size,
         contract_order,
         revert_on_invalid: true,
     ) {
@@ -264,29 +207,20 @@ fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
 fn call_and_check_status_with_skip(
     _ target: Address,
     order_hash: u256,
-    data: *u8,
-    size: u256,
+    data: Buffer,
     contract_order: bool,
     revert_on_invalid: bool,
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let magic = unsafe {
-            load_word(data)
-        }
-        & 0xffffffff00000000000000000000000000000000000000000000000000000000
+    let magic = data.word(0) & 0xffffffff00000000000000000000000000000000000000000000000000000000
     let mut ret = MemBuffer::with_capacity(32)
-    unsafe {
-        store_word(ret.ptr(), 0)
-    }
     let outcome = call
         .raw_call(
             addr: target,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: data, len: size)
-            },
+            args: data.span(),
             ret: mut ret,
         )
     if !outcome.success() {
@@ -296,7 +230,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_with_reason_if_one_is_returned()
         revert_invalid_order(order_hash, contract_order)
     }
-    if unsafe { load_word(ret.ptr()) } != magic {
+    if return_word(ret.span(), initial: 0) != magic {
         revert_invalid_order(order_hash, contract_order)
     }
     true
@@ -306,14 +240,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 pub fn assert_restricted_advanced_order_authorization(
     _ book: Book,
     order: OrderState,
-    order_hashes: Arr<u256>,
+    order_hashes: MemArray<u256>,
     order_hash: u256,
     order_index: u256,
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let (data, size) = encode_zone_call(
+        let data = encode_zone_call(
             book,
             order,
             order_hash,
@@ -321,7 +255,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             hashes_count: order_index,
             selector: AUTHORIZE_ORDER_SELECTOR,
         )
-        call_and_check_status(order.zone, order_hash, data, size, contract_order: false)
+        call_and_check_status(order.zone, order_hash, data, contract_order: false)
     }
 }
 
@@ -329,7 +263,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 pub fn check_restricted_advanced_order_authorization(
     _ book: Book,
     order: OrderState,
-    order_hashes: Arr<u256>,
+    order_hashes: MemArray<u256>,
     order_hash: u256,
     order_index: u256,
     revert_on_invalid: bool,
@@ -337,7 +271,7 @@ pub fn check_restricted_advanced_order_authorization(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let (data, size) = encode_zone_call(
+        let data = encode_zone_call(
             book,
             order,
             order_hash,
@@ -349,7 +283,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             order.zone,
             order_hash,
             data,
-            size,
             contract_order: false,
             revert_on_invalid,
         )
@@ -362,13 +295,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 pub fn assert_restricted_advanced_order_validity(
     _ book: Book,
     order: OrderState,
-    order_hashes: Arr<u256>,
+    order_hashes: MemArray<u256>,
     order_hash: u256,
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let (data, size) = encode_zone_call(
+        let data = encode_zone_call(
             book,
             order,
             order_hash,
@@ -376,16 +309,10 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             hashes_count: order_hashes.len(),
             selector: VALIDATE_ORDER_SELECTOR,
         )
-        call_and_check_status(order.zone, order_hash, data, size, contract_order: false)
+        call_and_check_status(order.zone, order_hash, data, contract_order: false)
     } else if order.order_type == CONTRACT as u256 {
-        let (data, size) = encode_ratify_order(book, order, order_hash, order_hashes)
-        call_and_check_status(
-            order.offerer,
-            order_hash,
-            data,
-            size,
-            contract_order: true,
-        )
+        let data = encode_ratify_order(book, order, order_hash, order_hashes)
+        call_and_check_status(order.offerer, order_hash, data, contract_order: true)
     }
 }
 
@@ -394,8 +321,8 @@ fn encode_ratify_order(
     _ book: Book,
     order: OrderState,
     order_hash: u256,
-    order_hashes: Arr<u256>,
-) -> (*u8, u256) {
+    order_hashes: MemArray<u256>,
+) -> Buffer {
     let size = 4
         + 0xa0
         + 32
@@ -403,52 +330,50 @@ fn encode_ratify_order(
         + 32
         + order.consideration_len * 160
         + 32
-        + padded(book.bytes(order.extra_data).len)
+        + padded(order.extra_data.len())
         + 32
         + order_hashes.len() * 32
-    let data = ptr::alloc_bytes(size + 28)
-    unsafe {
-        store_word(data, RATIFY_ORDER_SELECTOR << 224)
-    }
-    let head = at(data, 4)
-    unsafe {
-        store_word(at(head, 0x80), order_hash ^ (order.offerer.inner << 96))
-    }
+    let mut data = Buffer::new(size)
+    data.write(offset: 0, value: RATIFY_ORDER_SELECTOR << 224)
+    let head: u256 = 4
+    data.write(
+        offset: head + 0x80,
+        value: order_hash ^ (order.offerer.inner << 96),
+    )
     let mut tail: u256 = 0xa0
-    unsafe {
-        store_word(head, tail)
-    }
+    data.write(offset: head, value: tail)
     tail = tail
         + write_spent_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.offer_start,
             count: order.offer_len,
             use_original: true,
         )
-    unsafe {
-        store_word(at(head, 0x20), tail)
-    }
+    data.write(offset: head + 0x20, value: tail)
     tail = tail
         + write_received_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.consideration_start,
             count: order.consideration_len,
         )
-    unsafe {
-        store_word(at(head, 0x40), tail)
-    }
-    tail = tail + write_bytes(at(head, tail), book.bytes(order.extra_data))
-    unsafe {
-        store_word(at(head, 0x60), tail)
-    }
-    write_hashes(at(head, tail), order_hashes, count: order_hashes.len())
-    (data, size)
+    data.write(offset: head + 0x40, value: tail)
+    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
+    data.write(offset: head + 0x60, value: tail)
+    write_hashes(
+        mut data,
+        offset: head + tail,
+        order_hashes,
+        count: order_hashes.len(),
+    )
+    data
 }
 
 /// `_encodeGenerateOrder`: offer and consideration both as `SpentItem[]`.
-fn encode_generate_order(_ book: Book, order: OrderState) -> (*u8, u256)
+fn encode_generate_order(_ book: Book, order: OrderState) -> Buffer
 uses (ctx: Ctx)
 {
     let size = 4
@@ -458,52 +383,42 @@ uses (ctx: Ctx)
         + 32
         + order.consideration_len * 128
         + 32
-        + padded(book.bytes(order.extra_data).len)
-    let data = ptr::alloc_bytes(size + 28)
-    unsafe {
-        store_word(data, GENERATE_ORDER_SELECTOR << 224)
-    }
-    let head = at(data, 4)
-    unsafe {
-        store_word(head, ctx.caller().inner)
-    }
+        + padded(order.extra_data.len())
+    let mut data = Buffer::new(size)
+    data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
+    let head: u256 = 4
+    data.write(offset: head, value: ctx.caller().inner)
     let mut tail: u256 = 0x80
-    unsafe {
-        store_word(at(head, 0x20), tail)
-    }
+    data.write(offset: head + 0x20, value: tail)
     tail = tail
         + write_spent_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.offer_start,
             count: order.offer_len,
             use_original: false,
         )
-    unsafe {
-        store_word(at(head, 0x40), tail)
-    }
+    data.write(offset: head + 0x40, value: tail)
     tail = tail
         + write_spent_items(
-            at(head, tail),
+            mut data,
+            offset: head + tail,
             book,
             start: order.consideration_start,
             count: order.consideration_len,
             use_original: false,
         )
-    unsafe {
-        store_word(at(head, 0x60), tail)
-    }
-    write_bytes(at(head, tail), book.bytes(order.extra_data))
-    (data, size)
+    data.write(offset: head + 0x60, value: tail)
+    write_bytes(mut data, offset: head + tail, order.extra_data)
+    data
 }
 
 /// One word of returndata at `offset`.
 fn returndata_word(_ offset: u256) -> u256 uses (ops: mut RawOps) {
     let mut buf = MemBuffer::with_capacity(32)
     ops.returndatacopy(dest: mut buf, dest_offset: 0, src_offset: offset, len: 32)
-    unsafe {
-        load_word(buf.ptr())
-    }
+    read_word(buf.span(), offset: 0)
 }
 
 /// The layout of valid `generateOrder` returndata.
@@ -523,30 +438,24 @@ impl Copy for GeneratedOrder {}
 /// are installed by `install_generated_order`, which must follow before any
 /// other call replaces the returndata.
 ///
-/// seaport-core replaces the arrays in place; the port splits validation
-/// (reads only) from installation (one fresh pool), because every extra path
-/// returning an item pool multiplies the states Fe's borrow checker tracks
-/// in the calling loop (ISSUES.md #9).
+/// Validation reads the current pool; installation then replaces the owned
+/// item allocation and updates this order's ranges under exclusive Book access.
 pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) -> GeneratedOrder
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
-    let order = unsafe {
-        ref *book.order(order_index)
-    }
+    let order = ref book.orders[(order_index) as usize]
     if order.consideration_len != order.total_original {
         revert_error(ConsiderationLengthNotEqualToTotalOriginal {})
     }
     let offerer = order.offerer
-    let (data, size) = encode_generate_order(book, order)
+    let data = encode_generate_order(book, order)
     let mut ret = MemBuffer::empty()
     let success = call
         .raw_call(
             addr: offerer,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: data, len: size)
-            },
+            args: data.span(),
             ret: mut ret,
         )
         .success()
@@ -621,9 +530,7 @@ uses (ops: mut RawOps)
     let mut i: u256 = 0
     while i < offer_length && i < order.offer_len {
         let base = offer_offset + 32 + i * 128
-        let original = unsafe {
-            ref *book.offer_item(order, i)
-        }
+        let original = ref book.items[(order.offer_start + i) as usize]
         bad = bad
             || items_differ(
                 original,
@@ -640,9 +547,7 @@ uses (ops: mut RawOps)
     i = 0
     while i < consideration_length && i < order.consideration_len {
         let base = consideration_offset + 32 + i * 160
-        let original = unsafe {
-            ref *book.consideration_item(order, i)
-        }
+        let original = ref book.items[(order.consideration_start + i) as usize]
         let recipient = returndata_word(base + 128)
         let recipient_mismatch = original.receiver.inner != 0
             && recipient != original.receiver.inner
@@ -674,23 +579,23 @@ uses (ops: mut RawOps)
 
 /// `_getGeneratedOrder`, second half: copy the validated items from the
 /// returndata into a new pool and point the order at them.
-pub fn install_generated_order(_ book: Book, order_index: u256, generated: GeneratedOrder) -> Book
+pub fn install_generated_order(_ book: mut Book, order_index: u256, generated: GeneratedOrder)
 uses (ops: mut RawOps)
 {
     let start = book.used
     let offer_length = generated.offer_length
     let consideration_length = generated.consideration_length
     let used = start + offer_length + consideration_length
-    let items = Arr<Item>::alloc(used)
+    let mut items = MemArray<Item>::new_zeroed(used)
     let mut i: u256 = 0
     while i < start {
-        copy_item(items, source: book.items, index: i)
+        copy_item(mut items, source: book.items, index: i)
         i += 1
     }
     i = 0
     while i < offer_length {
         write_generated_offer_item(
-            items,
+            mut items,
             slot: start + i,
             base: generated.offer_offset + 32 + i * 128,
         )
@@ -700,64 +605,57 @@ uses (ops: mut RawOps)
     i = 0
     while i < consideration_length {
         write_generated_consideration_item(
-            items,
+            mut items,
             slot: consideration_start + i,
             base: generated.consideration_offset + 32 + i * 160,
         )
         i += 1
     }
-    let order = unsafe {
-        mut *book.order(order_index)
-    }
+    let order = mut book.orders[(order_index) as usize]
     order.offer_start = start
     order.offer_len = offer_length
     order.consideration_start = consideration_start
     order.consideration_len = consideration_length
-    Book { orders: book.orders, items, used, blob: book.blob }
+    book.items = items
+    book.used = used
 }
 
-fn copy_item(_ items: Arr<Item>, source: Arr<Item>, index: u256) {
-    unsafe {
-        *items.at(index) = *source.at(index)
-    }
+fn copy_item(_ items: mut MemArray<Item>, source: MemArray<Item>, index: u256) {
+    items[(index) as usize] = source[(index) as usize]
 }
 
-fn write_generated_offer_item(_ items: Arr<Item>, slot: u256, base: u256)
+fn write_generated_offer_item(_ items: mut MemArray<Item>, slot: u256, base: u256)
 uses (ops: mut RawOps)
 {
     let amount = returndata_word(base + 96)
-    unsafe {
-        *items.at(slot) = Item {
-            item_type: returndata_word(base),
-            token: Address { inner: returndata_word(base + 32) },
-            identifier: returndata_word(base + 64),
-            start_amount: amount,
-            end_amount: amount,
-            recipient: Address::zero(),
-            amount,
-            receiver: Address::zero(),
-            original: amount,
-        }
+    items[(slot) as usize] = Item {
+        item_type: returndata_word(base),
+        token: Address { inner: returndata_word(base + 32) },
+        identifier: returndata_word(base + 64),
+        start_amount: amount,
+        end_amount: amount,
+        recipient: Address::zero(),
+        amount,
+        receiver: Address::zero(),
+        original: amount,
     }
 }
 
-fn write_generated_consideration_item(_ items: Arr<Item>, slot: u256, base: u256)
+fn write_generated_consideration_item(_ items: mut MemArray<Item>, slot: u256, base: u256)
 uses (ops: mut RawOps)
 {
     let amount = returndata_word(base + 96)
     let recipient = Address { inner: returndata_word(base + 128) }
-    unsafe {
-        *items.at(slot) = Item {
-            item_type: returndata_word(base),
-            token: Address { inner: returndata_word(base + 32) },
-            identifier: returndata_word(base + 64),
-            start_amount: amount,
-            end_amount: amount,
-            recipient,
-            amount,
-            receiver: recipient,
-            original: amount,
-        }
+    items[(slot) as usize] = Item {
+        item_type: returndata_word(base),
+        token: Address { inner: returndata_word(base + 32) },
+        identifier: returndata_word(base + 64),
+        start_amount: amount,
+        end_amount: amount,
+        recipient,
+        amount,
+        receiver: recipient,
+        original: amount,
     }
 }
 

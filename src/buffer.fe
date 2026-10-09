@@ -1,0 +1,119 @@
+// SPDX-License-Identifier: MIT
+// An initialized, exclusively owned byte buffer for exact protocol encodings.
+use core::ptr::{self, MemArray, MemBuffer, MemSpan}
+use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_error}
+
+pub struct Buffer { data: MemBuffer }
+
+impl Buffer {
+    pub fn new(_ len: u256) -> Self {
+        let mut data = MemArray<u256>::new_zeroed((len + 31) / 32).into_buffer()
+        data.truncate(len)
+        Buffer { data }
+    }
+    pub fn len(self) -> u256 {
+        self.data.len()
+    }
+    pub fn span(self) -> ref MemSpan {
+        self.data.span()
+    }
+    pub fn slice(self, offset: u256, len: u256) -> ref MemSpan {
+        self.data.slice(offset, len)
+    }
+    pub fn word(self, _ offset: u256) -> u256 {
+        self.check_word(offset)
+        // The complete word is initialized and lies in this owner's allocation.
+        unsafe {
+            *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset))
+        }
+    }
+    pub fn write(mut self, offset: u256, value: u256) {
+        self.check_word(offset)
+        // The complete word lies in this exclusively held owner's allocation.
+        unsafe {
+            *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
+        }
+    }
+    pub fn copy_from(mut self, offset: u256, source: MemSpan) {
+        if offset > self.len() || source.len() > self.len() - offset {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+        self.data.copy_from(dest_offset: offset, source)
+    }
+
+    fn check_word(self, _ offset: u256) {
+        if offset > self.len() || self.len() - offset < 32 {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+    }
+}
+
+#[test]
+fn word_writes_preserve_unaligned_neighbors() {
+    let mut data = Buffer::new(66)
+    data.write(offset: 0, value: 0x1901 << 240)
+    data.write(offset: 2, value: 7)
+    data.write(offset: 34, value: 11)
+    assert(data.word(2) == 7)
+    assert(data.word(34) == 11)
+    assert(data.span().byte_at(0) == 0x19)
+    assert(data.span().byte_at(1) == 1)
+}
+
+/// Read a complete word from a checked byte range.
+pub fn read_word(_ data: MemSpan, offset: u256) -> u256 {
+    if offset > data.len() || data.len() - offset < 32 {
+        revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+    }
+    unsafe {
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data.ptr(), offset))
+    }
+}
+
+/// EVM output copying overwrites only the returned prefix of a scratch word.
+/// Preserve its initial suffix without reading beyond the returned span.
+pub fn return_word(_ returned: MemSpan, initial: u256) -> u256 {
+    if returned.len() >= 32 {
+        return read_word(returned, offset: 0)
+    }
+    let mut word = initial
+    let mut i: u256 = 0
+    while i < returned.len() {
+        let shift = (31 - i) * 8
+        word = (word & !((0xff as u256) << shift)) | ((returned.byte_at(i) as u256) << shift)
+        i += 1
+    }
+    word
+}
+
+#[test]
+fn short_returns_preserve_the_initial_suffix() {
+    let mut data = Buffer::new(32)
+    data.write(offset: 0, value: 0x1626ba7e << 224)
+    assert(
+        return_word(data.slice(offset: 0, len: 4), initial: 7) == (0x1626ba7e << 224) | 7,
+    )
+    assert(
+        return_word(data.slice(offset: 0, len: 0), initial: 7) == 7,
+    )
+    assert(return_word(data.span(), initial: 7) == 0x1626ba7e << 224)
+}
+
+#[test(should_revert, panic = 0x32)]
+fn word_write_cannot_cross_the_owned_extent() {
+    let mut data = Buffer::new(33)
+    data.write(offset: 2, value: 7)
+}
+
+#[test(should_revert, panic = 0x32)]
+fn word_read_cannot_wrap_the_offset() {
+    let data = Buffer::new(32)
+    read_word(data.span(), offset: !(0 as u256))
+}
+
+#[test(should_revert, panic = 0x32)]
+fn byte_copy_cannot_use_allocation_padding() {
+    let mut data = Buffer::new(33)
+    let source = Buffer::new(1)
+    data.copy_from(offset: 33, source: source.span())
+}

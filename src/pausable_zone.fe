@@ -5,7 +5,7 @@
 // `isPaused` into slot 0; the controller keeps `_owner`, `_potentialOwner`
 // and `_pauser` in slots 0 to 2.
 use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
+use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynVec, DynString, sol}
 use std::evm::{
     Address,
     Call,
@@ -18,7 +18,6 @@ use std::evm::{
     keccak256,
     revert_error,
 }
-use super::lowlevel::store_word
 use super::seaport::SeaportMsg
 use super::types::{
     AdvancedOrder,
@@ -239,24 +238,11 @@ pub contract PausableZone {
         GetSeaportMetadata {} -> (DynString, DynArray<Schema>) {
             // "PausableZone"
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
-            // [Schema({ id: 3003, metadata: "" })]
-            let data = core::ptr::alloc_bytes(160)
-            unsafe {
-                store_word(data, 1)
-            }
-            unsafe {
-                store_word(core::ptr::offset_bytes(data, 32), 0x20)
-            }
-            unsafe {
-                store_word(core::ptr::offset_bytes(data, 64), 3003)
-            }
-            unsafe {
-                store_word(core::ptr::offset_bytes(data, 96), 0x40)
-            }
-            unsafe {
-                store_word(core::ptr::offset_bytes(data, 128), 0)
-            }
-            (name, unsafe { DynArray<Schema>::from_abi_tail(data, len: 1, size: 160) })
+            let schemas = DynVec<Schema>::filled(
+                1,
+                value: Schema { id: 3003, metadata: Bytes::empty() },
+            )
+            (name, schemas.to_dyn_array())
         }
         SupportsInterface { interfaceId } -> bool {
             interfaceId.val == ZONE_INTERFACE_ID || interfaceId.val == ERC165_INTERFACE_ID

@@ -2,10 +2,10 @@
 // BasicOrderFulfiller: `fulfillBasicOrder` reads its parameters directly
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
-use core::ptr::{self, MemSpan}
-use std::abi::{Bytes32, DynArray, MemVec}
+use core::ptr::MemBuffer
+use std::abi::{Bytes, Bytes32, DynArray, MemVec}
 use std::evm::{Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
-use super::arr::{Arr, ByteRef}
+use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
@@ -31,7 +31,7 @@ use super::executor::{
     Accumulator,
 }
 use super::hashing::{CONSIDERATION_ITEM_TYPEHASH, Env, OFFER_ITEM_TYPEHASH, ORDER_TYPEHASH}
-use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::signature::verify_signature
 use super::status::{
     clear_reentrancy_guard,
@@ -156,7 +156,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         transfer_individual_721_or_1155_item(env, item_type: offered_item_type, conduit_key)
         transfer_native_tokens_and_finalize()
     } else {
-        let buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
+        let mut buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
         let empty = new_accumulator()
         let acc = if route == 2 {
             transfer_erc721(
@@ -167,7 +167,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 amount: cd(OFFER_AMOUNT),
                 conduit_key,
                 acc: empty,
-                buf,
+                mut buf,
                 env,
             )
         } else if route == 3 {
@@ -179,7 +179,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 amount: cd(OFFER_AMOUNT),
                 conduit_key,
                 acc: empty,
-                buf,
+                mut buf,
                 env,
             )
         } else if route == 4 {
@@ -191,7 +191,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 amount: cd(CONSIDERATION_AMOUNT),
                 conduit_key,
                 acc: empty,
-                buf,
+                mut buf,
                 env,
             )
         } else {
@@ -203,7 +203,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 amount: cd(CONSIDERATION_AMOUNT),
                 conduit_key,
                 acc: empty,
-                buf,
+                mut buf,
                 env,
             )
         }
@@ -211,9 +211,9 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
             env,
             from_offerer: offer_type_is_additional_recipients_type,
             acc,
-            buf,
+            mut buf,
         )
-        let _ = trigger_if_armed(finalized, buf, env)
+        let _ = trigger_if_armed(finalized, mut buf, env)
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
         call_basic_order_zone(order_hash, selector: VALIDATE_ORDER_SELECTOR)
@@ -251,11 +251,11 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     // Consideration item hashes of the primary item and the original
     // additional recipients, and the ReceivedItems of all of them.
     let offerer = cd_address(OFFERER)
-    let consideration_hashes = ptr::alloc_bytes((total_original + 1) * 32)
-    unsafe {
-        store_word(
-            consideration_hashes,
-            keccak_words(
+    let mut consideration_hashes = Buffer::new((total_original + 1) * 32)
+    consideration_hashes
+        .write(
+            offset: 0,
+            value: keccak_words(
                 [
                     CONSIDERATION_ITEM_TYPEHASH,
                     received_item_type,
@@ -267,7 +267,6 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 ],
             ),
         )
-    }
     let mut received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
     received
         .set(
@@ -286,10 +285,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         let amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
         if i < total_original {
-            unsafe {
-                store_word(
-                    ptr::offset_bytes(consideration_hashes, (i + 1) * 32),
-                    keccak_words(
+            consideration_hashes
+                .write(
+                    offset: (i + 1) * 32,
+                    value: keccak_words(
                         [
                             CONSIDERATION_ITEM_TYPEHASH,
                             additional_recipients_item_type,
@@ -301,7 +300,6 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                         ],
                     ),
                 )
-            }
         }
         combined_recipients = combined_recipients | recipient
         received
@@ -320,11 +318,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     if combined_recipients >= (1 << 160) {
         revert_error(InvalidBasicOrderParameterEncoding {})
     }
-    let received_items_hash = keccak256(
-        unsafe {
-            MemSpan::from_raw_parts(ptr: consideration_hashes, len: (total_original + 1) * 32)
-        },
-    )
+    let received_items_hash = keccak256(consideration_hashes.span())
 
     let offer_item_hash = keccak_words(
         [
@@ -402,22 +396,17 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 
 /// The signature `bytes`, with the length masked to 32 bits like
 /// seaport-core's decoder.
-fn basic_order_signature() -> ByteRef uses (ops: RawOps) {
+fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
     let at = cd(SIGNATURE_HEAD) + 0x24
     let len = cd(at) & 0xffffffff
-    let size = 32 + ((len + 31) & !(31 as u256))
-    let data = ptr::alloc_bytes(size)
-    let mut i: u256 = 32
-    unsafe {
-        store_word(data, len)
-    }
-    while i < size {
-        unsafe {
-            store_word(ptr::offset_bytes(data, i), cd(at + i))
-        }
-        i += 32
-    }
-    ByteRef { data, len, size }
+    let mut payload = MemBuffer::with_capacity(len)
+    ops.calldatacopy(
+        dest: mut payload,
+        dest_offset: 0,
+        src_offset: at + 32,
+        len,
+    )
+    Bytes::from_payload(source: payload.span())
 }
 
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the
@@ -435,67 +424,33 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // head, offer (one SpentItem), consideration, empty extraData, hashes
     let params_size = 0x140 + 0xa0 + consideration_size + 32 + 32 + hashes_count * 32
     let size = 0x24 + params_size
-    let data = ptr::alloc_bytes(size + 28)
-    unsafe {
-        store_word(data, selector << 224)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(data, 4), 0x20)
-    }
-    let head = ptr::offset_bytes(data, 0x24)
-    unsafe {
-        store_word(head, order_hash)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x20), ctx.caller().inner)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x40), cd(OFFERER))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x60), 0x140)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x80), 0x1e0)
-    }
+    let mut data = Buffer::new(size)
+    data.write(offset: 0, value: selector << 224)
+    data.write(offset: 4, value: 0x20)
+    let head: u256 = 0x24
+    data.write(offset: head, value: order_hash)
+    data.write(offset: head + 0x20, value: ctx.caller().inner)
+    data.write(offset: head + 0x40, value: cd(OFFERER))
+    data.write(offset: head + 0x60, value: 0x140)
+    data.write(offset: head + 0x80, value: 0x1e0)
     let extra_data_offset = 0x1e0 + consideration_size
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0xa0), extra_data_offset)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0xc0), extra_data_offset + 32)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0xe0), cd(START_TIME))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x100), cd(END_TIME))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(head, 0x120), cd(ZONE_HASH))
-    }
+    data.write(offset: head + 0xa0, value: extra_data_offset)
+    data.write(offset: head + 0xc0, value: extra_data_offset + 32)
+    data.write(offset: head + 0xe0, value: cd(START_TIME))
+    data.write(offset: head + 0x100, value: cd(END_TIME))
+    data.write(offset: head + 0x120, value: cd(ZONE_HASH))
     // offer: [(offeredItemType, offerToken, offerIdentifier, offerAmount)]
     let basic_order_type = cd(BASIC_ORDER_TYPE)
     let route = basic_order_type >> 2
-    let offer = ptr::offset_bytes(head, 0x140)
-    unsafe {
-        store_word(offer, 1)
-    }
-    unsafe {
-        store_word(
-            ptr::offset_bytes(offer, 0x20),
-            byte_at(route, OFFERED_ITEM_BYTE_MAP),
-        )
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(offer, 0x40), cd(OFFER_TOKEN))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(offer, 0x60), cd(OFFER_IDENTIFIER))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(offer, 0x80), cd(OFFER_AMOUNT))
-    }
+    let offer = head + 0x140
+    data.write(offset: offer, value: 1)
+    data.write(
+        offset: offer + 0x20,
+        value: byte_at(route, OFFERED_ITEM_BYTE_MAP),
+    )
+    data.write(offset: offer + 0x40, value: cd(OFFER_TOKEN))
+    data.write(offset: offer + 0x60, value: cd(OFFER_IDENTIFIER))
+    data.write(offset: offer + 0x80, value: cd(OFFER_AMOUNT))
     // consideration: primary item, then all additional recipients
     let additional_recipients_item_type: u256 = if route > 1 { 1 } else { 0 }
     let additional_recipients_token = if route > 3 {
@@ -503,86 +458,47 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     } else {
         cd(CONSIDERATION_TOKEN)
     }
-    let consideration = ptr::offset_bytes(head, 0x1e0)
-    unsafe {
-        store_word(consideration, total_recipients + 1)
-    }
-    let first = ptr::offset_bytes(consideration, 0x20)
-    unsafe {
-        store_word(first, byte_at(route, RECEIVED_ITEM_BYTE_MAP))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(first, 0x20), cd(CONSIDERATION_TOKEN))
-    }
-    unsafe {
-        store_word(
-            ptr::offset_bytes(first, 0x40),
-            cd(CONSIDERATION_IDENTIFIER),
-        )
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(first, 0x60), cd(CONSIDERATION_AMOUNT))
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(first, 0x80), cd(OFFERER))
-    }
+    let consideration = head + 0x1e0
+    data.write(offset: consideration, value: total_recipients + 1)
+    let first = consideration + 0x20
+    data.write(
+        offset: first,
+        value: byte_at(route, RECEIVED_ITEM_BYTE_MAP),
+    )
+    data.write(offset: first + 0x20, value: cd(CONSIDERATION_TOKEN))
+    data.write(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
+    data.write(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
+    data.write(offset: first + 0x80, value: cd(OFFERER))
     let mut i: u256 = 0
     while i < total_recipients {
-        let item = ptr::offset_bytes(consideration, 0x20 + (i + 1) * 160)
-        unsafe {
-            store_word(item, additional_recipients_item_type)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(item, 0x20), additional_recipients_token)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(item, 0x40), 0)
-        }
-        unsafe {
-            store_word(
-                ptr::offset_bytes(item, 0x60),
-                cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
-            )
-        }
-        unsafe {
-            store_word(
-                ptr::offset_bytes(item, 0x80),
-                cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
-            )
-        }
+        let item = consideration + 0x20 + (i + 1) * 160
+        data.write(offset: item, value: additional_recipients_item_type)
+        data.write(offset: item + 0x20, value: additional_recipients_token)
+        data.write(offset: item + 0x40, value: 0)
+        data.write(
+            offset: item + 0x60,
+            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
+        )
+        data.write(
+            offset: item + 0x80,
+            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
+        )
         i += 1
     }
-    unsafe {
-        store_word(ptr::offset_bytes(head, extra_data_offset), 0)
-    }
-    unsafe {
-        store_word(
-            ptr::offset_bytes(head, extra_data_offset + 32),
-            hashes_count,
-        )
-    }
+    data.write(offset: head + extra_data_offset, value: 0)
+    data.write(offset: head + extra_data_offset + 32, value: hashes_count)
     if hashes_count == 1 {
-        unsafe {
-            store_word(
-                ptr::offset_bytes(head, extra_data_offset + 64),
-                order_hash,
-            )
-        }
+        data.write(offset: head + extra_data_offset + 64, value: order_hash)
     }
     let magic = selector << 224
-    let mut ret = core::ptr::MemBuffer::with_capacity(32)
-    unsafe {
-        store_word(ret.ptr(), 0)
-    }
+    let mut ret = MemBuffer::with_capacity(32)
     let zone = cd_address(ZONE)
     let outcome = call
         .raw_call(
             addr: zone,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: data, len: size)
-            },
+            args: data.span(),
             ret: mut ret,
         )
     if !outcome.success() {
@@ -591,7 +507,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
         )
     }
-    if unsafe { load_word(ret.ptr()) } != magic {
+    if return_word(ret.span(), initial: 0) != magic {
         revert_error(
             InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
         )
@@ -608,41 +524,17 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
     if conduit_key != 0 {
-        let data = ptr::alloc_bytes(0x104 + 28)
-        unsafe {
-            store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x04), 0x20)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x24), 1)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x44), item_type)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x64), token.inner)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x84), from.inner)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0xa4), ctx.caller().inner)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0xc4), identifier)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0xe4), amount)
-        }
-        call_conduit(
-            env,
-            conduit_key,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: data, len: 0x104)
-            },
-        )
+        let mut data = Buffer::new(0x104)
+        data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+        data.write(offset: 0x04, value: 0x20)
+        data.write(offset: 0x24, value: 1)
+        data.write(offset: 0x44, value: item_type)
+        data.write(offset: 0x64, value: token.inner)
+        data.write(offset: 0x84, value: from.inner)
+        data.write(offset: 0xa4, value: ctx.caller().inner)
+        data.write(offset: 0xc4, value: identifier)
+        data.write(offset: 0xe4, value: amount)
+        call_conduit(env, conduit_key, args: data.span())
     } else if item_type == ERC721 as u256 {
         if amount != 1 {
             revert_error(InvalidERC721TransferAmount { amount })
@@ -688,7 +580,7 @@ fn transfer_erc20_and_finalize(
     _ env: Env,
     from_offerer: bool,
     acc: Accumulator,
-    buf: *u8,
+    buf: mut Buffer,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -728,7 +620,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             amount: additional_amount,
             conduit_key,
             acc: current,
-            buf,
+            mut buf,
             env,
         )
         i += 1
@@ -740,7 +632,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         amount,
         conduit_key,
         acc: current,
-        buf,
+        mut buf,
         env,
     )
 }

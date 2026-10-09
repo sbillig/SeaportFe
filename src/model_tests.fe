@@ -1,0 +1,90 @@
+use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol::Uint120}
+use std::evm::Address
+use super::applier::aggregate_offer_items
+use super::model::{advanced_orders, nested_components, single_advanced}
+use super::types::{
+    AdvancedOrder,
+    ConsiderationItem,
+    FulfillmentComponent,
+    OfferItem,
+    OrderParameters,
+}
+
+fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
+    AdvancedOrder {
+        parameters: OrderParameters {
+            offerer: Address { inner: 0xabc },
+            zone: Address::zero(),
+            offer: dyn_array_from(
+                [
+                    OfferItem {
+                        itemType: 2,
+                        token: Address { inner: 0x123 },
+                        identifierOrCriteria: identifier,
+                        startAmount: amount,
+                        endAmount: amount,
+                    },
+                ],
+            ),
+            consideration: DynArray<ConsiderationItem>::empty(),
+            orderType: 0,
+            startTime: 0,
+            endTime: 123,
+            zoneHash: Bytes32 { val: 0 },
+            salt: 7,
+            conduitKey: Bytes32 { val: 0 },
+            totalOriginalConsiderationItems: 0,
+        },
+        numerator: Uint120 { val: 1 },
+        denominator: Uint120 { val: 1 },
+        signature: Bytes::from_word_prefix(word: identifier << 248, len: 1),
+        extraData: Bytes::from_word_prefix(word: amount << 248, len: 1),
+    }
+}
+
+#[test]
+fn owned_items_mutate_independently_of_order_views() {
+    let mut book = single_advanced(order(4, amount: 7))
+    let descriptor = ref book.orders[0]
+    book.items[descriptor.offer_start as usize].amount = 11
+    assert(descriptor.offer_len == 1)
+    assert(descriptor.signature.byte_at(0) == 4)
+    assert(descriptor.extra_data.byte_at(0) == 7)
+    assert(book.items[0].amount == 11)
+    assert(book.items[0].start_amount == 7)
+}
+
+#[test]
+fn multiple_orders_keep_their_item_and_byte_ranges() {
+    let mut input = DynVec<AdvancedOrder>::new()
+    input.push(order(4, amount: 7))
+    input.push(order(5, amount: 13))
+    let mut book = advanced_orders(input.to_dyn_array())
+    assert(book.used == 2)
+    assert(book.orders[0].offer_start == 0)
+    assert(book.orders[1].offer_start == 1)
+    let second = ref book.orders[1]
+    book.items[second.offer_start as usize].identifier = 99
+    assert(second.signature.byte_at(0) == 5)
+    assert(second.extra_data.byte_at(0) == 13)
+    assert(book.items[0].identifier == 4)
+    assert(book.items[1].identifier == 99)
+}
+
+#[test(should_revert, selector = 0x91b3e514)]
+fn repeated_fulfillment_indices_observe_prior_mutation() {
+    let mut book = single_advanced(order(4, amount: 7))
+    let components = dyn_array_from(
+        [
+            FulfillmentComponent { orderIndex: 0, itemIndex: 0 },
+            FulfillmentComponent { orderIndex: 0, itemIndex: 0 },
+        ],
+    )
+    let groups = nested_components(dyn_array_from([components]))
+    let _ = aggregate_offer_items(
+        mut book,
+        groups,
+        group: ref groups.list[0],
+        recipient: Address { inner: 0xdef },
+    )
+}

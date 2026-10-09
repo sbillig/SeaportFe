@@ -2,7 +2,7 @@
 // Executor and TokenTransferrer: native, ERC20, ERC721 and ERC1155 transfers,
 // either directly or batched into one `Conduit.execute` call through the
 // accumulator.
-use core::ptr::{self, MemBuffer, MemSpan}
+use core::ptr::{MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
 use super::errors::{
@@ -16,7 +16,8 @@ use super::errors::{
     UnusedItemParameters,
 }
 use super::hashing::{Env, derive_conduit}
-use super::lowlevel::{load_word, revert_with_reason_if_one_is_returned, store_word}
+use super::lowlevel::revert_with_reason_if_one_is_returned
+use super::buffer::{Buffer, return_word}
 use super::types::{ERC20, ERC721, NATIVE}
 
 /// transferFrom(address,address,uint256), shared by ERC20 and ERC721.
@@ -42,11 +43,8 @@ pub struct Transfer {
 
 impl Copy for Transfer {}
 
-/// Conduit transfers collected for a single `execute` call. The transfers
-/// themselves (ConduitTransfer structs, six words each) are written to a
-/// buffer the caller allocates for the most transfers the operation can
-/// make; the accumulator holds no pointer and is passed by value
-/// (ISSUES.md #9).
+/// Metadata for conduit transfers in a separately owned, checked Buffer.
+/// Copying this scalar record grants no access to the transfer buffer.
 pub struct Accumulator { pub armed: bool, pub conduit_key: u256, pub count: u256 }
 
 impl Copy for Accumulator {}
@@ -56,22 +54,18 @@ pub fn new_accumulator() -> Accumulator {
 }
 
 /// A transfer buffer for up to `transfers` conduit transfers.
-pub fn transfer_buffer(_ transfers: u256) -> *u8 {
-    ptr::alloc_bytes(transfers * 0xc0)
+pub fn transfer_buffer(_ transfers: u256) -> Buffer {
+    Buffer::new(transfers * 0xc0)
 }
 
-fn calldata_with_selector(_ selector: u256, _ words: u256) -> *u8 {
-    let data = ptr::alloc_bytes(4 + words * 32)
-    unsafe {
-        store_word(data, selector << 224)
-    }
+fn calldata_with_selector(_ selector: u256, _ words: u256) -> Buffer {
+    let mut data = Buffer::new(4 + words * 32)
+    data.write(offset: 0, value: selector << 224)
     data
 }
 
-fn set_arg(_ data: *u8, _ index: u256, _ value: u256) {
-    unsafe {
-        store_word(ptr::offset_bytes(data, 4 + index * 32), value)
-    }
+fn set_arg(_ data: mut Buffer, _ index: u256, _ value: u256) {
+    data.write(offset: 4 + index * 32, value)
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
@@ -80,7 +74,7 @@ pub fn transfer(
     from: Address,
     conduit_key: u256,
     acc: Accumulator,
-    buf: *u8,
+    buf: mut Buffer,
     env: Env,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
@@ -103,7 +97,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             amount: item.amount,
             conduit_key,
             acc,
-            buf,
+            mut buf,
             env,
         )
     }
@@ -116,7 +110,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             amount: item.amount,
             conduit_key,
             acc,
-            buf,
+            mut buf,
             env,
         )
     }
@@ -128,7 +122,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         amount: item.amount,
         conduit_key,
         acc,
-        buf,
+        mut buf,
         env,
     )
 }
@@ -148,19 +142,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // all forwarded gas, and seaport-core still reverts with the custom error
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
-    let failure = ptr::alloc_bytes(0x44)
-    unsafe {
-        store_word(
-            failure,
-            NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+    let mut failure = Buffer::new(0x44)
+    failure.write(
+            offset: 0,
+            value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
         )
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(failure, 0x04), to.inner)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(failure, 0x24), amount)
-    }
+    failure.write(offset: 0x04, value: to.inner)
+    failure.write(offset: 0x24, value: amount)
     let mut ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
@@ -172,11 +160,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        ops.revert(
-            data: unsafe {
-                MemSpan::from_raw_parts(ptr: failure, len: 0x44)
-            },
-        )
+        ops.revert(data: failure.span())
     }
 }
 
@@ -190,20 +174,20 @@ pub fn transfer_erc20(
     amount: u256,
     conduit_key: u256,
     acc: Accumulator,
-    buf: *u8,
+    buf: mut Buffer,
     env: Env,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     assert_non_zero_amount(amount)
-    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
+    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc20_transfer(token, from, to, amount)
         return acc
     }
     insert(
         acc,
-        buf,
+        mut buf,
         conduit_key,
         item_type: CONDUIT_ERC20,
         token,
@@ -222,12 +206,12 @@ pub fn transfer_erc721(
     amount: u256,
     conduit_key: u256,
     acc: Accumulator,
-    buf: *u8,
+    buf: mut Buffer,
     env: Env,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
+    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
     if conduit_key == 0 {
         if amount != 1 {
             revert_error(InvalidERC721TransferAmount { amount })
@@ -237,7 +221,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     insert(
         acc,
-        buf,
+        mut buf,
         conduit_key,
         item_type: CONDUIT_ERC721,
         token,
@@ -256,20 +240,20 @@ pub fn transfer_erc1155(
     amount: u256,
     conduit_key: u256,
     acc: Accumulator,
-    buf: *u8,
+    buf: mut Buffer,
     env: Env,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     assert_non_zero_amount(amount)
-    let acc = trigger_if_armed_and_not_accumulatable(acc, buf, conduit_key, env)
+    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
     if conduit_key == 0 {
         perform_erc1155_transfer(token, from, to, identifier, amount)
         return acc
     }
     insert(
         acc,
-        buf,
+        mut buf,
         conduit_key,
         item_type: CONDUIT_ERC1155,
         token,
@@ -282,49 +266,34 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 fn trigger_if_armed_and_not_accumulatable(
     _ acc: Accumulator,
-    _ buf: *u8,
+    _ buf: mut Buffer,
     _ conduit_key: u256,
     _ env: Env,
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if acc.conduit_key != conduit_key {
-        return trigger_if_armed(acc, buf, env)
+        return trigger_if_armed(acc, mut buf, env)
     }
     acc
 }
 
 /// Execute the accumulated conduit transfers, if any.
-pub fn trigger_if_armed(_ acc: Accumulator, _ buf: *u8, _ env: Env) -> Accumulator
+pub fn trigger_if_armed(_ acc: Accumulator, _ buf: mut Buffer, _ env: Env) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if !acc.armed { return acc }
     let count = acc.count
     let size = 0x44 + count * 0xc0
-    let data = ptr::alloc_bytes(size)
-    unsafe {
-        store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(data, 4), 0x20)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(data, 0x24), count)
-    }
-    unsafe {
-        ptr::copy_raw(
-            dest: ptr::offset_bytes(data, 0x44),
-            source: buf,
-            len: count * 0xc0,
-        )
-    }
-    call_conduit(
-        env,
-        conduit_key: acc.conduit_key,
-        args: unsafe {
-            MemSpan::from_raw_parts(ptr: data, len: size)
-        },
+    let mut data = Buffer::new(size)
+    data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+    data.write(offset: 4, value: 0x20)
+    data.write(offset: 0x24, value: count)
+    data.copy_from(
+        offset: 0x44,
+        source: buf.slice(offset: 0, len: count * 0xc0),
     )
+    call_conduit(env, conduit_key: acc.conduit_key, args: data.span())
     let mut disarmed = acc
     disarmed.armed = false
     disarmed
@@ -337,9 +306,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let conduit = derive_conduit(env, conduit_key)
     let mut ret = MemBuffer::with_capacity(32)
-    unsafe {
-        store_word(ret.ptr(), 0)
-    }
     let outcome = call.raw_call(
             addr: conduit,
             gas: ctx.gas(),
@@ -351,7 +317,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_with_reason_if_one_is_returned()
         revert_error(InvalidCallToConduit { conduit })
     }
-    if unsafe { load_word(ret.ptr()) } >> 224 != CONDUIT_EXECUTE_SELECTOR {
+    if return_word(ret.span(), initial: 0) >> 224 != CONDUIT_EXECUTE_SELECTOR {
         revert_error(
             InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
         )
@@ -360,7 +326,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 fn insert(
     _ previous: Accumulator,
-    _ buf: *u8,
+    _ buf: mut Buffer,
     _ conduit_key: u256,
     item_type: u256,
     token: Address,
@@ -375,25 +341,13 @@ fn insert(
         acc.conduit_key = conduit_key
         acc.count = 0
     }
-    let at = ptr::offset_bytes(buf, acc.count * 0xc0)
-    unsafe {
-        store_word(at, item_type)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(at, 0x20), token.inner)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(at, 0x40), from.inner)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(at, 0x60), to.inner)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(at, 0x80), identifier)
-    }
-    unsafe {
-        store_word(ptr::offset_bytes(at, 0xa0), amount)
-    }
+    let at = acc.count * 0xc0
+    buf.write(offset: at, value: item_type)
+    buf.write(offset: at + 0x20, value: token.inner)
+    buf.write(offset: at + 0x40, value: from.inner)
+    buf.write(offset: at + 0x60, value: to.inner)
+    buf.write(offset: at + 0x80, value: identifier)
+    buf.write(offset: at + 0xa0, value: amount)
     acc.count = acc.count + 1
     acc
 }
@@ -403,27 +357,23 @@ fn insert(
 pub fn perform_erc20_transfer(token: Address, from: Address, to: Address, amount: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(args, 0, from.inner)
-    set_arg(args, 1, to.inner)
-    set_arg(args, 2, amount)
+    let mut args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
+    set_arg(mut args, 0, from.inner)
+    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 2, amount)
     let mut ret = MemBuffer::with_capacity(32)
-    unsafe {
-        store_word(ret.ptr(), 0)
-    }
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: args, len: 0x64)
-            },
+            args: args.span(),
             ret: mut ret,
         )
     let call_status = outcome.success()
     let size = outcome.returndata_len()
-    let success = call_status && ((unsafe { load_word(ret.ptr()) } == 1 && size > 31) || size == 0)
+    let success = call_status
+        && ((return_word(ret.span(), initial: 0) == 1 && size > 31) || size == 0)
     if success && size != 0 {
         return
     }
@@ -450,19 +400,17 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if ctx.extcodesize(token) == 0 {
         revert_error(NoContract { account: token })
     }
-    let args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(args, 0, from.inner)
-    set_arg(args, 1, to.inner)
-    set_arg(args, 2, identifier)
+    let mut args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
+    set_arg(mut args, 0, from.inner)
+    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 2, identifier)
     let mut ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: args, len: 0x64)
-            },
+            args: args.span(),
             ret: mut ret,
         )
     if !outcome.success() {
@@ -485,22 +433,20 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if ctx.extcodesize(token) == 0 {
         revert_error(NoContract { account: token })
     }
-    let args = calldata_with_selector(ERC1155_SAFE_TRANSFER_FROM_SELECTOR, 6)
-    set_arg(args, 0, from.inner)
-    set_arg(args, 1, to.inner)
-    set_arg(args, 2, identifier)
-    set_arg(args, 3, amount)
-    set_arg(args, 4, 0xa0)
-    set_arg(args, 5, 0)
+    let mut args = calldata_with_selector(ERC1155_SAFE_TRANSFER_FROM_SELECTOR, 6)
+    set_arg(mut args, 0, from.inner)
+    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 2, identifier)
+    set_arg(mut args, 3, amount)
+    set_arg(mut args, 4, 0xa0)
+    set_arg(mut args, 5, 0)
     let mut ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: unsafe {
-                MemSpan::from_raw_parts(ptr: args, len: 0xc4)
-            },
+            args: args.span(),
             ret: mut ret,
         )
     if !outcome.success() {

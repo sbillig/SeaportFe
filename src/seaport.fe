@@ -20,7 +20,7 @@ use super::model::{
     single_advanced,
     single_order,
 }
-use super::arr::Arr
+use core::ptr::MemArray
 use super::signature::domain_separator
 use super::status::{
     NOT_ENTERED_SSTORE,
@@ -186,9 +186,10 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 pub fn fulfill_order(_ env: Env, order: Order, fulfiller_conduit_key: Bytes32) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = single_order(order)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_order(order),
+        mut book,
         resolvers: no_resolvers(),
         fulfiller_conduit_key: fulfiller_conduit_key.val,
         recipient: ctx.caller(),
@@ -204,9 +205,10 @@ pub fn fulfill_advanced_order(
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = single_advanced(advanced_order)
     validate_and_fulfill_advanced_order(
         env,
-        book: single_advanced(advanced_order),
+        mut book,
         resolvers: resolvers(criteria_resolvers),
         fulfiller_conduit_key: fulfiller_conduit_key.val,
         recipient: caller_if_zero(recipient),
@@ -223,9 +225,10 @@ pub fn fulfill_available_orders(
 ) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = orders_as_advanced(orders)
     fulfill_available_advanced_orders(
         env,
-        book: orders_as_advanced(orders),
+        mut book,
         resolvers: no_resolvers(),
         offer_fulfillments: nested_components(offer_fulfillments),
         consideration_fulfillments: nested_components(consideration_fulfillments),
@@ -247,9 +250,10 @@ pub fn fulfill_available_advanced(
 ) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = advanced_orders(orders)
     fulfill_available_advanced_orders(
         env,
-        book: advanced_orders(orders),
+        mut book,
         resolvers: resolvers(criteria_resolvers),
         offer_fulfillments: nested_components(offer_fulfillments),
         consideration_fulfillments: nested_components(consideration_fulfillments),
@@ -266,9 +270,10 @@ pub fn match_orders(
 ) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = orders_as_advanced(orders)
     match_advanced_orders(
         env,
-        book: orders_as_advanced(orders),
+        mut book,
         resolvers: no_resolvers(),
         fulfillments: fulfillments(fulfillments_in),
         recipient: ctx.caller(),
@@ -284,9 +289,10 @@ pub fn match_advanced(
 ) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let mut book = advanced_orders(orders)
     match_advanced_orders(
         env,
-        book: advanced_orders(orders),
+        mut book,
         resolvers: resolvers(criteria_resolvers),
         fulfillments: fulfillments(fulfillments_in),
         recipient: caller_if_zero(recipient),

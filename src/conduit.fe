@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Conduit and ConduitController (seaport-core/src/conduit).
-use core::ptr::{self, MemBuffer, MemSpan}
+use core::ptr::MemBuffer
 use std::abi::{Bytes4, Bytes32, DynArray, MemVec, sol}
 use std::evm::{
     Address,
@@ -17,13 +17,9 @@ use std::evm::{
     revert_error,
 }
 use super::errors::{InvalidERC721TransferAmount, NoContract, Invalid1155BatchTransferEncoding}
+use super::buffer::Buffer
 use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
-use super::lowlevel::{
-    bubble_revert_if_affordable,
-    load_word,
-    revert_with_reason_if_one_is_returned,
-    store_word,
-}
+use super::lowlevel::{bubble_revert_if_affordable, revert_with_reason_if_one_is_returned}
 
 #[abi]
 pub struct ConduitTransfer {
@@ -213,46 +209,37 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         // the failure error can be laid over it from the buffer start.
         // Call data: selector, from, to, ids head, amounts head, data head,
         // ids, amounts, empty data.
-        let mem = ptr::alloc_bytes(size + 0x40)
-        let data = ptr::offset_bytes(mem, 0x20)
-        unsafe {
-            store_word(data, SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224)
-        }
+        let mut mem = Buffer::new(size + 0x40)
+        let data: u256 = 0x20
+        mem.write(
+            offset: data,
+            value: SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224,
+        )
         let mut word: u256 = 0
         while word < 4 {
-            unsafe {
-                store_word(
-                    ptr::offset_bytes(data, 4 + word * 32),
-                    ops.calldataload(element + 0x20 + word * 32),
-                )
-            }
+            mem.write(
+                offset: data + 4 + word * 32,
+                value: ops.calldataload(element + 0x20 + word * 32),
+            )
             word += 1
         }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0x84), 0xa0 + ids_and_amounts_size)
-        }
+        mem.write(offset: data + 0x84, value: 0xa0 + ids_and_amounts_size)
         word = 0
         while word * 32 < ids_and_amounts_size {
-            unsafe {
-                store_word(
-                    ptr::offset_bytes(data, 0xa4 + word * 32),
-                    ops.calldataload(element + 0xa0 + word * 32),
-                )
-            }
+            mem.write(
+                offset: data + 0xa4 + word * 32,
+                value: ops.calldataload(element + 0xa0 + word * 32),
+            )
             word += 1
         }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 0xa4 + ids_and_amounts_size), 0)
-        }
+        mem.write(offset: data + 0xa4 + ids_and_amounts_size, value: 0)
         let mut ret = MemBuffer::empty()
         let outcome = call
             .raw_call(
                 addr: token,
                 gas: ctx.gas(),
                 value: 0,
-                args: unsafe {
-                    MemSpan::from_raw_parts(ptr: data, len: size)
-                },
+                args: mem.slice(offset: data, len: size),
                 ret: mut ret,
             )
         if !outcome.success() {
@@ -261,29 +248,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             // laid over the call data: from and to stay in place, ids follow
             // at the same position, and the amounts head grows by the word
             // taken by the token.
-            unsafe {
-                store_word(
-                    mem,
-                    ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
-                )
-            }
-            unsafe {
-                store_word(ptr::offset_bytes(mem, 0x04), token.inner)
-            }
-            unsafe {
-                store_word(ptr::offset_bytes(mem, 0x64), 0xc0)
-            }
-            unsafe {
-                store_word(
-                    ptr::offset_bytes(mem, 0x84),
-                    unsafe { load_word(ptr::offset_bytes(mem, 0x84)) } + 0x20,
-                )
-            }
-            ops.revert(
-                data: unsafe {
-                    MemSpan::from_raw_parts(ptr: mem, len: size)
-                },
+            mem.write(
+                offset: 0,
+                value: ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
             )
+            mem.write(offset: 0x04, value: token.inner)
+            mem.write(offset: 0x64, value: 0xc0)
+            mem.write(offset: 0x84, value: mem.word(0x84) + 0x20)
+            ops.revert(data: mem.slice(offset: 0, len: size))
         }
         i += 1
     }

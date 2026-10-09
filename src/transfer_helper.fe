@@ -2,11 +2,11 @@
 // TransferHelper (contracts/helpers/TransferHelper.sol): bulk transfers of
 // ERC20/721/1155 tokens through a conduit.
 use core::option::Option
-use core::ptr::{self, MemBuffer, MemSpan}
+use core::ptr::{MemBuffer, MemSpan}
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, MemVec, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
 use super::conduit::{ConduitMsg, ConduitTransfer}
-use super::lowlevel::{load_word, store_word}
+use super::buffer::{read_word, return_word}
 
 #[abi]
 pub struct TransferHelperItem {
@@ -113,18 +113,14 @@ pub fn setup(_ controller: Address) -> TransferHelperEnv uses (call: Call) {
 /// something else.
 pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
     let size = data.len()
-    if size < 0x44 || unsafe { load_word(data.ptr()) } >> 224 != ERROR_STRING_SELECTOR {
+    if size < 0x44 || return_word(data, initial: 0) >> 224 != ERROR_STRING_SELECTOR {
         return Option::None
     }
-    let offset = unsafe {
-        load_word(ptr::offset_bytes(data.ptr(), 4))
-    }
+    let offset = read_word(data, offset: 4)
     if offset > 0xffffffffffffffff || offset + 0x24 > size {
         return Option::None
     }
-    let length = unsafe {
-        load_word(ptr::offset_bytes(data.ptr(), 4 + offset))
-    }
+    let length = read_word(data, offset: 4 + offset)
     if length > 0xffffffffffffffff || offset + 0x20 + length > size - 4 {
         return Option::None
     }
@@ -141,9 +137,7 @@ fn decode_bytes4(_ data: MemSpan) -> u256 {
     if data.len() < 32 {
         std::evm::revert(())
     }
-    let word = unsafe {
-        load_word(data.ptr())
-    }
+    let word = read_word(data, offset: 0)
     if word << 32 != 0 {
         std::evm::revert(())
     }
@@ -276,7 +270,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         Option::None => {},
     }
     let selector = if data.len() >= 4 {
-        unsafe { load_word(data.ptr()) } >> 224
+        return_word(data, initial: 0) >> 224
     } else {
         0
     }

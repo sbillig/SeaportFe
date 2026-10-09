@@ -61,9 +61,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
     let mut i: u256 = 0
     while i < orders.len() {
         let book = single_order(orders.get(i))
-        let order = unsafe {
-            ref *book.order(0)
-        }
+        let order = ref book.orders[(0) as usize]
         if order.order_type != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(book, order)
             let status = read_status(order_hash)
@@ -81,7 +79,7 @@ uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
                     env,
                     offerer: order.offerer,
                     order_hash,
-                    signature: book.bytes(order.signature),
+                    signature: order.signature,
                 )
                 set_validated(order_hash)
                 log.emit(

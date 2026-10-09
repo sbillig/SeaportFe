@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: MIT
 // SeaportRouter (contracts/helpers/SeaportRouter.sol): fulfill available
 // orders across Seaport 1.5 and 1.6 in one call.
-use core::ptr::{self, MemBuffer, MemSpan}
-use core::abi::AbiSize
-use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
+use core::ptr::MemSpan
+use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol}
 use std::abi::sol::decode_output
 use std::evm::{Address, Call, Create, Ctx, RawOps, revert_error}
-use super::arr::{Arr, ByteRef}
 use super::hashing::Env
-use super::lowlevel::{load_word, store_word}
+use super::buffer::return_word
 use super::seaport::SeaportMsg
 use super::status::{
     NOT_ENTERED_SSTORE,
@@ -105,57 +103,6 @@ fn assert_seaport_allowed(_ env: RouterEnv, seaport: Address) {
     }
 }
 
-/// An ABI array of dynamic elements from their complete encodings.
-fn nested_array<T>(_ parts: Arr<ByteRef>) -> DynArray<T> where T: AbiSize {
-    let count = parts.len()
-    let mut size = 32 + count * 32
-    let mut i: u256 = 0
-    while i < count {
-        unsafe {
-            size = size + parts.at(i).size
-        }
-        i += 1
-    }
-    let data = ptr::alloc_bytes(size)
-    unsafe {
-        store_word(data, count)
-    }
-    let mut offset = count * 32
-    i = 0
-    while i < count {
-        let part = unsafe {
-            *parts.at(i)
-        }
-        unsafe {
-            store_word(ptr::offset_bytes(data, 32 + i * 32), offset)
-        }
-        unsafe {
-            ptr::copy_raw(
-                dest: ptr::offset_bytes(data, 32 + offset),
-                source: part.data,
-                len: part.size,
-            )
-        }
-        offset = offset + part.size
-        i += 1
-    }
-    unsafe {
-        DynArray<T>::from_abi_tail(data, len: count, size)
-    }
-}
-
-fn span_ref(_ span: MemSpan) -> ByteRef {
-    ByteRef { data: span.ptr(), len: 0, size: span.len() }
-}
-
-fn empty_array_ref() -> ByteRef {
-    let data = ptr::alloc_bytes(32)
-    unsafe {
-        store_word(data, 0)
-    }
-    ByteRef { data, len: 0, size: 32 }
-}
-
 /// `fulfillAvailableAdvancedOrders`: forward each group of orders to its
 /// Seaport, skipping groups that revert with `NoSpecifiedOrdersAvailable`.
 pub fn fulfill_available_advanced_orders(
@@ -168,18 +115,12 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     let seaports = params.seaportContracts
     let order_params = params.advancedOrderParams
     let count = seaports.len()
-    let available_parts = Arr<ByteRef>::alloc(count)
-    let execution_parts = Arr<ByteRef>::alloc(count)
+    let mut available_parts = DynVec<DynArray<bool>>::filled(count, value: DynArray<bool>::empty())
+    let mut execution_parts = DynVec<DynArray<Execution>>::filled(
+        count,
+        value: DynArray<Execution>::empty(),
+    )
     let mut i: u256 = 0
-    while i < count {
-        unsafe {
-            *available_parts.at(i) = empty_array_ref()
-        }
-        unsafe {
-            *execution_parts.at(i) = empty_array_ref()
-        }
-        i += 1
-    }
     let maximum_fulfilled = params.maximumFulfilled
     let mut fulfillments_left = maximum_fulfilled
     let recipient = if params.recipient.inner == 0 {
@@ -187,7 +128,6 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     } else {
         params.recipient
     }
-    i = 0
     while i < count {
         let seaport = seaports.get(i)
         assert_seaport_allowed(env, seaport)
@@ -208,12 +148,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(
                 returned,
             )
-            unsafe {
-                *available_parts.at(i) = span_ref(available.encoded_span())
-            }
-            unsafe {
-                *execution_parts.at(i) = span_ref(executions.encoded_span())
-            }
+            available_parts.set(index: i, value: available)
+            execution_parts.set(index: i, value: executions)
             // Upstream only advances `j` for available orders, so an
             // unavailable order loops until the call runs out of gas.
             let mut j: u256 = 0
@@ -228,7 +164,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             }
         } else {
             let selector = if returned.len() >= 4 {
-                unsafe { load_word(returned.ptr()) } >> 224
+                return_word(returned, initial: 0) >> 224
             } else {
                 0
             }
@@ -245,10 +181,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
         return_excess_ether()
     }
     clear_reentrancy_guard(env.guard)
-    (
-        nested_array<DynArray<bool>>(available_parts),
-        nested_array<DynArray<Execution>>(execution_parts),
-    )
+    (available_parts.to_dyn_array(), execution_parts.to_dyn_array())
 }
 
 /// `_returnExcessEther`

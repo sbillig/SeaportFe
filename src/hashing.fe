@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // EIP-712 typehashes and derivations of ConsiderationBase and
 // GettersAndDerivers.
-use core::ptr
 use std::evm::{Address, keccak256, keccak_words, create2_address}
-use super::arr::Arr
+use core::ptr::MemArray
+use super::buffer::Buffer
 use super::model::{Book, Item, OrderState}
 use super::types::OrderComponents
 
@@ -74,56 +74,42 @@ pub fn derive_order_hash(_ book: Book, order: OrderState, counter: u256) -> u256
 /// Hash an order's ABI fields without building the mutable fulfillment model.
 pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     let offer = order.offer
-    let offer_hashes = ptr::alloc_bytes(offer.len() * 32)
+    let mut offer_hashes = MemArray<u256>::new_zeroed(offer.len())
     let mut i: u256 = 0
     while i < offer.len() {
         let item = offer.get(i)
-        store(
-            ptr::offset_bytes(offer_hashes, i * 32),
-            keccak_words(
-                [
-                    OFFER_ITEM_TYPEHASH,
-                    item.itemType as u256,
-                    item.token.inner,
-                    item.identifierOrCriteria,
-                    item.startAmount,
-                    item.endAmount,
-                ],
-            ),
+        offer_hashes[i as usize] = keccak_words(
+            [
+                OFFER_ITEM_TYPEHASH,
+                item.itemType as u256,
+                item.token.inner,
+                item.identifierOrCriteria,
+                item.startAmount,
+                item.endAmount,
+            ],
         )
         i += 1
     }
     let consideration = order.consideration
-    let consideration_hashes = ptr::alloc_bytes(consideration.len() * 32)
+    let mut consideration_hashes = MemArray<u256>::new_zeroed(consideration.len())
     i = 0
     while i < consideration.len() {
         let item = consideration.get(i)
-        store(
-            ptr::offset_bytes(consideration_hashes, i * 32),
-            keccak_words(
-                [
-                    CONSIDERATION_ITEM_TYPEHASH,
-                    item.itemType as u256,
-                    item.token.inner,
-                    item.identifierOrCriteria,
-                    item.startAmount,
-                    item.endAmount,
-                    item.recipient.inner,
-                ],
-            ),
+        consideration_hashes[i as usize] = keccak_words(
+            [
+                CONSIDERATION_ITEM_TYPEHASH,
+                item.itemType as u256,
+                item.token.inner,
+                item.identifierOrCriteria,
+                item.startAmount,
+                item.endAmount,
+                item.recipient.inner,
+            ],
         )
         i += 1
     }
-    let offer_hash = keccak256(
-        unsafe {
-            ptr::MemSpan::from_raw_parts(ptr: offer_hashes, len: offer.len() * 32)
-        },
-    )
-    let consideration_hash = keccak256(
-        unsafe {
-            ptr::MemSpan::from_raw_parts(ptr: consideration_hashes, len: consideration.len() * 32)
-        },
-    )
+    let offer_hash = keccak256(offer_hashes.span())
+    let consideration_hash = keccak256(consideration_hashes.span())
     keccak_words(
         [
             ORDER_TYPEHASH,
@@ -142,13 +128,11 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     )
 }
 
-fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool) -> u256 {
-    let hashes = ptr::alloc_bytes(count * 32)
+fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: bool) -> u256 {
+    let mut hashes = MemArray<u256>::new_zeroed(count)
     let mut i: u256 = 0
     while i < count {
-        let item = unsafe {
-            ref *items.at(start + i)
-        }
+        let item = ref items[(start + i) as usize]
         let hash = if consideration {
             keccak_words(
                 [
@@ -173,34 +157,19 @@ fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool)
                 ],
             )
         }
-        store(ptr::offset_bytes(hashes, i * 32), hash)
+        hashes[i as usize] = hash
         i += 1
     }
-    keccak256(
-        unsafe {
-            core::ptr::MemSpan::from_raw_parts(ptr: hashes, len: count * 32)
-        },
-    )
-}
-
-fn store(_ at: *u8, _ value: u256) {
-    let word = ptr::cast<u8, u256>(at)
-    unsafe {
-        *word = value
-    }
+    keccak256(hashes.span())
 }
 
 /// keccak256(0x1901 ++ domainSeparator ++ orderHash)
 pub fn derive_eip712_digest(domain_separator: u256, order_hash: u256) -> u256 {
-    let buf = ptr::alloc_bytes(96)
-    store(buf, 0x1901 << 240)
-    store(ptr::offset_bytes(buf, 2), domain_separator)
-    store(ptr::offset_bytes(buf, 34), order_hash)
-    keccak256(
-        unsafe {
-            core::ptr::MemSpan::from_raw_parts(ptr: buf, len: 66)
-        },
-    )
+    let mut buf = Buffer::new(66)
+    buf.write(offset: 0, value: 0x1901 << 240)
+    buf.write(offset: 2, value: domain_separator)
+    buf.write(offset: 34, value: order_hash)
+    keccak256(buf.span())
 }
 
 /// CREATE2 address of the conduit for `conduit_key`.

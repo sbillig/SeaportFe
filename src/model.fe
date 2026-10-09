@@ -12,16 +12,15 @@
 // - `receiver`: the `endAmount` slot read as `ReceivedItem.recipient`.
 // - `original`: the current amount before fulfillment aggregation.
 //
-// All items of all orders live in one pool (`Book.items`); an order refers
-// to its offer and consideration by index ranges, and to its signature and
-// extra data by offsets into a byte pool (`Book.blob`). Resolver proofs and
-// fulfillment components use pools as well. Typed helpers receive MVS views
-// or mutable parameters; raw pool handles are converted to scoped accesses
-// only at the element boundary. Separate order, item, and proof allocations
-// stay live across every fulfillment phase.
-use std::abi::DynArray
+// All items of all orders live in one owned pool (`Book.items`); orders
+// describe their offer and consideration as index ranges. Immutable ABI Bytes
+// retain signatures and extra data without copying them into a raw byte pool.
+// Resolver proofs and fulfillment components also have non-Copy owners.
+// Separate order and item fields allow scoped views of descriptors during item
+// mutation; replacing an item pool requires exclusive access to its Book.
+use std::abi::{Bytes, DynArray}
 use std::evm::Address
-use super::arr::{Arr, ByteRef}
+use core::ptr::MemArray
 use super::types::{
     AdvancedOrder,
     ConsiderationItem,
@@ -65,78 +64,18 @@ pub struct OrderState {
     pub total_original: u256,
     pub numerator: u256,
     pub denominator: u256,
-    /// Offset of the signature's ABI tail in `Book.blob`.
-    pub signature: u256,
-    /// Offset of the extra data's ABI tail in `Book.blob`.
-    pub extra_data: u256,
+    pub signature: Bytes,
+    pub extra_data: Bytes,
 }
 
 impl Copy for OrderState {}
 
 /// The orders being fulfilled and the pool of their items.
 pub struct Book {
-    pub orders: Arr<OrderState>,
-    pub items: Arr<Item>,
+    pub orders: MemArray<OrderState>,
+    pub items: MemArray<Item>,
     /// Items in use; the pool beyond `used` is spare capacity.
     pub used: u256,
-    /// Signatures and extra data as consecutive ABI `bytes` tails.
-    pub blob: *u8,
-}
-
-impl Copy for Book {}
-
-impl Book {
-    pub fn order(self, _ index: u256) -> *OrderState {
-        self.orders.at(index)
-    }
-    pub fn offer_item(self, _ order: OrderState, _ index: u256) -> *Item {
-        self.items.at(order.offer_start + index)
-    }
-    pub fn consideration_item(self, _ order: OrderState, _ index: u256) -> *Item {
-        self.items.at(order.consideration_start + index)
-    }
-
-    /// The `bytes` at `offset` in the byte pool.
-    pub fn bytes(self, _ offset: u256) -> ByteRef {
-        let data = core::ptr::offset_bytes(self.blob, offset)
-        let len = unsafe {
-            *core::ptr::cast<u8, u256>(data)
-        }
-        ByteRef { data, len, size: 32 + ((len + 31) & !(31 as u256)) }
-    }
-}
-
-/// Copies `bytes` values into one allocation, in order.
-struct BlobWriter { base: *u8, offset: u256 }
-
-impl Copy for BlobWriter {}
-
-fn tail_size(_ len: u256) -> u256 {
-    32 + ((len + 31) & !(31 as u256))
-}
-
-fn blob_writer(_ size: u256) -> BlobWriter {
-    BlobWriter { base: core::ptr::alloc_bytes(size), offset: 0 }
-}
-
-/// Append `bytes`; returns its offset and the advanced writer.
-fn append_bytes(_ writer: BlobWriter, _ bytes: ByteRef) -> (BlobWriter, u256) {
-    let size = tail_size(bytes.len)
-    let at = core::ptr::offset_bytes(writer.base, writer.offset)
-    unsafe {
-        core::ptr::zero_bytes(at, size)
-    }
-    unsafe {
-        *core::ptr::cast<u8, u256>(at) = bytes.len
-    }
-    unsafe {
-        core::ptr::copy_raw(
-            dest: core::ptr::offset_bytes(at, 32),
-            source: bytes.payload(),
-            len: bytes.len,
-        )
-    }
-    (BlobWriter { base: writer.base, offset: writer.offset + size }, writer.offset)
 }
 
 pub struct Resolver {
@@ -151,9 +90,7 @@ pub struct Resolver {
 
 impl Copy for Resolver {}
 
-pub struct Resolvers { pub list: Arr<Resolver>, pub proofs: Arr<u256> }
-
-impl Copy for Resolvers {}
+pub struct Resolvers { pub list: MemArray<Resolver>, pub proofs: MemArray<u256> }
 
 pub struct Component { pub order_index: u256, pub item_index: u256 }
 
@@ -165,9 +102,7 @@ pub struct Group { pub start: u256, pub len: u256 }
 impl Copy for Group {}
 
 /// `FulfillmentComponent[][]`
-pub struct Groups { pub list: Arr<Group>, pub components: Arr<Component> }
-
-impl Copy for Groups {}
+pub struct Groups { pub list: MemArray<Group>, pub components: MemArray<Component> }
 
 fn offer_item_state(_ item: OfferItem) -> Item {
     Item {
@@ -199,24 +134,20 @@ fn consideration_item_state(_ item: ConsiderationItem) -> Item {
 
 /// Copy an offer and consideration into the pool at `start`.
 fn fill_items(
-    _ items: Arr<Item>,
+    _ items: mut MemArray<Item>,
     start: u256,
     offer: DynArray<OfferItem>,
     consideration: DynArray<ConsiderationItem>,
 ) {
     let mut i: u256 = 0
     while i < offer.len() {
-        unsafe {
-            *items.at(start + i) = offer_item_state(offer.get(i))
-        }
+        items[(start + i) as usize] = offer_item_state(offer.get(i))
         i += 1
     }
     let consideration_start = start + offer.len()
     i = 0
     while i < consideration.len() {
-        unsafe {
-            *items.at(consideration_start + i) = consideration_item_state(consideration.get(i))
-        }
+        items[(consideration_start + i) as usize] = consideration_item_state(consideration.get(i))
         i += 1
     }
 }
@@ -226,8 +157,8 @@ fn order_state(
     items_start: u256,
     numerator: u256,
     denominator: u256,
-    signature: u256,
-    extra_data: u256,
+    signature: Bytes,
+    extra_data: Bytes,
 ) -> OrderState {
     OrderState {
         offerer: p.offerer,
@@ -257,20 +188,15 @@ fn parameters_items(_ p: OrderParameters) -> u256 {
 pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
     let n = orders.len()
     let mut total: u256 = 0
-    let mut blob_size: u256 = 0
     let mut i: u256 = 0
     while i < n {
-        let order = orders.get(i)
         total = total + parameters_items(orders.get(i).parameters)
-        blob_size = blob_size + tail_size(order.signature.len()) + tail_size(order.extraData.len())
         i += 1
     }
-    let mut writer = blob_writer(blob_size)
-    let book = Book {
-        orders: Arr<OrderState>::alloc(n),
-        items: Arr<Item>::alloc(total),
+    let mut book = Book {
+        orders: MemArray<OrderState>::new_zeroed(n),
+        items: MemArray<Item>::new_zeroed(total),
         used: total,
-        blob: writer.base,
     }
     let mut start: u256 = 0
     i = 0
@@ -278,27 +204,19 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         let order = orders.get(i)
         let p = order.parameters
         fill_items(
-            book.items,
+            mut book.items,
             start,
             offer: p.offer,
             consideration: p.consideration,
         )
-        let (after_signature, signature) = append_bytes(writer, ByteRef::of(order.signature))
-        let (after_extra_data, extra_data) = append_bytes(
-            after_signature,
-            ByteRef::of(order.extraData),
+        book.orders[(i) as usize] = order_state(
+            orders.get(i).parameters,
+            items_start: start,
+            numerator: order.numerator.val as u256,
+            denominator: order.denominator.val as u256,
+            signature: order.signature,
+            extra_data: order.extraData,
         )
-        writer = after_extra_data
-        unsafe {
-            *book.orders.at(i) = order_state(
-                orders.get(i).parameters,
-                items_start: start,
-                numerator: order.numerator.val as u256,
-                denominator: order.denominator.val as u256,
-                signature,
-                extra_data,
-            )
-        }
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
@@ -308,22 +226,15 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
 pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
     let n = orders.len()
     let mut total: u256 = 0
-    let mut blob_size: u256 = 32
     let mut i: u256 = 0
     while i < n {
-        let order = orders.get(i)
         total = total + parameters_items(orders.get(i).parameters)
-        blob_size = blob_size + tail_size(order.signature.len())
         i += 1
     }
-    // Offset 0 holds the empty extra data shared by all orders.
-    let (first, empty) = append_bytes(blob_writer(blob_size), ByteRef::empty())
-    let mut writer = first
-    let book = Book {
-        orders: Arr<OrderState>::alloc(n),
-        items: Arr<Item>::alloc(total),
+    let mut book = Book {
+        orders: MemArray<OrderState>::new_zeroed(n),
+        items: MemArray<Item>::new_zeroed(total),
         used: total,
-        blob: writer.base,
     }
     let mut start: u256 = 0
     i = 0
@@ -331,23 +242,19 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         let order = orders.get(i)
         let p = order.parameters
         fill_items(
-            book.items,
+            mut book.items,
             start,
             offer: p.offer,
             consideration: p.consideration,
         )
-        let (after_signature, signature) = append_bytes(writer, ByteRef::of(order.signature))
-        writer = after_signature
-        unsafe {
-            *book.orders.at(i) = order_state(
-                orders.get(i).parameters,
-                items_start: start,
-                numerator: 1,
-                denominator: 1,
-                signature,
-                extra_data: empty,
-            )
-        }
+        book.orders[(i) as usize] = order_state(
+            orders.get(i).parameters,
+            items_start: start,
+            numerator: 1,
+            denominator: 1,
+            signature: order.signature,
+            extra_data: Bytes::empty(),
+        )
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
@@ -355,35 +262,22 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
 }
 
 pub fn single_advanced(_ order: AdvancedOrder) -> Book {
-    let numerator = order.numerator.val as u256
-    let denominator = order.denominator.val as u256
-    let signature = ByteRef::of(order.signature)
-    let extra_data = ByteRef::of(order.extraData)
-    let writer = blob_writer(tail_size(signature.len) + tail_size(extra_data.len))
-    let (after_signature, signature_offset) = append_bytes(writer, signature)
-    let (_, extra_data_offset) = append_bytes(after_signature, extra_data)
     single_book(
         order.parameters,
-        numerator,
-        denominator,
-        blob: writer.base,
-        signature: signature_offset,
-        extra_data: extra_data_offset,
+        numerator: order.numerator.val as u256,
+        denominator: order.denominator.val as u256,
+        signature: order.signature,
+        extra_data: order.extraData,
     )
 }
 
 pub fn single_order(_ order: Order) -> Book {
-    let signature = ByteRef::of(order.signature)
-    let writer = blob_writer(32 + tail_size(signature.len))
-    let (after_empty, empty) = append_bytes(writer, ByteRef::empty())
-    let (_, signature_offset) = append_bytes(after_empty, signature)
     single_book(
         order.parameters,
         numerator: 1,
         denominator: 1,
-        blob: writer.base,
-        signature: signature_offset,
-        extra_data: empty,
+        signature: order.signature,
+        extra_data: Bytes::empty(),
     )
 }
 
@@ -391,41 +285,37 @@ fn single_book(
     _ p: OrderParameters,
     numerator: u256,
     denominator: u256,
-    blob: *u8,
-    signature: u256,
-    extra_data: u256,
+    signature: Bytes,
+    extra_data: Bytes,
 ) -> Book {
     let offer = p.offer
     let consideration = p.consideration
     let offer_len = offer.len()
     let consideration_len = consideration.len()
-    let book = Book {
-        orders: Arr<OrderState>::alloc(1),
-        items: Arr<Item>::alloc(offer_len + consideration_len),
+    let mut book = Book {
+        orders: MemArray<OrderState>::new_zeroed(1),
+        items: MemArray<Item>::new_zeroed(offer_len + consideration_len),
         used: offer_len + consideration_len,
-        blob,
     }
-    fill_items(book.items, start: 0, offer, consideration)
-    unsafe {
-        *book.orders.at(0) = OrderState {
-            offerer: p.offerer,
-            zone: p.zone,
-            offer_start: 0,
-            offer_len,
-            consideration_start: offer_len,
-            consideration_len,
-            order_type: p.orderType as u256,
-            start_time: p.startTime,
-            end_time: p.endTime,
-            zone_hash: p.zoneHash.val,
-            salt: p.salt,
-            conduit_key: p.conduitKey.val,
-            total_original: p.totalOriginalConsiderationItems,
-            numerator,
-            denominator,
-            signature,
-            extra_data,
-        }
+    fill_items(mut book.items, start: 0, offer, consideration)
+    book.orders[(0) as usize] = OrderState {
+        offerer: p.offerer,
+        zone: p.zone,
+        offer_start: 0,
+        offer_len,
+        consideration_start: offer_len,
+        consideration_len,
+        order_type: p.orderType as u256,
+        start_time: p.startTime,
+        end_time: p.endTime,
+        zone_hash: p.zoneHash.val,
+        salt: p.salt,
+        conduit_key: p.conduitKey.val,
+        total_original: p.totalOriginalConsiderationItems,
+        numerator,
+        denominator,
+        signature,
+        extra_data,
     }
     book
 }
@@ -438,7 +328,10 @@ pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
         total = total + resolvers.get(i).criteriaProof.len()
         i += 1
     }
-    let out = Resolvers { list: Arr<Resolver>::alloc(n), proofs: Arr<u256>::alloc(total) }
+    let mut out = Resolvers {
+        list: MemArray<Resolver>::new_zeroed(n),
+        proofs: MemArray<u256>::new_zeroed(total),
+    }
     let mut start: u256 = 0
     i = 0
     while i < n {
@@ -446,20 +339,16 @@ pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
         let proof = r.criteriaProof
         let mut j: u256 = 0
         while j < proof.len() {
-            unsafe {
-                *out.proofs.at(start + j) = proof.get(j).val
-            }
+            out.proofs[(start + j) as usize] = proof.get(j).val
             j += 1
         }
-        unsafe {
-            *out.list.at(i) = Resolver {
-                order_index: r.orderIndex,
-                side: r.side as u256,
-                index: r.index,
-                identifier: r.identifier,
-                proof_start: start,
-                proof_len: proof.len(),
-            }
+        out.list[(i) as usize] = Resolver {
+            order_index: r.orderIndex,
+            side: r.side as u256,
+            index: r.index,
+            identifier: r.identifier,
+            proof_start: start,
+            proof_len: proof.len(),
         }
         start = start + proof.len()
         i += 1
@@ -468,11 +357,11 @@ pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
 }
 
 pub fn no_resolvers() -> Resolvers {
-    Resolvers { list: Arr<Resolver>::empty(), proofs: Arr<u256>::empty() }
+    Resolvers { list: MemArray<Resolver>::new_zeroed(0), proofs: MemArray<u256>::new_zeroed(0) }
 }
 
 fn group_components(
-    _ groups: Groups,
+    _ groups: mut Groups,
     index: u256,
     start: u256,
     items: DynArray<FulfillmentComponent>,
@@ -480,17 +369,13 @@ fn group_components(
     let mut i: u256 = 0
     while i < items.len() {
         let c = items.get(i)
-        unsafe {
-            *groups.components.at(start + i) = Component {
-                order_index: c.orderIndex,
-                item_index: c.itemIndex,
-            }
+        groups.components[(start + i) as usize] = Component {
+            order_index: c.orderIndex,
+            item_index: c.itemIndex,
         }
         i += 1
     }
-    unsafe {
-        *groups.list.at(index) = Group { start, len: items.len() }
-    }
+    groups.list[(index) as usize] = Group { start, len: items.len() }
     start + items.len()
 }
 
@@ -503,11 +388,14 @@ pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> 
         total = total + nested.get(i).len()
         i += 1
     }
-    let groups = Groups { list: Arr<Group>::alloc(n), components: Arr<Component>::alloc(total) }
+    let mut groups = Groups {
+        list: MemArray<Group>::new_zeroed(n),
+        components: MemArray<Component>::new_zeroed(total),
+    }
     let mut start: u256 = 0
     i = 0
     while i < n {
-        start = group_components(groups, index: i, start, items: nested.get(i))
+        start = group_components(mut groups, index: i, start, items: nested.get(i))
         i += 1
     }
     groups
@@ -524,18 +412,21 @@ pub fn fulfillments(_ items: DynArray<Fulfillment>) -> Groups {
         total = total + f.offerComponents.len() + items.get(i).considerationComponents.len()
         i += 1
     }
-    let groups = Groups { list: Arr<Group>::alloc(2 * n), components: Arr<Component>::alloc(total) }
+    let mut groups = Groups {
+        list: MemArray<Group>::new_zeroed(2 * n),
+        components: MemArray<Component>::new_zeroed(total),
+    }
     let mut start: u256 = 0
     i = 0
     while i < n {
         start = group_components(
-            groups,
+            mut groups,
             index: 2 * i,
             start,
             items: items.get(i).offerComponents,
         )
         start = group_components(
-            groups,
+            mut groups,
             index: 2 * i + 1,
             start,
             items: items.get(i).considerationComponents,

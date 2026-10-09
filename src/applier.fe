@@ -2,7 +2,7 @@
 // FulfillmentApplier: aggregate fulfillment components into executions.
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
 use std::evm::keccak_words
-use super::arr::Arr
+use core::ptr::MemArray
 use super::errors::{
     InvalidFulfillmentComponentData,
     MismatchedFulfillmentOfferAndConsiderationComponents,
@@ -51,10 +51,12 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 /// available orders, zeroing them. All of them must share type, token,
 /// identifier, offerer and conduit key. Also returns the index of the first
 /// used component, which seaport-core moves to the front of the array.
-pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipient: Address) -> (
-    ExecutionState,
-    u256,
-) {
+pub fn aggregate_offer_items(
+    _ book: mut Book,
+    groups: Groups,
+    group: Group,
+    recipient: Address,
+) -> (ExecutionState, u256) {
     let mut execution = empty_execution()
     let mut first_used: u256 = 0
     let mut amount: u256 = 0
@@ -62,19 +64,13 @@ pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipie
     let mut data_hash: u256 = 0
     let mut k: u256 = 0
     while k < group.len {
-        let component = unsafe {
-            *groups.components.at(group.start + k)
-        }
+        let component = groups.components[(group.start + k) as usize]
         if component.order_index >= book.orders.len() {
             revert_error(InvalidFulfillmentComponentData {})
         }
-        let order = unsafe {
-            ref *book.order(component.order_index)
-        }
+        let order = ref book.orders[(component.order_index) as usize]
         if component.item_index < order.offer_len && order.numerator != 0 {
-            let item = unsafe {
-                mut *book.offer_item(order, component.item_index)
-            }
+            let item = mut book.items[(order.offer_start + component.item_index) as usize]
             let new_amount = amount.wrapping_add(item.amount)
             if new_amount < amount {
                 error_buffer = error_buffer | 2
@@ -109,7 +105,7 @@ pub fn aggregate_offer_items(_ book: Book, groups: Groups, group: Group, recipie
 /// `_aggregateValidFulfillmentConsiderationItems`: like the offer side, but
 /// items must also share the recipient; offerer and conduit key are given.
 pub fn aggregate_consideration_items(
-    _ book: Book,
+    _ book: mut Book,
     groups: Groups,
     group: Group,
     offerer: Address,
@@ -122,19 +118,13 @@ pub fn aggregate_consideration_items(
     let mut data_hash: u256 = 0
     let mut k: u256 = 0
     while k < group.len {
-        let component = unsafe {
-            *groups.components.at(group.start + k)
-        }
+        let component = groups.components[(group.start + k) as usize]
         if component.order_index >= book.orders.len() {
             revert_error(InvalidFulfillmentComponentData {})
         }
-        let order = unsafe {
-            ref *book.order(component.order_index)
-        }
+        let order = ref book.orders[(component.order_index) as usize]
         if component.item_index < order.consideration_len && order.numerator != 0 {
-            let item = unsafe {
-                mut *book.consideration_item(order, component.item_index)
-            }
+            let item = mut book.items[(order.consideration_start + component.item_index) as usize]
             let new_amount = amount.wrapping_add(item.amount)
             if new_amount < amount {
                 error_buffer = error_buffer | 2
@@ -170,18 +160,18 @@ pub fn aggregate_consideration_items(
 /// `_applyFulfillment`: match aggregated offer items against aggregated
 /// consideration items; the unmatched rest stays on the first used
 /// component.
-pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) -> ExecutionState {
-    let offer_group = unsafe {
-        *groups.list.at(2 * fulfillment_index)
-    }
-    let consideration_group = unsafe {
-        *groups.list.at(2 * fulfillment_index + 1)
-    }
+pub fn apply_fulfillment(
+    _ book: mut Book,
+    groups: Groups,
+    fulfillment_index: u256,
+) -> ExecutionState {
+    let offer_group = groups.list[(2 * fulfillment_index) as usize]
+    let consideration_group = groups.list[(2 * fulfillment_index + 1) as usize]
     if offer_group.len == 0 || consideration_group.len == 0 {
         revert_error(OfferAndConsiderationRequiredOnFulfillment {})
     }
     let (consideration, consideration_first) = aggregate_consideration_items(
-        book,
+        mut book,
         groups,
         group: consideration_group,
         offerer: Address::zero(),
@@ -191,7 +181,7 @@ pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) 
         return consideration
     }
     let (offered, offer_first) = aggregate_offer_items(
-        book,
+        mut book,
         groups,
         group: offer_group,
         recipient: consideration.recipient,
@@ -207,26 +197,14 @@ pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) 
         )
     }
     if consideration.amount > execution.amount {
-        let target = unsafe {
-            *groups.components.at(consideration_group.start + consideration_first)
-        }
-        let order = unsafe {
-            ref *book.order(target.order_index)
-        }
-        let item = unsafe {
-            mut *book.consideration_item(order, target.item_index)
-        }
+        let target = groups.components[(consideration_group.start + consideration_first) as usize]
+        let order = ref book.orders[(target.order_index) as usize]
+        let item = mut book.items[(order.consideration_start + target.item_index) as usize]
         item.amount = consideration.amount - execution.amount
     } else {
-        let target = unsafe {
-            *groups.components.at(offer_group.start + offer_first)
-        }
-        let order = unsafe {
-            ref *book.order(target.order_index)
-        }
-        let item = unsafe {
-            mut *book.offer_item(order, target.item_index)
-        }
+        let target = groups.components[(offer_group.start + offer_first) as usize]
+        let order = ref book.orders[(target.order_index) as usize]
+        let item = mut book.items[(order.offer_start + target.item_index) as usize]
         item.amount = execution.amount - consideration.amount
         execution.amount = consideration.amount
     }
@@ -235,7 +213,7 @@ pub fn apply_fulfillment(_ book: Book, groups: Groups, fulfillment_index: u256) 
 
 /// `_aggregateAvailable`
 pub fn aggregate_available(
-    _ book: Book,
+    _ book: mut Book,
     side: u8,
     groups: Groups,
     index: u256,
@@ -244,18 +222,16 @@ pub fn aggregate_available(
 ) -> ExecutionState
 uses (ctx: Ctx)
 {
-    let group = unsafe {
-        *groups.list.at(index)
-    }
+    let group = groups.list[(index) as usize]
     if group.len == 0 {
         revert_error(MissingFulfillmentComponentOnAggregation { side })
     }
     if side == OFFER {
-        let (execution, _) = aggregate_offer_items(book, groups, group, recipient)
+        let (execution, _) = aggregate_offer_items(mut book, groups, group, recipient)
         return execution
     }
     let (execution, _) = aggregate_consideration_items(
-        book,
+        mut book,
         groups,
         group,
         offerer: ctx.caller(),
