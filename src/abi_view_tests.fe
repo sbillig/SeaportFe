@@ -1,0 +1,111 @@
+use core::abi::ByteInput
+use core::ptr::{self, MemBuffer}
+use std::evm::{Address, CallData, Evm}
+use super::abi_view::ComponentsArray
+
+msg ViewMsg {
+    #[selector = 0x01000001]
+    Length {} -> u256,
+    #[selector = 0x01000002]
+    First {} -> (u256, u256),
+}
+
+contract ViewHarness {
+    recv ViewMsg {
+        Length {} -> u256 {
+            ComponentsArray::argument(CallData::with_base(4)).len()
+        }
+        First {} -> (u256, u256) {
+            let orders = ComponentsArray::argument(CallData::with_base(4))
+            (orders.len(), orders.element(0).word(0))
+        }
+    }
+}
+
+fn call_words<const N: usize>(_ addr: Address, selector: u256, words: [u256; N], len: u256) -> (
+    bool,
+    u256,
+    u256,
+    u256,
+)
+uses (evm: mut Evm)
+{
+    let data = MemBuffer::alloc(36 + (N as u256) * 32)
+    // Each full word store fits in the allocation, including the selector.
+    unsafe {
+        *ptr::cast<u8, u256>(data.ptr()) = selector << 224
+    }
+    let mut i: usize = 0
+    while i < N {
+        unsafe {
+            *ptr::cast<u8, u256>(
+                ptr::offset_bytes(data.ptr(), 4 + (i as u256) * 32),
+            ) = words[i]
+        }
+        i += 1
+    }
+    let mut ret = MemBuffer::alloc(64)
+    unsafe {
+        ptr::zero_bytes(ret.ptr(), 64)
+    }
+    let result = evm
+        .raw_call(
+            addr,
+            gas: 100000,
+            value: 0,
+            args: data.slice(offset: 0, len),
+            ret: mut ret,
+        )
+    // The whole capacity was zeroed before the call; a short return leaves
+    // the rest initialized even though raw_call reduces the logical length.
+    let output = unsafe {
+        ret.capacity_span()
+    }
+    (result.success(), result.returndata_len(), output.word_at(0), output.word_at(32))
+}
+
+#[test]
+fn components_array_checks_only_the_frame() uses (evm: mut Evm) {
+    let addr = evm.create2<ViewHarness>(value: 0, args: (), salt: 0)
+    let empty = call_words(addr, selector: 0x01000001, words: [32, 0], len: 68)
+    assert(empty.0 && empty.1 == 32 && empty.2 == 0)
+    let words = [32, 1, 32, 0xabc | (1 << 200), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let raw = call_words(addr, selector: 0x01000002, words, len: 452)
+    assert(raw.0 && raw.1 == 64 && raw.2 == 1 && raw.3 == words[3])
+}
+
+#[test]
+fn components_array_rejects_invalid_frames() uses (evm: mut Evm) {
+    let addr = evm.create2<ViewHarness>(value: 0, args: (), salt: 0)
+    let short_head = call_words(addr, selector: 0x01000001, words: [32], len: 35)
+    assert(!short_head.0 && short_head.1 == 0)
+    let missing_length = call_words(addr, selector: 0x01000001, words: [32], len: 36)
+    assert(!missing_length.0 && missing_length.1 == 0)
+    let wide_offset = call_words(addr, selector: 0x01000001, words: [1 << 64], len: 36)
+    assert(!wide_offset.0 && wide_offset.1 == 0)
+    let wide_length = call_words(addr, selector: 0x01000001, words: [32, 1 << 64], len: 68)
+    assert(!wide_length.0 && wide_length.1 == 0)
+    let missing_heads = call_words(addr, selector: 0x01000001, words: [32, 2, 32], len: 100)
+    assert(!missing_heads.0 && missing_heads.1 == 0)
+}
+
+#[test]
+fn components_array_preserves_signed_element_bounds() uses (evm: mut Evm) {
+    let addr = evm.create2<ViewHarness>(value: 0, args: (), salt: 0)
+    // The negative offset passes solc's signed bound; its reads zero-fill.
+    let negative = call_words(
+        addr,
+        selector: 0x01000002,
+        words: [32, 1, 1 << 255],
+        len: 100,
+    )
+    assert(
+        negative.0 && negative.1 == 64 && negative.2 == 1 && negative.3 == 0,
+    )
+    let positive = call_words(addr, selector: 0x01000002, words: [32, 1, 32], len: 100)
+    assert(!positive.0 && positive.1 == 0)
+    let empty = call_words(addr, selector: 0x01000002, words: [32, 0], len: 68)
+    assert(
+        !empty.0 && empty.1 == 36 && empty.2 == 0x4e487b71 << 224 && empty.3 == 0x32 << 224,
+    )
+}

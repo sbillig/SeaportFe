@@ -1,7 +1,7 @@
 use core::abi::ByteInput
 use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::{Bytes32, DynArray, dyn_array_from}
-use super::abi_view::ComponentsView
+use super::abi_view::{ComponentsArray, ComponentsView}
 use std::evm::{Address, Call, CallData, Evm}
 use super::hashing::{bulk_order_typehash, derive_components_hash}
 use super::types::{ConsiderationItem, OfferItem, OrderComponents}
@@ -21,8 +21,8 @@ contract HashHarness {
     recv HashMsg {
         #[decode(manual)]
         CancelArrayHash { .. } -> u256 {
-            let orders = CallData::with_base(4).array_view<OrderComponents>(0)
-            let order = ComponentsView::element(orders, index: 0)
+            let orders = ComponentsArray::argument(CallData::with_base(4))
+            let order = orders.element(0)
             let _ = order.offerer()
             let _ = order.zone()
             let _ = order.order_type()

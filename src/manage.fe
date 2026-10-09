@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
-use std::abi::{ArrayView, Bytes32, DynArray}
+use std::abi::{Bytes32, DynArray}
 use core::ptr
-use super::abi_view::{CalldataView, ComponentsView}
+use super::abi_view::{CalldataView, ComponentsArray}
 use super::arr::ByteRef
 use std::evm::{
     Address,
     Call,
-    CallData,
     Ctx,
     Log,
     RawOps,
@@ -32,18 +31,18 @@ use super::status::{
     set_validated,
     verify_order_status,
 }
-use super::types::{CONTRACT, OfferItem, ConsiderationItem, OrderComponents, OrderParameters}
+use super::types::{CONTRACT, OfferItem, ConsiderationItem, OrderParameters}
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled.
-pub fn cancel(_ env: Env, orders: ArrayView<CallData, OrderComponents>) -> bool
+pub fn cancel(_ env: Env, orders: ComponentsArray) -> bool
 uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
 {
     assert_non_reentrant(env)
     let mut any_invalid = false
     let mut i: u256 = 0
     while i < orders.len() {
-        let order = ComponentsView::element(orders, index: i)
+        let order = orders.element(i)
         let offerer = order.offerer()
         let zone = order.zone()
         if order.order_type() == CONTRACT as u256

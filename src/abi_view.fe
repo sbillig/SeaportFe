@@ -1,10 +1,50 @@
 // SPDX-License-Identifier: MIT
 // Seaport's custom OrderComponents calldata decoder, matching seaport-core.
-use core::abi::{ByteInput, checked_frame_end}
+use core::abi::{ByteInput, checked_frame_end, store_word}
 use core::num::IntWord
-use std::abi::{ArrayView, Sol}
-use std::evm::{Address, CallData, revert_empty}
-use super::types::OrderComponents
+use std::abi::Sol
+use std::evm::{Address, CallData, Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_empty, revert_error}
+
+/// The array frame of `OrderComponents[] calldata`. Only the offset, length,
+/// and element heads are checked here; each element keeps Seaport's custom
+/// signed offset check and raw, zero-padded tail reads.
+pub struct ComponentsArray { input: CallData, heads: u256, len: u256 }
+impl Copy for ComponentsArray {}
+
+impl ComponentsArray {
+    pub fn argument(_ input: CallData) -> Self {
+        let input_len = input.len()
+        checked_frame_end<Sol>(0, 32, input_len)
+        let offset = input.word_at(0)
+        if offset >= 0x10000000000000000 {
+            revert_empty()
+        }
+        let heads = checked_frame_end<Sol>(offset, 32, input_len)
+        let len = input.word_at(offset)
+        if len >= 0x10000000000000000 || len > (input_len - heads) / 32 {
+            revert_empty()
+        }
+        Self { input, heads, len }
+    }
+    pub fn len(self) -> u256 {
+        self.len
+    }
+
+    /// Match solc 0.8.24's calldata struct-array indexing, including its
+    /// signed relative-offset bound and wrapping address calculation.
+    #[arithmetic(unchecked)]
+    pub fn element(self, _ index: u256) -> ComponentsView {
+        if index >= self.len {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+        let relative = self.input.word_at(self.heads + index * 32)
+        let limit = self.input.len() - self.heads - 351
+        if i256::from_word(relative) >= i256::from_word(limit) {
+            revert_empty()
+        }
+        ComponentsView { input: self.input, pos: self.heads + relative }
+    }
+}
 
 /// Solidity validates the struct head; Seaport reads its tails with 32-bit
 /// offsets and lengths and zero-padded calldata loads. It hashes raw words,
@@ -13,18 +53,6 @@ pub struct ComponentsView { input: CallData, pos: u256 }
 impl Copy for ComponentsView {}
 
 impl ComponentsView {
-    /// Match solc 0.8.24's calldata struct-array indexing, including its
-    /// signed relative-offset bound and wrapping address calculation.
-    #[arithmetic(unchecked)]
-    pub fn element(_ orders: ArrayView<CallData, OrderComponents>, index: u256) -> Self {
-        let input = orders.input()
-        let relative = orders.head_word(index)
-        let limit = input.len() - orders.heads_pos() - 351
-        if i256::from_word(relative) >= i256::from_word(limit) {
-            revert_empty()
-        }
-        Self { input, pos: orders.heads_pos() + relative }
-    }
     pub fn argument(_ input: CallData) -> Self {
         checked_frame_end<Sol>(0, 32, input.len())
         let pos = input.word_at(0)
@@ -158,8 +186,9 @@ impl CalldataView {
     pub fn byte_size(self) -> u256 {
         32 + ((self.word(0) + 31) & 0xffffffe0)
     }
-    pub fn copy_bytes(self, _ dest: *u8) {
+    /// `dest` must have room for `self.byte_size()` bytes in a live allocation.
+    pub unsafe fn copy_bytes(self, _ dest: *u8) {
         CallData::new().copy_to_memory_unchecked(dest, src_offset: self.pos, len: self.byte_size())
-        *core::ptr::cast<u8, u256>(dest) = self.len()
+        store_word(ptr: dest, value: self.len())
     }
 }

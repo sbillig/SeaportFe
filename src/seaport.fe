@@ -4,7 +4,7 @@
 // their name, which also enters the EIP-712 domain separator.
 use std::abi::{Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallData, Create, Ctx, Log, RawOps, revert_error}
-use super::abi_view::{CalldataView, ComponentsView}
+use super::abi_view::{CalldataView, ComponentsArray, ComponentsView}
 use super::basic::{assert_decodable_basic_order_calldata, validate_and_fulfill_basic_order}
 use super::combiner::{fulfill_available_advanced_orders, match_advanced_orders}
 use super::errors::TloadTestContractDeploymentFailed
@@ -396,7 +396,7 @@ pub contract Seaport {
         SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
             cancel(
                 env,
-                orders: CallData::with_base(4).array_view<OrderComponents>(0),
+                orders: ComponentsArray::argument(CallData::with_base(4)),
             )
         }
         #[decode(manual)]
@@ -536,7 +536,7 @@ pub contract Consideration {
         SeaportMsg::Cancel { .. } -> bool uses (env, ctx: Ctx, ops: mut RawOps, log: mut Log) {
             cancel(
                 env,
-                orders: CallData::with_base(4).array_view<OrderComponents>(0),
+                orders: ComponentsArray::argument(CallData::with_base(4)),
             )
         }
         #[decode(manual)]
