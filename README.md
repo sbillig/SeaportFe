@@ -44,12 +44,38 @@ and write order status slots directly).
 
 ## Compiler
 
-The port is built with Fe `upstream/master` plus all open pull requests by
-cburgdorf, merged into the local branch `seaport-integration` of
-`toolchain/fe`. Compiler defects found during the port are fixed on separate
-branches; see [COMPILER_FIXES.md](COMPILER_FIXES.md). All problems
-encountered, including language and library gaps, are logged in
-[ISSUES.md](ISSUES.md).
+This branch targets Fe's mutable value semantics (MVS) branch at
+`169ed8ce360a69bb92cdb20bba5a78b41280c6c4`. Its committed Sonatina revision
+`601010bc9364276e598143ebb5749f8273832df6` currently prevents a clean compiler
+build: Fe imports `EvmKeccak256Words`, which that dependency lacks. The
+compiler pin must be fixed before the draft bootstrap can build successfully.
+No compiler patches or dependency overrides are applied by the bootstrap.
+
+The source migration builds all eight contracts and passes all twelve Fe tests
+with the existing local MVS toolchain, which uses Sonatina
+`361e0e86a88413f12e0ef1cb16b7ef75bbb10034` through local path dependencies.
+The current MVS build passes all 482 Foundry tests (1,000 cases per fuzz
+test) and all 402 Hardhat tests, with the upstream one pending test. All eight
+contract ABIs are identical to the initial MVS migration.
+
+The source baseline is SeaportFe `6ffc19564ecc3121bfbf0cc7752b9c7a81cb7eea`,
+which passes `fe check` and builds all eight contracts on Fe master
+`26e1fddd269c020ed41f77aa8777d2dc83c1c252`.
+It includes direct component hashing, constant bulk-order typehashes, and
+immutable environment passing. Later local calldata and output-buffer
+changes are deferred: their `#[decode(manual)]` dispatch feature is absent
+from both that master revision and MVS.
+
+Book, Resolvers, and Groups own non-Copy MemArray pools. Order descriptors
+retain immutable Bytes signatures and extra data, and helpers use scoped MVS
+views or explicit mutable parameters. Generated orders replace the item pool
+in place. DynVec builds nested ABI arrays; exact protocol encoders use a
+checked, initialized owning byte buffer. Copyable raw pool and byte handles
+have been removed. Explicit unsafe blocks fell from 333 to 72: three implement
+the checked byte boundary, and the rest access the fixed Solidity storage
+layout.
+`COMPILER_FIXES.md` and `compiler/seaport-integration.patch` describe the
+historical toolchain; neither is used to build this branch.
 
 ## Tests
 
@@ -65,14 +91,17 @@ Seaport's own test suites run against the Fe bytecode:
 - `scripts/compare_abi.py` compares the Fe JSON ABIs with the Solidity
   artifacts (functions with outputs and mutability, events, errors).
 
-Results with the current build (`seaport-integration` at the head recorded
-in `reference_manifest.json`, `fe build -O 1`):
+Current MVS verification uses Fe 169ed8ce3 / Sonatina 361e0e86 at `-O1`.
+All eight production contracts build and their ABIs are unchanged from the
+initial MVS port. The full upstream results match the documented pre-MVS
+results:
 
-| Suite | Solidity (pinned reference) | Fe |
-| --- | --- | --- |
-| Foundry, `upstream_suite.py` | 482 passed | 482 passed |
-| Hardhat, `hardhat_suite.py` | 402 passing, 1 pending | 402 passing, 1 pending |
-| Foundry, `upstream_suite.py --both` | 482 passed | 480 passed |
+| Suite | Observed result |
+| --- | --- |
+| Fe tests | 12 passed |
+| Foundry, optimized artifacts replaced | 482 passed; 1,000 cases per fuzz test |
+| Hardhat, all eight contracts replaced | 402 passing, 1 pending |
+| Foundry, optimized and reference artifacts replaced | 480 passed, 2 documented expected failures |
 
 The two `--both` failures are expected: `testRevertErc20Transfer` and
 `testMatchAuthRevertAndInvMagicValue` assert behavior that differs on
@@ -88,16 +117,21 @@ order entry points and the conduit batch functions use numeric selectors
 
 ## Limitations
 
-- Code size: the Fe `Seaport` runtime is about 65 KB (154 KB before the
-  rebase onto upstream PR #1618), still well above the 24 KB EIP-170 limit
-  that the Solidity build just meets (ISSUES.md #13). `Seaport` and
-  `Consideration` deploy only with the size limit lifted; both test scripts
-  do that. The periphery contracts are within 1.0 to 1.6 times their
-  Solidity size and below the limit. Sizes per contract are in
-  [COMPILER_FIXES.md](COMPILER_FIXES.md).
+- Typed ABI dispatch retains the baseline's strict decoding. Malformed
+  calldata can be rejected earlier than the optimized Solidity implementation,
+  which sometimes reads raw words with zero padding. The deferred manual
+  decoder changes address those differences.
+- Code size: this MVS build has a 49,809-byte Seaport runtime and a
+  49,815-byte Consideration runtime, above the 24 KB EIP-170 limit
+  (ISSUES.md #13). Both test scripts lift the size limit. The eight-contract
+  build uses Fe 169ed8ce3 / local Sonatina 361e0e86 at `-O1`; periphery
+  runtimes are 4,181 to 13,071 bytes. The checked encoder conversion increased
+  Consideration from 47,418 bytes for the initial owned-pool phase to 49,815
+  bytes; these checks and initialization have a code-size cost.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
-  seaport-core. Tests that pin gas budgets pass, but absolute costs are
-  higher. The same calls in the same Foundry test (`test_fuzzCoverage_x`):
+  seaport-core. The current upstream behavioral suites, including gas-budget
+  cases, pass. The following pre-MVS measurements are historical; these calls
+  came from one Foundry test (`test_fuzzCoverage_x`):
 
   | Call | Solidity | Fe |
   | --- | --- | --- |
@@ -125,9 +159,8 @@ scripts/upstream_suite.py
 scripts/hardhat_suite.py
 ```
 
-`bootstrap.py` clones the pinned Seaport revision, builds its Foundry and
-Hardhat artifacts, clones Fe at the pinned base and applies
-`compiler/seaport-integration.patch` (the full difference of the
-`seaport-integration` branch, checked against `reference_manifest.json`),
-then builds the compiler and the Fe contracts into `build/fe`. Required
-tools: git, Rust, Node with yarn, Foundry.
+`bootstrap.py` clones the pinned Seaport revision and builds its Foundry and
+Hardhat artifacts, then builds the pinned Fe MVS compiler and contracts into
+`build/fe`. An existing `toolchain/fe` must be at the exact pinned revision
+with no tracked changes. Required tools: git, Rust, Node with npm, Foundry.
+Yarn 1.22.22 is invoked through npx for the reference's frozen lockfile.

@@ -9,14 +9,11 @@
    upstream tests deploy (`reference-out`, `optimized-out`). Unless
    `--no-hardhat`, also install the Node dependencies and compile the
    Hardhat artifacts.
-2. Clone argotorg/fe at the pinned base into toolchain/fe and apply
-   compiler/seaport-integration.patch, which is the complete source
-   difference of the local `seaport-integration` branch (the merged open
-   PRs and the fix branches listed in reference_manifest.json).
+2. Clone argotorg/fe at the pinned MVS revision into toolchain/fe. Use its
+   committed Cargo dependencies without compiler patches or local overrides.
 3. Build the compiler and the Fe contracts into build/fe.
 """
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -43,23 +40,23 @@ def reference(hardhat):
         env["FOUNDRY_PROFILE"] = profile
         run("forge", "build", cwd=ref, env=env)
     if hardhat:
-        run("yarn", "install", "--frozen-lockfile", "--ignore-engines", cwd=ref)
+        run("npx", "--yes", "yarn@1.22.22", "install", "--frozen-lockfile", "--ignore-engines", cwd=ref)
         run("npx", "hardhat", "compile", "--config", "./hardhat.config.ts", cwd=ref)
 
 
 def compiler():
     fe = ROOT / "toolchain" / "fe"
     pinned = MANIFEST["compiler"]
-    patch = ROOT / pinned["patch"]
-    digest = hashlib.sha256(patch.read_bytes()).hexdigest()
-    if digest != pinned["patch_sha256"]:
-        raise SystemExit(f"{patch} does not match the manifest")
     if not fe.exists():
         run("git", "clone", pinned["url"], fe)
-        run("git", "checkout", "--detach", pinned["base"], cwd=fe)
-        run("git", "apply", patch, cwd=fe)
+        run("git", "checkout", "--detach", pinned["revision"], cwd=fe)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=fe, text=True).strip()
+    if head != pinned["revision"]:
+        raise SystemExit(f"{fe} must be at {pinned['revision']}; found {head}")
+    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], cwd=fe).returncode:
+        raise SystemExit(f"{fe} has tracked changes; the MVS build requires the pinned sources")
     run("npm", "ci", "--prefix", "crates/tree-sitter-fe", cwd=fe)
-    run("cargo", "build", "--release", "-p", "fe", cwd=fe)
+    run("cargo", "build", "--locked", "--release", "-p", "fe", cwd=fe)
 
 
 def build():
