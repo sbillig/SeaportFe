@@ -62,12 +62,16 @@ pub fn transfer_buffer(_ transfers: u256) -> *u8 {
 
 fn calldata_with_selector(_ selector: u256, _ words: u256) -> *u8 {
     let data = ptr::alloc_bytes(4 + words * 32)
-    store_word(data, selector << 224)
+    unsafe {
+        store_word(data, selector << 224)
+    }
     data
 }
 
 fn set_arg(_ data: *u8, _ index: u256, _ value: u256) {
-    store_word(ptr::offset_bytes(data, 4 + index * 32), value)
+    unsafe {
+        store_word(ptr::offset_bytes(data, 4 + index * 32), value)
+    }
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
@@ -145,12 +149,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
     let failure = ptr::alloc_bytes(0x44)
-    store_word(
-        failure,
-        NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
-    )
-    store_word(ptr::offset_bytes(failure, 0x04), to.inner)
-    store_word(ptr::offset_bytes(failure, 0x24), amount)
+    unsafe {
+        store_word(
+            failure,
+            NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+        )
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(failure, 0x04), to.inner)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(failure, 0x24), amount)
+    }
     let mut ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
@@ -162,7 +172,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        ops.revert(data: MemSpan::from_raw_parts(ptr: failure, len: 0x44))
+        ops.revert(
+            data: unsafe {
+                MemSpan::from_raw_parts(ptr: failure, len: 0x44)
+            },
+        )
     }
 }
 
@@ -288,18 +302,28 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let count = acc.count
     let size = 0x44 + count * 0xc0
     let data = ptr::alloc_bytes(size)
-    store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
-    store_word(ptr::offset_bytes(data, 4), 0x20)
-    store_word(ptr::offset_bytes(data, 0x24), count)
-    ptr::copy_raw(
-        dest: ptr::offset_bytes(data, 0x44),
-        source: buf,
-        len: count * 0xc0,
-    )
+    unsafe {
+        store_word(data, CONDUIT_EXECUTE_SELECTOR << 224)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(data, 4), 0x20)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(data, 0x24), count)
+    }
+    unsafe {
+        ptr::copy_raw(
+            dest: ptr::offset_bytes(data, 0x44),
+            source: buf,
+            len: count * 0xc0,
+        )
+    }
     call_conduit(
         env,
         conduit_key: acc.conduit_key,
-        args: MemSpan::from_raw_parts(ptr: data, len: size),
+        args: unsafe {
+            MemSpan::from_raw_parts(ptr: data, len: size)
+        },
     )
     let mut disarmed = acc
     disarmed.armed = false
@@ -313,7 +337,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let conduit = derive_conduit(env, conduit_key)
     let mut ret = MemBuffer::with_capacity(32)
-    store_word(ret.ptr(), 0)
+    unsafe {
+        store_word(ret.ptr(), 0)
+    }
     let outcome = call.raw_call(
             addr: conduit,
             gas: ctx.gas(),
@@ -325,7 +351,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_with_reason_if_one_is_returned()
         revert_error(InvalidCallToConduit { conduit })
     }
-    if load_word(ret.ptr()) >> 224 != CONDUIT_EXECUTE_SELECTOR {
+    if unsafe { load_word(ret.ptr()) } >> 224 != CONDUIT_EXECUTE_SELECTOR {
         revert_error(
             InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
         )
@@ -350,12 +376,24 @@ fn insert(
         acc.count = 0
     }
     let at = ptr::offset_bytes(buf, acc.count * 0xc0)
-    store_word(at, item_type)
-    store_word(ptr::offset_bytes(at, 0x20), token.inner)
-    store_word(ptr::offset_bytes(at, 0x40), from.inner)
-    store_word(ptr::offset_bytes(at, 0x60), to.inner)
-    store_word(ptr::offset_bytes(at, 0x80), identifier)
-    store_word(ptr::offset_bytes(at, 0xa0), amount)
+    unsafe {
+        store_word(at, item_type)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(at, 0x20), token.inner)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(at, 0x40), from.inner)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(at, 0x60), to.inner)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(at, 0x80), identifier)
+    }
+    unsafe {
+        store_word(ptr::offset_bytes(at, 0xa0), amount)
+    }
     acc.count = acc.count + 1
     acc
 }
@@ -370,18 +408,22 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     set_arg(args, 1, to.inner)
     set_arg(args, 2, amount)
     let mut ret = MemBuffer::with_capacity(32)
-    store_word(ret.ptr(), 0)
+    unsafe {
+        store_word(ret.ptr(), 0)
+    }
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: MemSpan::from_raw_parts(ptr: args, len: 0x64),
+            args: unsafe {
+                MemSpan::from_raw_parts(ptr: args, len: 0x64)
+            },
             ret: mut ret,
         )
     let call_status = outcome.success()
     let size = outcome.returndata_len()
-    let success = call_status && ((load_word(ret.ptr()) == 1 && size > 31) || size == 0)
+    let success = call_status && ((unsafe { load_word(ret.ptr()) } == 1 && size > 31) || size == 0)
     if success && size != 0 {
         return
     }
@@ -418,7 +460,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: MemSpan::from_raw_parts(ptr: args, len: 0x64),
+            args: unsafe {
+                MemSpan::from_raw_parts(ptr: args, len: 0x64)
+            },
             ret: mut ret,
         )
     if !outcome.success() {
@@ -454,7 +498,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: MemSpan::from_raw_parts(ptr: args, len: 0xc4),
+            args: unsafe {
+                MemSpan::from_raw_parts(ptr: args, len: 0xc4)
+            },
             ret: mut ret,
         )
     if !outcome.success() {

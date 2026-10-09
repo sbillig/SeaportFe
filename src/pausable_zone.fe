@@ -121,11 +121,11 @@ pub msg PausableZoneMsg {
 const OPERATOR_MASK: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
 fn zone_operator() -> Address uses (ops: RawOps) {
-    Address { inner: ops.sload(0) & OPERATOR_MASK }
+    Address { inner: unsafe { ops.sload(0) } & OPERATOR_MASK }
 }
 
 fn zone_is_paused() -> bool uses (ops: RawOps) {
-    (ops.sload(0) >> 160) & 0xff != 0
+    (unsafe { ops.sload(0) } >> 160) & 0xff != 0
 }
 
 fn assert_operator(_ controller: Address) uses (ctx: Ctx, ops: RawOps) {
@@ -169,7 +169,9 @@ pub contract PausableZone {
         Pause {} uses (controller, ctx: Ctx, ops: mut RawOps, log: mut Log) {
             assert_controller(controller)
             log.emit(Paused {})
-            ops.sstore(slot: 0, value: ops.sload(0) | (1 << 160))
+            unsafe {
+                ops.sstore(slot: 0, value: ops.sload(0) | (1 << 160))
+            }
         }
         AssignOperator { operatorToAssign } uses (
             controller,
@@ -181,10 +183,12 @@ pub contract PausableZone {
             if operatorToAssign.inner == 0 {
                 revert_error(PauserCanNotBeSetAsZero {})
             }
-            ops.sstore(
-                slot: 0,
-                value: (ops.sload(0) & !OPERATOR_MASK) | operatorToAssign.inner,
-            )
+            unsafe {
+                ops.sstore(
+                    slot: 0,
+                    value: (unsafe { ops.sload(0) } & !OPERATOR_MASK) | operatorToAssign.inner,
+                )
+            }
             log.emit(OperatorUpdated { newOperator: operatorToAssign })
         }
         #[payable]
@@ -237,12 +241,22 @@ pub contract PausableZone {
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
             // [Schema({ id: 3003, metadata: "" })]
             let data = core::ptr::alloc_bytes(160)
-            store_word(data, 1)
-            store_word(core::ptr::offset_bytes(data, 32), 0x20)
-            store_word(core::ptr::offset_bytes(data, 64), 3003)
-            store_word(core::ptr::offset_bytes(data, 96), 0x40)
-            store_word(core::ptr::offset_bytes(data, 128), 0)
-            (name, DynArray<Schema>::from_abi_tail(data, len: 1, size: 160))
+            unsafe {
+                store_word(data, 1)
+            }
+            unsafe {
+                store_word(core::ptr::offset_bytes(data, 32), 0x20)
+            }
+            unsafe {
+                store_word(core::ptr::offset_bytes(data, 64), 3003)
+            }
+            unsafe {
+                store_word(core::ptr::offset_bytes(data, 96), 0x40)
+            }
+            unsafe {
+                store_word(core::ptr::offset_bytes(data, 128), 0)
+            }
+            (name, unsafe { DynArray<Schema>::from_abi_tail(data, len: 1, size: 160) })
         }
         SupportsInterface { interfaceId } -> bool {
             interfaceId.val == ZONE_INTERFACE_ID || interfaceId.val == ERC165_INTERFACE_ID
@@ -313,7 +327,7 @@ const POTENTIAL_OWNER_SLOT: u256 = 1
 const PAUSER_SLOT: u256 = 2
 
 fn read_address(_ slot: u256) -> Address uses (ops: RawOps) {
-    Address { inner: ops.sload(slot) }
+    Address { inner: unsafe { ops.sload(slot) } }
 }
 
 fn assert_owner() uses (ctx: Ctx, ops: RawOps) {
@@ -340,7 +354,9 @@ pub contract PausableZoneController {
     init(ownerAddress: Address)
     uses (mut zone_creation_code, ops: mut RawOps)
     {
-        ops.sstore(slot: OWNER_SLOT, value: ownerAddress.inner)
+        unsafe {
+            ops.sstore(slot: OWNER_SLOT, value: ownerAddress.inner)
+        }
         zone_creation_code = zone_init_code_hash()
     }
 
@@ -432,14 +448,18 @@ pub contract PausableZoneController {
                 revert_error(OwnerCanNotBeSetAsZero {})
             }
             log.emit(PotentialOwnerUpdated { newPotentialOwner })
-            ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: newPotentialOwner.inner)
+            unsafe {
+                ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: newPotentialOwner.inner)
+            }
         }
         CancelOwnershipTransfer {} uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
             assert_owner()
             log.emit(
                 PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
             )
-            ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
+            unsafe {
+                ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
+            }
         }
         AcceptOwnership {} uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
             if ctx.caller() != read_address(POTENTIAL_OWNER_SLOT) {
@@ -448,21 +468,27 @@ pub contract PausableZoneController {
             log.emit(
                 PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
             )
-            ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
+            unsafe {
+                ops.sstore(slot: POTENTIAL_OWNER_SLOT, value: 0)
+            }
             log.emit(
                 OwnershipTransferred {
                     previousOwner: read_address(OWNER_SLOT),
                     newOwner: ctx.caller(),
                 },
             )
-            ops.sstore(slot: OWNER_SLOT, value: ctx.caller().inner)
+            unsafe {
+                ops.sstore(slot: OWNER_SLOT, value: ctx.caller().inner)
+            }
         }
         AssignPauser { pauserToAssign } uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
             assert_owner()
             if pauserToAssign.inner == 0 {
                 revert_error(PauserCanNotBeSetAsZero {})
             }
-            ops.sstore(slot: PAUSER_SLOT, value: pauserToAssign.inner)
+            unsafe {
+                ops.sstore(slot: PAUSER_SLOT, value: pauserToAssign.inner)
+            }
             log.emit(PauserUpdated { newPauser: pauserToAssign })
         }
         AssignOperator { pausableZoneAddress, operatorToAssign }

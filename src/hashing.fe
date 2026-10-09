@@ -40,7 +40,7 @@ pub fn derive_domain_separator(name_hash: u256, chain_id: u256, this: Address) -
 
 /// The EIP-712 hash of `order` with `counter`; only the first
 /// `total_original` consideration items are included.
-pub fn derive_order_hash(_ book: Book, order: *OrderState, counter: u256) -> u256 {
+pub fn derive_order_hash(_ book: Book, order: OrderState, counter: u256) -> u256 {
     let offer_hash = hash_items(
         book.items,
         start: order.offer_start,
@@ -80,14 +80,16 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
         let item = offer.get(i)
         store(
             ptr::offset_bytes(offer_hashes, i * 32),
-            keccak_words([
-                OFFER_ITEM_TYPEHASH,
-                item.itemType as u256,
-                item.token.inner,
-                item.identifierOrCriteria,
-                item.startAmount,
-                item.endAmount,
-            ]),
+            keccak_words(
+                [
+                    OFFER_ITEM_TYPEHASH,
+                    item.itemType as u256,
+                    item.token.inner,
+                    item.identifierOrCriteria,
+                    item.startAmount,
+                    item.endAmount,
+                ],
+            ),
         )
         i += 1
     }
@@ -98,45 +100,55 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
         let item = consideration.get(i)
         store(
             ptr::offset_bytes(consideration_hashes, i * 32),
-            keccak_words([
-                CONSIDERATION_ITEM_TYPEHASH,
-                item.itemType as u256,
-                item.token.inner,
-                item.identifierOrCriteria,
-                item.startAmount,
-                item.endAmount,
-                item.recipient.inner,
-            ]),
+            keccak_words(
+                [
+                    CONSIDERATION_ITEM_TYPEHASH,
+                    item.itemType as u256,
+                    item.token.inner,
+                    item.identifierOrCriteria,
+                    item.startAmount,
+                    item.endAmount,
+                    item.recipient.inner,
+                ],
+            ),
         )
         i += 1
     }
     let offer_hash = keccak256(
-        ptr::MemSpan::from_raw_parts(ptr: offer_hashes, len: offer.len() * 32),
+        unsafe {
+            ptr::MemSpan::from_raw_parts(ptr: offer_hashes, len: offer.len() * 32)
+        },
     )
     let consideration_hash = keccak256(
-        ptr::MemSpan::from_raw_parts(ptr: consideration_hashes, len: consideration.len() * 32),
+        unsafe {
+            ptr::MemSpan::from_raw_parts(ptr: consideration_hashes, len: consideration.len() * 32)
+        },
     )
-    keccak_words([
-        ORDER_TYPEHASH,
-        order.offerer.inner,
-        order.zone.inner,
-        offer_hash,
-        consideration_hash,
-        order.orderType as u256,
-        order.startTime,
-        order.endTime,
-        order.zoneHash.val,
-        order.salt,
-        order.conduitKey.val,
-        order.counter,
-    ])
+    keccak_words(
+        [
+            ORDER_TYPEHASH,
+            order.offerer.inner,
+            order.zone.inner,
+            offer_hash,
+            consideration_hash,
+            order.orderType as u256,
+            order.startTime,
+            order.endTime,
+            order.zoneHash.val,
+            order.salt,
+            order.conduitKey.val,
+            order.counter,
+        ],
+    )
 }
 
 fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool) -> u256 {
     let hashes = ptr::alloc_bytes(count * 32)
     let mut i: u256 = 0
     while i < count {
-        let item = items.at(start + i)
+        let item = unsafe {
+            ref *items.at(start + i)
+        }
         let hash = if consideration {
             keccak_words(
                 [
@@ -165,13 +177,17 @@ fn hash_items(_ items: Arr<Item>, start: u256, count: u256, consideration: bool)
         i += 1
     }
     keccak256(
-        core::ptr::MemSpan::from_raw_parts(ptr: hashes, len: count * 32),
+        unsafe {
+            core::ptr::MemSpan::from_raw_parts(ptr: hashes, len: count * 32)
+        },
     )
 }
 
 fn store(_ at: *u8, _ value: u256) {
     let word = ptr::cast<u8, u256>(at)
-    *word = value
+    unsafe {
+        *word = value
+    }
 }
 
 /// keccak256(0x1901 ++ domainSeparator ++ orderHash)
@@ -180,7 +196,11 @@ pub fn derive_eip712_digest(domain_separator: u256, order_hash: u256) -> u256 {
     store(buf, 0x1901 << 240)
     store(ptr::offset_bytes(buf, 2), domain_separator)
     store(ptr::offset_bytes(buf, 34), order_hash)
-    keccak256(core::ptr::MemSpan::from_raw_parts(ptr: buf, len: 66))
+    keccak256(
+        unsafe {
+            core::ptr::MemSpan::from_raw_parts(ptr: buf, len: 66)
+        },
+    )
 }
 
 /// CREATE2 address of the conduit for `conduit_key`.

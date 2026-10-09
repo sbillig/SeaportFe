@@ -68,10 +68,12 @@ pub fn compute_bulk_order_proof(_ signature: ByteRef, leaf: u256) -> (u256, u256
     let signature_length = 65 - (full_length & 1)
     let height = (full_length - signature_length) >> 5
     let key_ptr = ptr::offset_bytes(signature.payload(), signature_length)
-    let key = load_word(key_ptr) >> 0xe8
+    let key = unsafe { load_word(key_ptr) } >> 0xe8
     // Proof elements are addressed from the key pointer; advancing a pointer
     // variable inside the loop hangs the compiler (ISSUES.md #6).
-    let first = load_word(ptr::offset_bytes(key_ptr, 3))
+    let first = unsafe {
+        load_word(ptr::offset_bytes(key_ptr, 3))
+    }
     let mut node = if key & 1 == 1 {
         keccak_words([first, leaf])
     } else {
@@ -79,7 +81,9 @@ pub fn compute_bulk_order_proof(_ signature: ByteRef, leaf: u256) -> (u256, u256
     }
     let mut i: u256 = 1
     while i < height {
-        let element = load_word(ptr::offset_bytes(key_ptr, 3 + i * 32))
+        let element = unsafe {
+            load_word(ptr::offset_bytes(key_ptr, 3 + i * 32))
+        }
         node = if (key >> i) & 1 == 1 {
             keccak_words([element, node])
         } else {
@@ -107,10 +111,16 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     let mut recovered: u256 = 0
     let mut v: u256 = 0
     if signature_length == 64 || signature_length == 65 {
-        let r = load_word(payload)
-        let mut s = load_word(ptr::offset_bytes(payload, 32))
+        let r = unsafe {
+            load_word(payload)
+        }
+        let mut s = unsafe {
+            load_word(ptr::offset_bytes(payload, 32))
+        }
         if signature_length == 65 {
-            v = load_word(ptr::offset_bytes(payload, 64)) >> 248
+            unsafe {
+                v = load_word(ptr::offset_bytes(payload, 64)) >> 248
+            }
         } else {
             v = (s >> 255) + 27
             s = s & ALL_BUT_HIGHEST_BIT
@@ -124,19 +134,31 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     if !success {
         // isValidSignature(bytes32,bytes) with the unpadded signature bytes.
         let args = MemBuffer::alloc(original_length + 0x64)
-        store_word(args.ptr(), EIP1271_SELECTOR_WORD)
-        store_word(ptr::offset_bytes(args.ptr(), 4), original_digest)
-        store_word(ptr::offset_bytes(args.ptr(), 0x24), 0x40)
-        store_word(ptr::offset_bytes(args.ptr(), 0x44), original_length)
-        ptr::copy_raw(
-            dest: ptr::offset_bytes(args.ptr(), 0x64),
-            source: payload,
-            len: original_length,
-        )
+        unsafe {
+            store_word(args.ptr(), EIP1271_SELECTOR_WORD)
+        }
+        unsafe {
+            store_word(ptr::offset_bytes(args.ptr(), 4), original_digest)
+        }
+        unsafe {
+            store_word(ptr::offset_bytes(args.ptr(), 0x24), 0x40)
+        }
+        unsafe {
+            store_word(ptr::offset_bytes(args.ptr(), 0x44), original_length)
+        }
+        unsafe {
+            ptr::copy_raw(
+                dest: ptr::offset_bytes(args.ptr(), 0x64),
+                source: payload,
+                len: original_length,
+            )
+        }
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
         let mut ret = MemBuffer::with_capacity(32)
-        store_word(ret.ptr(), recovered)
+        unsafe {
+            store_word(ret.ptr(), recovered)
+        }
         success = call
             .raw_staticcall(
                 addr: signer,
@@ -145,7 +167,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
                 ret: mut ret,
             )
             .success()
-        if success && load_word(ret.ptr()) != EIP1271_SELECTOR_WORD {
+        if success && unsafe { load_word(ret.ptr()) } != EIP1271_SELECTOR_WORD {
             if ctx.extcodesize(signer) != 0 {
                 revert_error(BadContractSignature {})
             }

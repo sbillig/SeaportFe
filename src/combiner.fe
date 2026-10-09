@@ -36,7 +36,7 @@ use super::zone::{
 
 /// Current amount of `item` for the fraction; rounds up for consideration.
 fn prepare_item(
-    _ item: *Item,
+    _ item: mut Item,
     numerator: u256,
     denominator: u256,
     start_time: u256,
@@ -130,7 +130,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     let mut some_order_available = false
     let mut i: u256 = 0
     while i < total_orders {
-        if *order_hashes.at(i) != 0 {
+        if unsafe { *order_hashes.at(i) } != 0 {
             let (updated, available) = prepare_available_order(
                 env,
                 book: current,
@@ -166,25 +166,33 @@ fn validate_and_prepare_order(
 ) -> (bool, bool)
 uses (ctx: Ctx, call: Call, ops: RawOps)
 {
-    *order_hashes.at(index) = 0
-    let order = book.order(index)
+    unsafe {
+        *order_hashes.at(index) = 0
+    }
+    let order = unsafe {
+        mut *book.order(index)
+    }
     let (order_hash, numerator, denominator) = validate_order(env, book, order, revert_on_invalid)
     order.numerator = numerator
     if numerator == 0 {
         return (false, false)
     }
     order.denominator = denominator
-    *order_hashes.at(index) = order_hash
+    unsafe {
+        *order_hashes.at(index) = order_hash
+    }
     let is_non_contract = order.order_type < 4
     let mut native_offer = false
     let mut j: u256 = 0
     while j < order.offer_len {
-        let item = book.offer_item(order, j)
+        let item = unsafe {
+            mut *book.offer_item(order, j)
+        }
         if item.item_type == NATIVE as u256 && is_non_contract {
             native_offer = true
         }
         prepare_item(
-            item,
+            mut item,
             numerator,
             denominator,
             start_time: order.start_time,
@@ -195,9 +203,11 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     }
     j = 0
     while j < order.consideration_len {
-        let item = book.consideration_item(order, j)
+        let item = unsafe {
+            mut *book.consideration_item(order, j)
+        }
         prepare_item(
-            item,
+            mut item,
             numerator,
             denominator,
             start_time: order.start_time,
@@ -226,7 +236,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     if remaining == 0 {
         skip_available_order(book, order_hashes, index)
         (book, false)
-    } else if book.order(index).order_type != CONTRACT as u256 {
+    } else if unsafe { book.order(index).order_type } != CONTRACT as u256 {
         let available = prepare_standard_available_order(
             book,
             order_hashes,
@@ -241,8 +251,12 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 }
 
 fn skip_available_order(_ book: Book, order_hashes: Arr<u256>, index: u256) {
-    *order_hashes.at(index) = 0
-    book.order(index).numerator = 0
+    unsafe {
+        *order_hashes.at(index) = 0
+    }
+    unsafe {
+        book.order(index).numerator = 0
+    }
 }
 
 fn prepare_standard_available_order(
@@ -254,10 +268,19 @@ fn prepare_standard_available_order(
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let order_hash = *order_hashes.at(index)
+    let order_hash = unsafe {
+        *order_hashes.at(index)
+    }
     let available = authorize_and_record(book, order_hashes, order_hash, index, revert_on_invalid)
     if available {
-        emit_order_fulfilled(order_hash, book, order: book.order(index), recipient)
+        emit_order_fulfilled(
+            order_hash,
+            book,
+            order: unsafe {
+                ref *book.order(index)
+            },
+            recipient,
+        )
     }
     available
 }
@@ -272,16 +295,22 @@ fn prepare_contract_available_order(
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let generated = generate_order(book, order_index: index, revert_on_invalid)
-    *order_hashes.at(index) = generated.order_hash
+    unsafe {
+        *order_hashes.at(index) = generated.order_hash
+    }
     if generated.order_hash == 0 {
-        book.order(index).numerator = 0
+        unsafe {
+            book.order(index).numerator = 0
+        }
         (book, false)
     } else {
         let installed = install_generated_order(book, order_index: index, generated)
         emit_order_fulfilled(
             order_hash: generated.order_hash,
             book: installed,
-            order: installed.order(index),
+            order: unsafe {
+                ref *installed.order(index)
+            },
             recipient,
         )
         (installed, true)
@@ -299,7 +328,9 @@ fn authorize_and_record(
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
-    let order = book.order(index)
+    let order = unsafe {
+        mut *book.order(index)
+    }
     let authorized = check_restricted_advanced_order_authorization(
         book,
         order,
@@ -315,7 +346,9 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             denominator: order.denominator,
             revert_on_invalid: revert_on_failed_update(order, revert_on_invalid),
         ) {
-        *order_hashes.at(index) = 0
+        unsafe {
+            *order_hashes.at(index) = 0
+        }
         order.numerator = 0
         return false
     }
@@ -324,7 +357,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 
 /// `_revertOnFailedUpdate`: restricted orders fulfilled by someone other
 /// than the zone must not be skipped silently.
-fn revert_on_failed_update(_ order: *OrderState, _ revert_on_invalid: bool) -> bool
+fn revert_on_failed_update(_ order: OrderState, _ revert_on_invalid: bool) -> bool
 uses (ctx: Ctx)
 {
     revert_on_invalid || (order.order_type > 1 && ctx.caller() != order.zone)
@@ -332,7 +365,7 @@ uses (ctx: Ctx)
 
 /// `_fulfillAvailableAdvancedOrders`
 pub fn fulfill_available_advanced_orders(
-    _ env: ref Env,
+    _ env: Env,
     book: Book,
     resolvers: Resolvers,
     offer_fulfillments: Groups,
@@ -405,19 +438,21 @@ fn aggregate_into(
 )
 uses (ctx: Ctx)
 {
-    *executions.at(slot) = aggregate_available(
-        book,
-        side,
-        groups,
-        index,
-        fulfiller_conduit_key,
-        recipient,
-    )
+    unsafe {
+        *executions.at(slot) = aggregate_available(
+            book,
+            side,
+            groups,
+            index,
+            fulfiller_conduit_key,
+            recipient,
+        )
+    }
 }
 
 /// `_matchAdvancedOrders`
 pub fn match_advanced_orders(
-    _ env: ref Env,
+    _ env: Env,
     book: Book,
     resolvers: Resolvers,
     fulfillments: Groups,
@@ -459,7 +494,9 @@ fn apply_fulfillment_into(
     groups: Groups,
     index: u256,
 ) {
-    *executions.at(index) = apply_fulfillment(book, groups, fulfillment_index: index)
+    unsafe {
+        *executions.at(index) = apply_fulfillment(book, groups, fulfillment_index: index)
+    }
 }
 
 /// `_performFinalChecksAndExecuteOrders`: run the executions, transfer
@@ -519,7 +556,9 @@ fn run_execution(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let execution = *executions.at(index)
+    let execution = unsafe {
+        *executions.at(index)
+    }
     if execution.amount == 0 {
         return acc
     }
@@ -558,8 +597,12 @@ fn settle_order(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let order = book.order(index)
-    *available.at(index) = order.numerator != 0
+    let order = unsafe {
+        ref *book.order(index)
+    }
+    unsafe {
+        *available.at(index) = order.numerator != 0
+    }
     if order.numerator == 0 {
         return acc
     }
@@ -572,7 +615,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn transfer_unspent_offer(
     _ env: Env,
     book: Book,
-    order: *OrderState,
+    order: OrderState,
     recipient: Address,
     acc: Accumulator,
     buf: *u8,
@@ -599,7 +642,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn transfer_unspent_offer_item(
     _ env: Env,
     book: Book,
-    order: *OrderState,
+    order: OrderState,
     index: u256,
     recipient: Address,
     acc: Accumulator,
@@ -607,7 +650,9 @@ fn transfer_unspent_offer_item(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let item = book.offer_item(order, index)
+    let item = unsafe {
+        ref *book.offer_item(order, index)
+    }
     if item.amount == 0 {
         return acc
     }
@@ -628,16 +673,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     )
 }
 
-fn restore_offer_amounts(_ book: Book, order: *OrderState) {
+fn restore_offer_amounts(_ book: Book, order: OrderState) {
     let mut j: u256 = 0
     while j < order.offer_len {
-        let item = book.offer_item(order, j)
+        let item = unsafe {
+            mut *book.offer_item(order, j)
+        }
         item.amount = item.original
         j += 1
     }
 }
 
-fn check_consideration(_ book: Book, order: *OrderState, order_index: u256) {
+fn check_consideration(_ book: Book, order: OrderState, order_index: u256) {
     let mut j: u256 = 0
     while j < order.consideration_len {
         check_consideration_item(book, order, order_index, index: j)
@@ -645,8 +692,10 @@ fn check_consideration(_ book: Book, order: *OrderState, order_index: u256) {
     }
 }
 
-fn check_consideration_item(_ book: Book, order: *OrderState, order_index: u256, index: u256) {
-    let item = book.consideration_item(order, index)
+fn check_consideration_item(_ book: Book, order: OrderState, order_index: u256, index: u256) {
+    let item = unsafe {
+        mut *book.consideration_item(order, index)
+    }
     if item.amount != 0 {
         revert_error(
             ConsiderationNotMet {
@@ -667,12 +716,18 @@ fn validate_available_order(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if *available.at(index) {
+    if unsafe {
+        *available.at(index)
+    } {
         assert_restricted_advanced_order_validity(
             book,
-            order: book.order(index),
+            order: unsafe {
+                ref *book.order(index)
+            },
             order_hashes,
-            order_hash: *order_hashes.at(index),
+            order_hash: unsafe {
+                *order_hashes.at(index)
+            },
         )
     }
 }
@@ -681,7 +736,7 @@ fn bool_array(_ values: Arr<bool>) -> DynArray<bool> {
     let mut out = MemVec<bool>::zeroed(values.len())
     let mut i: u256 = 0
     while i < values.len() {
-        out.set(index: i, value: *values.at(i))
+        out.set(index: i, value: unsafe { *values.at(i) })
         i += 1
     }
     out.to_dyn_array()
@@ -691,7 +746,7 @@ pub fn hash_array(_ values: Arr<u256>) -> DynArray<Bytes32> {
     let mut out = MemVec<Bytes32>::zeroed(values.len())
     let mut i: u256 = 0
     while i < values.len() {
-        out.set(index: i, value: Bytes32 { val: *values.at(i) })
+        out.set(index: i, value: Bytes32 { val: unsafe { *values.at(i) } })
         i += 1
     }
     out.to_dyn_array()
@@ -701,7 +756,9 @@ fn execution_array(_ executions: Arr<ExecutionState>) -> DynArray<Execution> {
     let mut out = MemVec<Execution>::zeroed(executions.len())
     let mut i: u256 = 0
     while i < executions.len() {
-        let e = *executions.at(i)
+        let e = unsafe {
+            *executions.at(i)
+        }
         out.set(
             index: i,
             value: Execution {

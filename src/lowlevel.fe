@@ -3,13 +3,14 @@
 use core::ptr
 use std::evm::{Ctx, RawOps, bubble_last_revert}
 
-pub fn load_word(_ at: *u8) -> u256 {
+/// `at` must point to 32 initialized bytes in a live allocation.
+pub unsafe fn load_word(_ at: *u8) -> u256 {
     *ptr::cast<u8, u256>(at)
 }
 
-pub fn store_word(_ at: *u8, _ value: u256) {
-    let word = ptr::cast<u8, u256>(at)
-    *word = value
+/// `at` must point to 32 writable bytes in a live allocation.
+pub unsafe fn store_word(_ at: *u8, _ value: u256) {
+    *ptr::cast<u8, u256>(at) = value
 }
 
 /// `_revertWithReasonIfOneIsReturned`: bubble returndata when there is some

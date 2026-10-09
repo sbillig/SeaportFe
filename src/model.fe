@@ -15,10 +15,10 @@
 // All items of all orders live in one pool (`Book.items`); an order refers
 // to its offer and consideration by index ranges, and to its signature and
 // extra data by offsets into a byte pool (`Book.blob`). Resolver proofs and
-// fulfillment components use pools as well. Fe's borrow checker tracks
-// pointers stored in raw memory through every raw write, which explodes for
-// code like this (ISSUES.md #9), so no pointer is ever stored in raw memory:
-// pools are reached through handles passed as values.
+// fulfillment components use pools as well. Typed helpers receive MVS views
+// or mutable parameters; raw pool handles are converted to scoped accesses
+// only at the element boundary. Separate order, item, and proof allocations
+// stay live across every fulfillment phase.
 use std::abi::DynArray
 use std::evm::Address
 use super::arr::{Arr, ByteRef}
@@ -89,19 +89,19 @@ impl Book {
     pub fn order(self, _ index: u256) -> *OrderState {
         self.orders.at(index)
     }
-
-    pub fn offer_item(self, _ order: *OrderState, _ index: u256) -> *Item {
+    pub fn offer_item(self, _ order: OrderState, _ index: u256) -> *Item {
         self.items.at(order.offer_start + index)
     }
-
-    pub fn consideration_item(self, _ order: *OrderState, _ index: u256) -> *Item {
+    pub fn consideration_item(self, _ order: OrderState, _ index: u256) -> *Item {
         self.items.at(order.consideration_start + index)
     }
 
     /// The `bytes` at `offset` in the byte pool.
     pub fn bytes(self, _ offset: u256) -> ByteRef {
         let data = core::ptr::offset_bytes(self.blob, offset)
-        let len = *core::ptr::cast<u8, u256>(data)
+        let len = unsafe {
+            *core::ptr::cast<u8, u256>(data)
+        }
         ByteRef { data, len, size: 32 + ((len + 31) & !(31 as u256)) }
     }
 }
@@ -123,13 +123,19 @@ fn blob_writer(_ size: u256) -> BlobWriter {
 fn append_bytes(_ writer: BlobWriter, _ bytes: ByteRef) -> (BlobWriter, u256) {
     let size = tail_size(bytes.len)
     let at = core::ptr::offset_bytes(writer.base, writer.offset)
-    core::ptr::zero_bytes(at, size)
-    *core::ptr::cast<u8, u256>(at) = bytes.len
-    core::ptr::copy_raw(
-        dest: core::ptr::offset_bytes(at, 32),
-        source: bytes.payload(),
-        len: bytes.len,
-    )
+    unsafe {
+        core::ptr::zero_bytes(at, size)
+    }
+    unsafe {
+        *core::ptr::cast<u8, u256>(at) = bytes.len
+    }
+    unsafe {
+        core::ptr::copy_raw(
+            dest: core::ptr::offset_bytes(at, 32),
+            source: bytes.payload(),
+            len: bytes.len,
+        )
+    }
     (BlobWriter { base: writer.base, offset: writer.offset + size }, writer.offset)
 }
 
@@ -200,13 +206,17 @@ fn fill_items(
 ) {
     let mut i: u256 = 0
     while i < offer.len() {
-        *items.at(start + i) = offer_item_state(offer.get(i))
+        unsafe {
+            *items.at(start + i) = offer_item_state(offer.get(i))
+        }
         i += 1
     }
     let consideration_start = start + offer.len()
     i = 0
     while i < consideration.len() {
-        *items.at(consideration_start + i) = consideration_item_state(consideration.get(i))
+        unsafe {
+            *items.at(consideration_start + i) = consideration_item_state(consideration.get(i))
+        }
         i += 1
     }
 }
@@ -279,14 +289,16 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
             ByteRef::of(order.extraData),
         )
         writer = after_extra_data
-        *book.orders.at(i) = order_state(
-            orders.get(i).parameters,
-            items_start: start,
-            numerator: order.numerator.val as u256,
-            denominator: order.denominator.val as u256,
-            signature,
-            extra_data,
-        )
+        unsafe {
+            *book.orders.at(i) = order_state(
+                orders.get(i).parameters,
+                items_start: start,
+                numerator: order.numerator.val as u256,
+                denominator: order.denominator.val as u256,
+                signature,
+                extra_data,
+            )
+        }
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
@@ -326,14 +338,16 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         )
         let (after_signature, signature) = append_bytes(writer, ByteRef::of(order.signature))
         writer = after_signature
-        *book.orders.at(i) = order_state(
-            orders.get(i).parameters,
-            items_start: start,
-            numerator: 1,
-            denominator: 1,
-            signature,
-            extra_data: empty,
-        )
+        unsafe {
+            *book.orders.at(i) = order_state(
+                orders.get(i).parameters,
+                items_start: start,
+                numerator: 1,
+                denominator: 1,
+                signature,
+                extra_data: empty,
+            )
+        }
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
@@ -392,24 +406,26 @@ fn single_book(
         blob,
     }
     fill_items(book.items, start: 0, offer, consideration)
-    *book.orders.at(0) = OrderState {
-        offerer: p.offerer,
-        zone: p.zone,
-        offer_start: 0,
-        offer_len,
-        consideration_start: offer_len,
-        consideration_len,
-        order_type: p.orderType as u256,
-        start_time: p.startTime,
-        end_time: p.endTime,
-        zone_hash: p.zoneHash.val,
-        salt: p.salt,
-        conduit_key: p.conduitKey.val,
-        total_original: p.totalOriginalConsiderationItems,
-        numerator,
-        denominator,
-        signature,
-        extra_data,
+    unsafe {
+        *book.orders.at(0) = OrderState {
+            offerer: p.offerer,
+            zone: p.zone,
+            offer_start: 0,
+            offer_len,
+            consideration_start: offer_len,
+            consideration_len,
+            order_type: p.orderType as u256,
+            start_time: p.startTime,
+            end_time: p.endTime,
+            zone_hash: p.zoneHash.val,
+            salt: p.salt,
+            conduit_key: p.conduitKey.val,
+            total_original: p.totalOriginalConsiderationItems,
+            numerator,
+            denominator,
+            signature,
+            extra_data,
+        }
     }
     book
 }
@@ -430,16 +446,20 @@ pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
         let proof = r.criteriaProof
         let mut j: u256 = 0
         while j < proof.len() {
-            *out.proofs.at(start + j) = proof.get(j).val
+            unsafe {
+                *out.proofs.at(start + j) = proof.get(j).val
+            }
             j += 1
         }
-        *out.list.at(i) = Resolver {
-            order_index: r.orderIndex,
-            side: r.side as u256,
-            index: r.index,
-            identifier: r.identifier,
-            proof_start: start,
-            proof_len: proof.len(),
+        unsafe {
+            *out.list.at(i) = Resolver {
+                order_index: r.orderIndex,
+                side: r.side as u256,
+                index: r.index,
+                identifier: r.identifier,
+                proof_start: start,
+                proof_len: proof.len(),
+            }
         }
         start = start + proof.len()
         i += 1
@@ -460,13 +480,17 @@ fn group_components(
     let mut i: u256 = 0
     while i < items.len() {
         let c = items.get(i)
-        *groups.components.at(start + i) = Component {
-            order_index: c.orderIndex,
-            item_index: c.itemIndex,
+        unsafe {
+            *groups.components.at(start + i) = Component {
+                order_index: c.orderIndex,
+                item_index: c.itemIndex,
+            }
         }
         i += 1
     }
-    *groups.list.at(index) = Group { start, len: items.len() }
+    unsafe {
+        *groups.list.at(index) = Group { start, len: items.len() }
+    }
     start + items.len()
 }
 

@@ -80,7 +80,9 @@ uses (ctx: Ctx, call: Call, create: mut Create, ops: mut RawOps)
     }
     let tstore_initial_support = test_tload(tload_test_contract)
     if !tstore_initial_support {
-        ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
+        unsafe {
+            ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
+        }
     }
     RouterEnv {
         seaport_v1_5,
@@ -109,25 +111,37 @@ fn nested_array<T>(_ parts: Arr<ByteRef>) -> DynArray<T> where T: AbiSize {
     let mut size = 32 + count * 32
     let mut i: u256 = 0
     while i < count {
-        size = size + parts.at(i).size
+        unsafe {
+            size = size + parts.at(i).size
+        }
         i += 1
     }
     let data = ptr::alloc_bytes(size)
-    store_word(data, count)
+    unsafe {
+        store_word(data, count)
+    }
     let mut offset = count * 32
     i = 0
     while i < count {
-        let part = *parts.at(i)
-        store_word(ptr::offset_bytes(data, 32 + i * 32), offset)
-        ptr::copy_raw(
-            dest: ptr::offset_bytes(data, 32 + offset),
-            source: part.data,
-            len: part.size,
-        )
+        let part = unsafe {
+            *parts.at(i)
+        }
+        unsafe {
+            store_word(ptr::offset_bytes(data, 32 + i * 32), offset)
+        }
+        unsafe {
+            ptr::copy_raw(
+                dest: ptr::offset_bytes(data, 32 + offset),
+                source: part.data,
+                len: part.size,
+            )
+        }
         offset = offset + part.size
         i += 1
     }
-    DynArray<T>::from_abi_tail(data, len: count, size)
+    unsafe {
+        DynArray<T>::from_abi_tail(data, len: count, size)
+    }
 }
 
 fn span_ref(_ span: MemSpan) -> ByteRef {
@@ -136,7 +150,9 @@ fn span_ref(_ span: MemSpan) -> ByteRef {
 
 fn empty_array_ref() -> ByteRef {
     let data = ptr::alloc_bytes(32)
-    store_word(data, 0)
+    unsafe {
+        store_word(data, 0)
+    }
     ByteRef { data, len: 0, size: 32 }
 }
 
@@ -156,8 +172,12 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     let execution_parts = Arr<ByteRef>::alloc(count)
     let mut i: u256 = 0
     while i < count {
-        *available_parts.at(i) = empty_array_ref()
-        *execution_parts.at(i) = empty_array_ref()
+        unsafe {
+            *available_parts.at(i) = empty_array_ref()
+        }
+        unsafe {
+            *execution_parts.at(i) = empty_array_ref()
+        }
         i += 1
     }
     let maximum_fulfilled = params.maximumFulfilled
@@ -188,8 +208,12 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(
                 returned,
             )
-            *available_parts.at(i) = span_ref(available.encoded_span())
-            *execution_parts.at(i) = span_ref(executions.encoded_span())
+            unsafe {
+                *available_parts.at(i) = span_ref(available.encoded_span())
+            }
+            unsafe {
+                *execution_parts.at(i) = span_ref(executions.encoded_span())
+            }
             // Upstream only advances `j` for available orders, so an
             // unavailable order loops until the call runs out of gas.
             let mut j: u256 = 0
@@ -204,7 +228,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             }
         } else {
             let selector = if returned.len() >= 4 {
-                load_word(returned.ptr()) >> 224
+                unsafe { load_word(returned.ptr()) } >> 224
             } else {
                 0
             }

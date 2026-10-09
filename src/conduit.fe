@@ -83,7 +83,7 @@ fn channel_slot(_ channel: Address) -> u256 {
 
 /// `onlyOpenChannel`
 fn assert_open_channel() uses (ctx: Ctx, ops: RawOps) {
-    if ops.sload(channel_slot(ctx.caller())) == 0 {
+    if unsafe { ops.sload(channel_slot(ctx.caller())) } == 0 {
         revert_error(ChannelClosed { channel: ctx.caller() })
     }
 }
@@ -215,32 +215,44 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         // ids, amounts, empty data.
         let mem = ptr::alloc_bytes(size + 0x40)
         let data = ptr::offset_bytes(mem, 0x20)
-        store_word(data, SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224)
+        unsafe {
+            store_word(data, SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224)
+        }
         let mut word: u256 = 0
         while word < 4 {
-            store_word(
-                ptr::offset_bytes(data, 4 + word * 32),
-                ops.calldataload(element + 0x20 + word * 32),
-            )
+            unsafe {
+                store_word(
+                    ptr::offset_bytes(data, 4 + word * 32),
+                    ops.calldataload(element + 0x20 + word * 32),
+                )
+            }
             word += 1
         }
-        store_word(ptr::offset_bytes(data, 0x84), 0xa0 + ids_and_amounts_size)
+        unsafe {
+            store_word(ptr::offset_bytes(data, 0x84), 0xa0 + ids_and_amounts_size)
+        }
         word = 0
         while word * 32 < ids_and_amounts_size {
-            store_word(
-                ptr::offset_bytes(data, 0xa4 + word * 32),
-                ops.calldataload(element + 0xa0 + word * 32),
-            )
+            unsafe {
+                store_word(
+                    ptr::offset_bytes(data, 0xa4 + word * 32),
+                    ops.calldataload(element + 0xa0 + word * 32),
+                )
+            }
             word += 1
         }
-        store_word(ptr::offset_bytes(data, 0xa4 + ids_and_amounts_size), 0)
+        unsafe {
+            store_word(ptr::offset_bytes(data, 0xa4 + ids_and_amounts_size), 0)
+        }
         let mut ret = MemBuffer::empty()
         let outcome = call
             .raw_call(
                 addr: token,
                 gas: ctx.gas(),
                 value: 0,
-                args: MemSpan::from_raw_parts(ptr: data, len: size),
+                args: unsafe {
+                    MemSpan::from_raw_parts(ptr: data, len: size)
+                },
                 ret: mut ret,
             )
         if !outcome.success() {
@@ -249,17 +261,29 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             // laid over the call data: from and to stay in place, ids follow
             // at the same position, and the amounts head grows by the word
             // taken by the token.
-            store_word(
-                mem,
-                ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+            unsafe {
+                store_word(
+                    mem,
+                    ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+                )
+            }
+            unsafe {
+                store_word(ptr::offset_bytes(mem, 0x04), token.inner)
+            }
+            unsafe {
+                store_word(ptr::offset_bytes(mem, 0x64), 0xc0)
+            }
+            unsafe {
+                store_word(
+                    ptr::offset_bytes(mem, 0x84),
+                    unsafe { load_word(ptr::offset_bytes(mem, 0x84)) } + 0x20,
+                )
+            }
+            ops.revert(
+                data: unsafe {
+                    MemSpan::from_raw_parts(ptr: mem, len: size)
+                },
             )
-            store_word(ptr::offset_bytes(mem, 0x04), token.inner)
-            store_word(ptr::offset_bytes(mem, 0x64), 0xc0)
-            store_word(
-                ptr::offset_bytes(mem, 0x84),
-                load_word(ptr::offset_bytes(mem, 0x84)) + 0x20,
-            )
-            ops.revert(data: MemSpan::from_raw_parts(ptr: mem, len: size))
         }
         i += 1
     }
@@ -300,11 +324,13 @@ pub contract Conduit {
                 revert_error(InvalidController {})
             }
             let slot = channel_slot(channel)
-            let current = storage.sload(slot) != 0
+            let current = unsafe { storage.sload(slot) } != 0
             if current == isOpen {
                 revert_error(ChannelStatusAlreadySet { channel, isOpen })
             }
-            storage.sstore(slot, value: if isOpen { 1 } else { 0 })
+            unsafe {
+                storage.sstore(slot, value: if isOpen { 1 } else { 0 })
+            }
             log.emit(ChannelUpdated { channel, open: isOpen })
         }
     }

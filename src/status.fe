@@ -36,18 +36,26 @@ pub fn nonce_slot(_ offerer: Address) -> u256 {
 }
 
 pub fn get_counter(_ offerer: Address) -> u256 uses (ops: RawOps) {
-    ops.sload(counter_slot(offerer))
+    unsafe {
+        ops.sload(counter_slot(offerer))
+    }
 }
 
 pub fn get_contract_nonce(_ offerer: Address) -> u256 uses (ops: RawOps) {
-    ops.sload(nonce_slot(offerer))
+    unsafe {
+        ops.sload(nonce_slot(offerer))
+    }
 }
 
 /// `contractNonce = _contractNonces[offerer]++`
 pub fn take_contract_nonce(_ offerer: Address) -> u256 uses (ops: mut RawOps) {
     let slot = nonce_slot(offerer)
-    let nonce = ops.sload(slot)
-    ops.sstore(slot, value: nonce.wrapping_add(1))
+    let nonce = unsafe {
+        ops.sload(slot)
+    }
+    unsafe {
+        ops.sstore(slot, value: nonce.wrapping_add(1))
+    }
     nonce
 }
 
@@ -70,7 +78,7 @@ pub fn unpack_status(_ raw: u256) -> OrderStatus {
 }
 
 pub fn read_status(_ order_hash: u256) -> OrderStatus uses (ops: RawOps) {
-    unpack_status(ops.sload(status_slot(order_hash)))
+    unpack_status(unsafe { ops.sload(status_slot(order_hash)) })
 }
 
 /// `_verifyOrderStatus`: whether the order can still be filled.
@@ -107,22 +115,30 @@ pub fn verify_order_status(
 
 pub fn set_validated(_ order_hash: u256) uses (ops: mut RawOps) {
     let slot = status_slot(order_hash)
-    ops.sstore(slot, value: ops.sload(slot) | 1)
+    unsafe {
+        ops.sstore(slot, value: ops.sload(slot) | 1)
+    }
 }
 
 /// isValidated = false, isCancelled = true; the fill fraction is kept.
 pub fn set_cancelled(_ order_hash: u256) uses (ops: mut RawOps) {
     let slot = status_slot(order_hash)
-    let raw = ops.sload(slot)
-    ops.sstore(slot, value: (raw & !(0xffff as u256)) | 0x100)
+    let raw = unsafe {
+        ops.sload(slot)
+    }
+    unsafe {
+        ops.sstore(slot, value: (raw & !(0xffff as u256)) | 0x100)
+    }
 }
 
 /// Basic orders are always filled completely: validated, 1/1.
 pub fn set_basic_order_filled(_ order_hash: u256) uses (ops: mut RawOps) {
-    ops.sstore(
-        slot: status_slot(order_hash),
-        value: 0x0000000000000000000000000000010000000000000000000000000000010001,
-    )
+    unsafe {
+        ops.sstore(
+            slot: status_slot(order_hash),
+            value: 0x0000000000000000000000000000010000000000000000000000000000010001,
+        )
+    }
 }
 
 fn gcd(_ a: u256, _ b: u256) -> u256 {
@@ -197,7 +213,9 @@ pub fn update_status(
 uses (ops: mut RawOps)
 {
     let slot = status_slot(order_hash)
-    let raw = ops.sload(slot)
+    let raw = unsafe {
+        ops.sload(slot)
+    }
     let filled_denominator = raw >> 136
     let mut has_carry = false
     let mut filled_numerator = numerator
@@ -232,7 +250,9 @@ uses (ops: mut RawOps)
         }
         return false
     }
-    ops.sstore(slot, value: 1 | (filled_numerator << 16) | (den << 136))
+    unsafe {
+        ops.sstore(slot, value: 1 | (filled_numerator << 16) | (den << 136))
+    }
     true
 }
 
@@ -240,8 +260,10 @@ uses (ops: mut RawOps)
 pub fn increment_counter() -> u256 uses (ctx: Ctx, ops: mut RawOps, log: mut Log) {
     let quasi_random = ctx.blockhash(ctx.block_number().wrapping_sub(1)) >> 128
     let slot = counter_slot(ctx.caller())
-    let new_counter = quasi_random.wrapping_add(ops.sload(slot))
-    ops.sstore(slot, value: new_counter)
+    let new_counter = quasi_random.wrapping_add(unsafe { ops.sload(slot) })
+    unsafe {
+        ops.sstore(slot, value: new_counter)
+    }
     log.emit(
         CounterIncremented { newCounter: new_counter, offerer: ctx.caller() },
     )
@@ -261,11 +283,11 @@ const ENTERED_SSTORE: u256 = 2
 const ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE: u256 = 3
 
 fn tload_guard() -> u256 uses (ops: RawOps) {
-    ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT).read()
+    unsafe { ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT) }.read()
 }
 
 fn tstore_guard(_ value: u256) uses (ops: mut RawOps) {
-    ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT).write(value)
+    unsafe { ops.tstor_ptr<u256>(REENTRANCY_GUARD_SLOT) }.write(value)
 }
 
 fn revert_reentrant() -> ! {
@@ -283,7 +305,9 @@ uses (ops: mut RawOps)
         tstore_guard(ENTERED_TSTORE + accept)
         return
     }
-    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    let guard = unsafe {
+        ops.sload(REENTRANCY_GUARD_SLOT)
+    }
     if guard == TSTORE_ENABLED_SSTORE {
         if tload_guard() != 0 {
             revert_reentrant()
@@ -294,10 +318,12 @@ uses (ops: mut RawOps)
     if guard != NOT_ENTERED_SSTORE {
         revert_reentrant()
     }
-    ops.sstore(
-        slot: REENTRANCY_GUARD_SLOT,
-        value: ENTERED_SSTORE + accept,
-    )
+    unsafe {
+        ops.sstore(
+            slot: REENTRANCY_GUARD_SLOT,
+            value: ENTERED_SSTORE + accept,
+        )
+    }
 }
 
 pub fn clear_reentrancy_guard(_ env: Env) uses (ops: mut RawOps) {
@@ -305,11 +331,13 @@ pub fn clear_reentrancy_guard(_ env: Env) uses (ops: mut RawOps) {
         tstore_guard(NOT_ENTERED_TSTORE)
         return
     }
-    if ops.sload(REENTRANCY_GUARD_SLOT) == TSTORE_ENABLED_SSTORE {
+    if unsafe { ops.sload(REENTRANCY_GUARD_SLOT) } == TSTORE_ENABLED_SSTORE {
         tstore_guard(NOT_ENTERED_TSTORE)
         return
     }
-    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
+    unsafe {
+        ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
+    }
 }
 
 pub fn assert_non_reentrant(_ env: Env) uses (ops: RawOps) {
@@ -319,7 +347,9 @@ pub fn assert_non_reentrant(_ env: Env) uses (ops: RawOps) {
         }
         return
     }
-    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    let guard = unsafe {
+        ops.sload(REENTRANCY_GUARD_SLOT)
+    }
     if guard == TSTORE_ENABLED_SSTORE {
         if tload_guard() != 0 {
             revert_reentrant()
@@ -337,7 +367,9 @@ pub fn assert_accepting_native_tokens(_ env: Env) uses (ctx: Ctx, ops: RawOps) {
         }
         return
     }
-    let guard = ops.sload(REENTRANCY_GUARD_SLOT)
+    let guard = unsafe {
+        ops.sload(REENTRANCY_GUARD_SLOT)
+    }
     if guard == TSTORE_ENABLED_SSTORE {
         if tload_guard() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
             revert_error(InvalidMsgValue { value: ctx.value() })
@@ -356,7 +388,9 @@ const TLOAD_TEST_PAYLOAD: u256 = 0x6002601e613d5c3d52f3
 pub fn prepare_tload_test() -> Address uses (create: mut Create) {
     let code = MemBuffer::alloc(32)
     let word = core::ptr::cast<u8, u256>(code.ptr())
-    *word = TLOAD_TEST_PAYLOAD
+    unsafe {
+        *word = TLOAD_TEST_PAYLOAD
+    }
     create.create_raw(
             value: 0,
             init_code: code.span().slice(offset: 22, len: 10),
@@ -378,12 +412,14 @@ pub fn test_tload(_ probe: Address) -> bool uses (ctx: Ctx, call: Call) {
 
 /// `__activateTstore`: switch to transient storage after a hard fork.
 pub fn activate_tstore(_ env: Env) uses (ctx: Ctx, call: Call, ops: mut RawOps) {
-    let activatable = ops.sload(REENTRANCY_GUARD_SLOT) == NOT_ENTERED_SSTORE
+    let activatable = unsafe { ops.sload(REENTRANCY_GUARD_SLOT) } == NOT_ENTERED_SSTORE
     if env.tstore_initial_support || !activatable {
         revert_error(TStoreAlreadyActivated {})
     }
     if !test_tload(env.tload_test_contract) {
         revert_error(TStoreNotSupported {})
     }
-    ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: TSTORE_ENABLED_SSTORE)
+    unsafe {
+        ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: TSTORE_ENABLED_SSTORE)
+    }
 }

@@ -113,14 +113,18 @@ pub fn setup(_ controller: Address) -> TransferHelperEnv uses (call: Call) {
 /// something else.
 pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
     let size = data.len()
-    if size < 0x44 || load_word(data.ptr()) >> 224 != ERROR_STRING_SELECTOR {
+    if size < 0x44 || unsafe { load_word(data.ptr()) } >> 224 != ERROR_STRING_SELECTOR {
         return Option::None
     }
-    let offset = load_word(ptr::offset_bytes(data.ptr(), 4))
+    let offset = unsafe {
+        load_word(ptr::offset_bytes(data.ptr(), 4))
+    }
     if offset > 0xffffffffffffffff || offset + 0x24 > size {
         return Option::None
     }
-    let length = load_word(ptr::offset_bytes(data.ptr(), 4 + offset))
+    let length = unsafe {
+        load_word(ptr::offset_bytes(data.ptr(), 4 + offset))
+    }
     if length > 0xffffffffffffffff || offset + 0x20 + length > size - 4 {
         return Option::None
     }
@@ -137,7 +141,9 @@ fn decode_bytes4(_ data: MemSpan) -> u256 {
     if data.len() < 32 {
         std::evm::revert(())
     }
-    let word = load_word(data.ptr())
+    let word = unsafe {
+        load_word(data.ptr())
+    }
     if word << 32 != 0 {
         std::evm::revert(())
     }
@@ -270,7 +276,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         Option::None => {},
     }
     let selector = if data.len() >= 4 {
-        load_word(data.ptr()) >> 224
+        unsafe { load_word(data.ptr()) } >> 224
     } else {
         0
     }
