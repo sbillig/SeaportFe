@@ -137,8 +137,8 @@ fn apply_fractions(
 )
 uses (ctx: Ctx)
 {
-    let mut any_native = false
-    let mut i: u256 = 0
+    var any_native = false
+    var i: u256 = 0
     while i < order.offer_len {
         if apply_offer_fraction(
             mut items,
@@ -234,14 +234,14 @@ fn transfer_each(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < order.offer_len {
         let item = mut items[(order.offer_start + i) as usize]
         item.receiver = recipient
         i += 1
     }
-    let mut buf = transfer_buffer(order.offer_len + order.consideration_len)
-    let mut acc = new_accumulator()
+    var buf = transfer_buffer(order.offer_len + order.consideration_len)
+    var acc = new_accumulator()
     i = 0
     while i < order.offer_len {
         acc = transfer_offer_item(env, items, order, index: i, recipient, acc, mut buf)
@@ -315,8 +315,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem> {
-    let mut out = MemVec<SpentItem>::zeroed(count)
-    let mut i: u256 = 0
+    var out = MemVec<SpentItem>::zeroed(count)
+    var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
         out.set(
@@ -334,8 +334,8 @@ pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem
 }
 
 pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
-    let mut out = MemVec<ReceivedItem>::zeroed(count)
-    let mut i: u256 = 0
+    var out = MemVec<ReceivedItem>::zeroed(count)
+    var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
         out.set(
@@ -475,7 +475,7 @@ fn authorize_single_order(
 )
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
-    let mut order_hashes = MemArray<u256>::new_zeroed(1)
+    var order_hashes = MemArray<u256>::new_zeroed(1)
     order_hashes[(0) as usize] = 0
     assert_restricted_advanced_order_authorization(
         book,
@@ -509,7 +509,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         fulfiller_conduit_key,
         recipient,
     )
-    let mut order_hashes = MemArray<u256>::new_zeroed(1)
+    var order_hashes = MemArray<u256>::new_zeroed(1)
     order_hashes[(0) as usize] = order_hash
     assert_restricted_advanced_order_validity(
         book,

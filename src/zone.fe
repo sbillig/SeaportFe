@@ -53,7 +53,7 @@ fn write_spent_items(
     use_original: bool,
 ) -> u256 {
     dst.write(offset, value: count)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
         let out = offset + 32 + i * 128
@@ -74,7 +74,7 @@ fn write_received_items(
     count: u256,
 ) -> u256 {
     dst.write(offset, value: count)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
         let out = offset + 32 + i * 160
@@ -101,7 +101,7 @@ fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: Bytes) -> u256 {
 
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
     dst.write(offset, value: count)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < count {
         dst.write(offset: offset + 32 + i * 32, value: hashes[(i) as usize])
         i += 1
@@ -133,14 +133,14 @@ uses (ctx: Ctx)
         + 32
         + hashes_count * 32
     let size = 0x24 + params_size
-    let mut data = Buffer::new(size)
+    var data = Buffer::new(size)
     data.write(offset: 0, value: selector << 224)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
     data.write(offset: head, value: order_hash)
     data.write(offset: head + 0x20, value: ctx.caller().inner)
     data.write(offset: head + 0x40, value: order.offerer.inner)
-    let mut tail: u256 = 0x140
+    var tail: u256 = 0x140
     data.write(offset: head + 0x60, value: tail)
     tail = tail
         + write_spent_items(
@@ -214,7 +214,7 @@ fn call_and_check_status_with_skip(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let magic = data.word(0) & 0xffffffff00000000000000000000000000000000000000000000000000000000
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_call(
             addr: target,
@@ -333,14 +333,14 @@ fn encode_ratify_order(
         + padded(order.extra_data.len())
         + 32
         + order_hashes.len() * 32
-    let mut data = Buffer::new(size)
+    var data = Buffer::new(size)
     data.write(offset: 0, value: RATIFY_ORDER_SELECTOR << 224)
     let head: u256 = 4
     data.write(
         offset: head + 0x80,
         value: order_hash ^ (order.offerer.inner << 96),
     )
-    let mut tail: u256 = 0xa0
+    var tail: u256 = 0xa0
     data.write(offset: head, value: tail)
     tail = tail
         + write_spent_items(
@@ -384,11 +384,11 @@ uses (ctx: Ctx)
         + order.consideration_len * 128
         + 32
         + padded(order.extra_data.len())
-    let mut data = Buffer::new(size)
+    var data = Buffer::new(size)
     data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
     let head: u256 = 4
     data.write(offset: head, value: ctx.caller().inner)
-    let mut tail: u256 = 0x80
+    var tail: u256 = 0x80
     data.write(offset: head + 0x20, value: tail)
     tail = tail
         + write_spent_items(
@@ -416,7 +416,7 @@ uses (ctx: Ctx)
 
 /// One word of returndata at `offset`.
 fn returndata_word(_ offset: u256) -> u256 uses (ops: mut RawOps) {
-    let mut buf = MemBuffer::with_capacity(32)
+    var buf = MemBuffer::with_capacity(32)
     ops.returndatacopy(dest: mut buf, dest_offset: 0, src_offset: offset, len: 32)
     read_word(buf.span(), offset: 0)
 }
@@ -449,7 +449,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     }
     let offerer = order.offerer
     let data = encode_generate_order(book, order)
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     let success = call
         .raw_call(
             addr: offerer,
@@ -526,8 +526,8 @@ uses (ops: mut RawOps)
         return invalid
     }
 
-    let mut bad = order.offer_len > offer_length
-    let mut i: u256 = 0
+    var bad = order.offer_len > offer_length
+    var i: u256 = 0
     while i < offer_length && i < order.offer_len {
         let base = offer_offset + 32 + i * 128
         let original = ref book.items[(order.offer_start + i) as usize]
@@ -586,8 +586,8 @@ uses (ops: mut RawOps)
     let offer_length = generated.offer_length
     let consideration_length = generated.consideration_length
     let used = start + offer_length + consideration_length
-    let mut items = MemArray<Item>::new_zeroed(used)
-    let mut i: u256 = 0
+    var items = MemArray<Item>::new_zeroed(used)
+    var i: u256 = 0
     while i < start {
         copy_item(mut items, source: book.items, index: i)
         i += 1
@@ -662,8 +662,8 @@ uses (ops: mut RawOps)
 /// `compareItems`: a wildcard criteria item matches any identifier of the
 /// corresponding non-criteria type.
 fn items_differ(_ original: Item, item_type: u256, token: u256, identifier: u256) -> bool {
-    let mut expected_type = original.item_type
-    let mut expected_identifier = original.identifier
+    var expected_type = original.item_type
+    var expected_identifier = original.identifier
     if expected_type > 3 && expected_identifier == 0 {
         expected_type = expected_type - 2
         expected_identifier = identifier

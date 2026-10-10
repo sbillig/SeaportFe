@@ -7,7 +7,7 @@ pub struct Buffer { data: MemBuffer }
 
 impl Buffer {
     pub fn new(_ len: u256) -> Self {
-        let mut data = MemArray<u256>::new_zeroed((len + 31) / 32).into_buffer()
+        var data = MemArray<u256>::new_zeroed((len + 31) / 32).into_buffer()
         data.truncate(len)
         Buffer { data }
     }
@@ -50,7 +50,7 @@ impl Buffer {
 
 #[test]
 fn word_writes_preserve_unaligned_neighbors() {
-    let mut data = Buffer::new(66)
+    var data = Buffer::new(66)
     data.write(offset: 0, value: 0x1901 << 240)
     data.write(offset: 2, value: 7)
     data.write(offset: 34, value: 11)
@@ -76,8 +76,8 @@ pub fn return_word(_ returned: MemSpan, initial: u256) -> u256 {
     if returned.len() >= 32 {
         return read_word(returned, offset: 0)
     }
-    let mut word = initial
-    let mut i: u256 = 0
+    var word = initial
+    var i: u256 = 0
     while i < returned.len() {
         let shift = (31 - i) * 8
         word = (word & !((0xff as u256) << shift)) | ((returned.byte_at(i) as u256) << shift)
@@ -88,7 +88,7 @@ pub fn return_word(_ returned: MemSpan, initial: u256) -> u256 {
 
 #[test]
 fn short_returns_preserve_the_initial_suffix() {
-    let mut data = Buffer::new(32)
+    var data = Buffer::new(32)
     data.write(offset: 0, value: 0x1626ba7e << 224)
     assert(
         return_word(data.slice(offset: 0, len: 4), initial: 7) == (0x1626ba7e << 224) | 7,
@@ -101,7 +101,7 @@ fn short_returns_preserve_the_initial_suffix() {
 
 #[test(should_revert, panic = 0x32)]
 fn word_write_cannot_cross_the_owned_extent() {
-    let mut data = Buffer::new(33)
+    var data = Buffer::new(33)
     data.write(offset: 2, value: 7)
 }
 
@@ -113,7 +113,7 @@ fn word_read_cannot_wrap_the_offset() {
 
 #[test(should_revert, panic = 0x32)]
 fn byte_copy_cannot_use_allocation_padding() {
-    let mut data = Buffer::new(33)
+    var data = Buffer::new(33)
     let source = Buffer::new(1)
     data.copy_from(offset: 33, source: source.span())
 }

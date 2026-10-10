@@ -199,14 +199,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         salt: conduit_key,
         init_code_hash: env.conduit_creation_code_hash,
     )
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < transfers.len() {
         total = total + transfers.get(i).items.len()
         i += 1
     }
-    let mut conduit_transfers = MemVec<ConduitTransfer>::zeroed(total)
-    let mut index: u256 = 0
+    var conduit_transfers = MemVec<ConduitTransfer>::zeroed(total)
+    var index: u256 = 0
     i = 0
     while i < transfers.len() {
         let transfer = transfers.get(i)
@@ -217,7 +217,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let call_erc721_receiver = transfer.validateERC721Receiver
             && ctx.extcodesize(recipient) != 0
         let items = transfer.items
-        let mut j: u256 = 0
+        var j: u256 = 0
         while j < items.len() {
             let item = items.get(j)
             if item.itemType > 3 {

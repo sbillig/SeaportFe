@@ -44,7 +44,7 @@ fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
 
 #[test]
 fn owned_items_mutate_independently_of_order_views() {
-    let mut book = single_advanced(order(4, amount: 7))
+    var book = single_advanced(order(4, amount: 7))
     let descriptor = ref book.orders[0]
     book.items[descriptor.offer_start as usize].amount = 11
     assert(descriptor.offer_len == 1)
@@ -56,10 +56,10 @@ fn owned_items_mutate_independently_of_order_views() {
 
 #[test]
 fn multiple_orders_keep_their_item_and_byte_ranges() {
-    let mut input = DynVec<AdvancedOrder>::new()
+    var input = DynVec<AdvancedOrder>::new()
     input.push(order(4, amount: 7))
     input.push(order(5, amount: 13))
-    let mut book = advanced_orders(input.to_dyn_array())
+    var book = advanced_orders(input.to_dyn_array())
     assert(book.used == 2)
     assert(book.orders[0].offer_start == 0)
     assert(book.orders[1].offer_start == 1)
@@ -73,7 +73,7 @@ fn multiple_orders_keep_their_item_and_byte_ranges() {
 
 #[test(should_revert, selector = 0x91b3e514)]
 fn repeated_fulfillment_indices_observe_prior_mutation() {
-    let mut book = single_advanced(order(4, amount: 7))
+    var book = single_advanced(order(4, amount: 7))
     let components = dyn_array_from(
         [
             FulfillmentComponent { orderIndex: 0, itemIndex: 0 },

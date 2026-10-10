@@ -74,8 +74,8 @@ pub fn derive_order_hash(_ book: Book, order: OrderState, counter: u256) -> u256
 /// Hash an order's ABI fields without building the mutable fulfillment model.
 pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     let offer = order.offer
-    let mut offer_hashes = MemArray<u256>::new_zeroed(offer.len())
-    let mut i: u256 = 0
+    var offer_hashes = MemArray<u256>::new_zeroed(offer.len())
+    var i: u256 = 0
     while i < offer.len() {
         let item = offer.get(i)
         offer_hashes[i as usize] = keccak_words(
@@ -91,7 +91,7 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
         i += 1
     }
     let consideration = order.consideration
-    let mut consideration_hashes = MemArray<u256>::new_zeroed(consideration.len())
+    var consideration_hashes = MemArray<u256>::new_zeroed(consideration.len())
     i = 0
     while i < consideration.len() {
         let item = consideration.get(i)
@@ -129,8 +129,8 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
 }
 
 fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: bool) -> u256 {
-    let mut hashes = MemArray<u256>::new_zeroed(count)
-    let mut i: u256 = 0
+    var hashes = MemArray<u256>::new_zeroed(count)
+    var i: u256 = 0
     while i < count {
         let item = ref items[(start + i) as usize]
         let hash = if consideration {
@@ -165,7 +165,7 @@ fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: 
 
 /// keccak256(0x1901 ++ domainSeparator ++ orderHash)
 pub fn derive_eip712_digest(domain_separator: u256, order_hash: u256) -> u256 {
-    let mut buf = Buffer::new(66)
+    var buf = Buffer::new(66)
     buf.write(offset: 0, value: 0x1901 << 240)
     buf.write(offset: 2, value: domain_separator)
     buf.write(offset: 34, value: order_hash)

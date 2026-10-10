@@ -186,7 +186,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 pub fn fulfill_order(_ env: Env, order: Order, fulfiller_conduit_key: Bytes32) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = single_order(order)
+    var book = single_order(order)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
@@ -205,7 +205,7 @@ pub fn fulfill_advanced_order(
 ) -> bool
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = single_advanced(advanced_order)
+    var book = single_advanced(advanced_order)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
@@ -225,7 +225,7 @@ pub fn fulfill_available_orders(
 ) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = orders_as_advanced(orders)
+    var book = orders_as_advanced(orders)
     fulfill_available_advanced_orders(
         env,
         mut book,
@@ -250,7 +250,7 @@ pub fn fulfill_available_advanced(
 ) -> (DynArray<bool>, DynArray<Execution>)
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = advanced_orders(orders)
+    var book = advanced_orders(orders)
     fulfill_available_advanced_orders(
         env,
         mut book,
@@ -270,7 +270,7 @@ pub fn match_orders(
 ) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = orders_as_advanced(orders)
+    var book = orders_as_advanced(orders)
     match_advanced_orders(
         env,
         mut book,
@@ -289,7 +289,7 @@ pub fn match_advanced(
 ) -> DynArray<Execution>
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let mut book = advanced_orders(orders)
+    var book = advanced_orders(orders)
     match_advanced_orders(
         env,
         mut book,

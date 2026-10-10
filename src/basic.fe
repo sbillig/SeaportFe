@@ -156,7 +156,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         transfer_individual_721_or_1155_item(env, item_type: offered_item_type, conduit_key)
         transfer_native_tokens_and_finalize()
     } else {
-        let mut buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
+        var buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
         let empty = new_accumulator()
         let acc = if route == 2 {
             transfer_erc721(
@@ -251,7 +251,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
     // Consideration item hashes of the primary item and the original
     // additional recipients, and the ReceivedItems of all of them.
     let offerer = cd_address(OFFERER)
-    let mut consideration_hashes = Buffer::new((total_original + 1) * 32)
+    var consideration_hashes = Buffer::new((total_original + 1) * 32)
     consideration_hashes
         .write(
             offset: 0,
@@ -267,7 +267,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 ],
             ),
         )
-    let mut received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
+    var received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
     received
         .set(
             index: 0,
@@ -279,8 +279,8 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
                 recipient: offerer,
             },
         )
-    let mut combined_recipients: u256 = 0
-    let mut i: u256 = 0
+    var combined_recipients: u256 = 0
+    var i: u256 = 0
     while i < total_recipients {
         let amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
@@ -347,7 +347,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
         ],
     )
 
-    let mut spent = MemVec<SpentItem>::zeroed(1)
+    var spent = MemVec<SpentItem>::zeroed(1)
     spent
         .set(
             index: 0,
@@ -399,7 +399,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
     let at = cd(SIGNATURE_HEAD) + 0x24
     let len = cd(at) & 0xffffffff
-    let mut payload = MemBuffer::with_capacity(len)
+    var payload = MemBuffer::with_capacity(len)
     ops.calldatacopy(
         dest: mut payload,
         dest_offset: 0,
@@ -424,7 +424,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // head, offer (one SpentItem), consideration, empty extraData, hashes
     let params_size = 0x140 + 0xa0 + consideration_size + 32 + 32 + hashes_count * 32
     let size = 0x24 + params_size
-    let mut data = Buffer::new(size)
+    var data = Buffer::new(size)
     data.write(offset: 0, value: selector << 224)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
@@ -469,7 +469,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     data.write(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
     data.write(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
     data.write(offset: first + 0x80, value: cd(OFFERER))
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < total_recipients {
         let item = consideration + 0x20 + (i + 1) * 160
         data.write(offset: item, value: additional_recipients_item_type)
@@ -491,7 +491,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         data.write(offset: head + extra_data_offset + 64, value: order_hash)
     }
     let magic = selector << 224
-    let mut ret = MemBuffer::with_capacity(32)
+    var ret = MemBuffer::with_capacity(32)
     let zone = cd_address(ZONE)
     let outcome = call
         .raw_call(
@@ -524,7 +524,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
     if conduit_key != 0 {
-        let mut data = Buffer::new(0x104)
+        var data = Buffer::new(0x104)
         data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
         data.write(offset: 0x04, value: 0x20)
         data.write(offset: 0x24, value: 1)
@@ -550,11 +550,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn transfer_native_tokens_and_finalize()
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let mut remaining = ctx.value()
+    var remaining = ctx.value()
     let amount = cd(CONSIDERATION_AMOUNT)
     let offerer = cd_address(OFFERER)
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < total_recipients {
         let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
@@ -584,11 +584,11 @@ fn transfer_erc20_and_finalize(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let mut from = ctx.caller()
-    let mut to = cd_address(OFFERER)
-    let mut token = cd_address(CONSIDERATION_TOKEN)
-    let mut identifier = cd(CONSIDERATION_IDENTIFIER)
-    let mut amount = cd(CONSIDERATION_AMOUNT)
+    var from = ctx.caller()
+    var to = cd_address(OFFERER)
+    var token = cd_address(CONSIDERATION_TOKEN)
+    var identifier = cd(CONSIDERATION_IDENTIFIER)
+    var amount = cd(CONSIDERATION_AMOUNT)
     if from_offerer {
         from = cd_address(OFFERER)
         to = ctx.caller()
@@ -605,8 +605,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         cd(FULFILLER_CONDUIT_KEY)
     }
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
-    let mut current = acc
-    let mut i: u256 = 0
+    var current = acc
+    var i: u256 = 0
     while i < total_recipients {
         let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)

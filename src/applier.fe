@@ -57,12 +57,12 @@ pub fn aggregate_offer_items(
     group: Group,
     recipient: Address,
 ) -> (ExecutionState, u256) {
-    let mut execution = empty_execution()
-    let mut first_used: u256 = 0
-    let mut amount: u256 = 0
-    let mut error_buffer: u256 = 0
-    let mut data_hash: u256 = 0
-    let mut k: u256 = 0
+    var execution = empty_execution()
+    var first_used: u256 = 0
+    var amount: u256 = 0
+    var error_buffer: u256 = 0
+    var data_hash: u256 = 0
+    var k: u256 = 0
     while k < group.len {
         let component = groups.components[(group.start + k) as usize]
         if component.order_index >= book.orders.len() {
@@ -111,12 +111,12 @@ pub fn aggregate_consideration_items(
     offerer: Address,
     conduit_key: u256,
 ) -> (ExecutionState, u256) {
-    let mut execution = empty_execution()
-    let mut first_used: u256 = 0
-    let mut amount: u256 = 0
-    let mut error_buffer: u256 = 0
-    let mut data_hash: u256 = 0
-    let mut k: u256 = 0
+    var execution = empty_execution()
+    var first_used: u256 = 0
+    var amount: u256 = 0
+    var error_buffer: u256 = 0
+    var data_hash: u256 = 0
+    var k: u256 = 0
     while k < group.len {
         let component = groups.components[(group.start + k) as usize]
         if component.order_index >= book.orders.len() {
@@ -186,7 +186,7 @@ pub fn apply_fulfillment(
         group: offer_group,
         recipient: consideration.recipient,
     )
-    let mut execution = offered
+    var execution = offered
     if execution.item_type != consideration.item_type
         || execution.token != consideration.token
         || execution.identifier != consideration.identifier {

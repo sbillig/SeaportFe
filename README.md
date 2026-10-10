@@ -45,14 +45,14 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe's mutable value semantics (MVS) branch at
-`169ed8ce360a69bb92cdb20bba5a78b41280c6c4`. Its committed Sonatina revision
+`c329ceff361ae1e26d3b9a07358146bb53faa3b2`. Its committed Sonatina revision
 `601010bc9364276e598143ebb5749f8273832df6` currently prevents a clean compiler
 build: Fe imports `EvmKeccak256Words`, which that dependency lacks. The
 compiler pin must be fixed before the draft bootstrap can build successfully.
 No compiler patches or dependency overrides are applied by the bootstrap.
 
 The source migration builds all eight contracts and passes all twelve Fe tests
-with the existing local MVS toolchain, which uses Sonatina
+with an isolated build of this MVS revision, which uses Sonatina
 `361e0e86a88413f12e0ef1cb16b7ef75bbb10034` through local path dependencies.
 The current MVS build passes all 482 Foundry tests (1,000 cases per fuzz
 test) and all 402 Hardhat tests, with the upstream one pending test. All eight
@@ -66,9 +66,11 @@ immutable environment passing. Later local calldata and output-buffer
 changes are deferred: their `#[decode(manual)]` dispatch feature is absent
 from both that master revision and MVS.
 
-Book, Resolvers, and Groups own non-Copy MemArray pools. Order descriptors
-retain immutable Bytes signatures and extra data, and helpers use scoped MVS
-views or explicit mutable parameters. Generated orders replace the item pool
+Mutable owned locals use `var`; `mut` continues to grant write access to
+parameters and places, and `ref` keeps a read access. Book, Resolvers, and
+Groups own non-Copy MemArray pools. Order descriptors retain immutable Bytes
+signatures and extra data, and helpers use scoped MVS views or explicit mutable
+parameters. Generated orders replace the item pool
 in place. DynVec builds nested ABI arrays; exact protocol encoders use a
 checked, initialized owning byte buffer. Copyable raw pool and byte handles
 have been removed. Explicit unsafe blocks fell from 333 to 72: three implement
@@ -91,7 +93,7 @@ Seaport's own test suites run against the Fe bytecode:
 - `scripts/compare_abi.py` compares the Fe JSON ABIs with the Solidity
   artifacts (functions with outputs and mutability, events, errors).
 
-Current MVS verification uses Fe 169ed8ce3 / Sonatina 361e0e86 at `-O1`.
+Current MVS verification uses Fe c329ceff3 / Sonatina 361e0e86 at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
 initial MVS port. The full upstream results match the documented pre-MVS
 results:
@@ -121,13 +123,13 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: this MVS build has a 49,809-byte Seaport runtime and a
-  49,815-byte Consideration runtime, above the 24 KB EIP-170 limit
+- Code size: this MVS build has a 57,412-byte Seaport runtime and a
+  57,418-byte Consideration runtime, above the 24 KB EIP-170 limit
   (ISSUES.md #13). Both test scripts lift the size limit. The eight-contract
-  build uses Fe 169ed8ce3 / local Sonatina 361e0e86 at `-O1`; periphery
-  runtimes are 4,181 to 13,071 bytes. The checked encoder conversion increased
-  Consideration from 47,418 bytes for the initial owned-pool phase to 49,815
-  bytes; these checks and initialization have a code-size cost.
+  build uses Fe c329ceff3 / archived Sonatina 361e0e86 at `-O1`; periphery
+  runtimes are 4,815 to 13,466 bytes. Consideration grew from 49,815 bytes
+  on Fe 169ed8ce3 to 57,418 with this compiler update and the equivalent
+  `var` syntax. The compiler change responsible has not been isolated.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. The current upstream behavioral suites, including gas-budget
   cases, pass. The following pre-MVS measurements are historical; these calls

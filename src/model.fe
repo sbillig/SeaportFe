@@ -139,7 +139,7 @@ fn fill_items(
     offer: DynArray<OfferItem>,
     consideration: DynArray<ConsiderationItem>,
 ) {
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < offer.len() {
         items[(start + i) as usize] = offer_item_state(offer.get(i))
         i += 1
@@ -187,18 +187,18 @@ fn parameters_items(_ p: OrderParameters) -> u256 {
 
 pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
     let n = orders.len()
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < n {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    let mut book = Book {
+    var book = Book {
         orders: MemArray<OrderState>::new_zeroed(n),
         items: MemArray<Item>::new_zeroed(total),
         used: total,
     }
-    let mut start: u256 = 0
+    var start: u256 = 0
     i = 0
     while i < n {
         let order = orders.get(i)
@@ -225,18 +225,18 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
 
 pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
     let n = orders.len()
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < n {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    let mut book = Book {
+    var book = Book {
         orders: MemArray<OrderState>::new_zeroed(n),
         items: MemArray<Item>::new_zeroed(total),
         used: total,
     }
-    let mut start: u256 = 0
+    var start: u256 = 0
     i = 0
     while i < n {
         let order = orders.get(i)
@@ -292,7 +292,7 @@ fn single_book(
     let consideration = p.consideration
     let offer_len = offer.len()
     let consideration_len = consideration.len()
-    let mut book = Book {
+    var book = Book {
         orders: MemArray<OrderState>::new_zeroed(1),
         items: MemArray<Item>::new_zeroed(offer_len + consideration_len),
         used: offer_len + consideration_len,
@@ -322,22 +322,22 @@ fn single_book(
 
 pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
     let n = resolvers.len()
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < n {
         total = total + resolvers.get(i).criteriaProof.len()
         i += 1
     }
-    let mut out = Resolvers {
+    var out = Resolvers {
         list: MemArray<Resolver>::new_zeroed(n),
         proofs: MemArray<u256>::new_zeroed(total),
     }
-    let mut start: u256 = 0
+    var start: u256 = 0
     i = 0
     while i < n {
         let r = resolvers.get(i)
         let proof = r.criteriaProof
-        let mut j: u256 = 0
+        var j: u256 = 0
         while j < proof.len() {
             out.proofs[(start + j) as usize] = proof.get(j).val
             j += 1
@@ -366,7 +366,7 @@ fn group_components(
     start: u256,
     items: DynArray<FulfillmentComponent>,
 ) -> u256 {
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < items.len() {
         let c = items.get(i)
         groups.components[(start + i) as usize] = Component {
@@ -382,17 +382,17 @@ fn group_components(
 /// `FulfillmentComponent[][]` as groups of one component pool.
 pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> Groups {
     let n = nested.len()
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < n {
         total = total + nested.get(i).len()
         i += 1
     }
-    let mut groups = Groups {
+    var groups = Groups {
         list: MemArray<Group>::new_zeroed(n),
         components: MemArray<Component>::new_zeroed(total),
     }
-    let mut start: u256 = 0
+    var start: u256 = 0
     i = 0
     while i < n {
         start = group_components(mut groups, index: i, start, items: nested.get(i))
@@ -405,18 +405,18 @@ pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> 
 /// `2 * i + 1`).
 pub fn fulfillments(_ items: DynArray<Fulfillment>) -> Groups {
     let n = items.len()
-    let mut total: u256 = 0
-    let mut i: u256 = 0
+    var total: u256 = 0
+    var i: u256 = 0
     while i < n {
         let f = items.get(i)
         total = total + f.offerComponents.len() + items.get(i).considerationComponents.len()
         i += 1
     }
-    let mut groups = Groups {
+    var groups = Groups {
         list: MemArray<Group>::new_zeroed(2 * n),
         components: MemArray<Component>::new_zeroed(total),
     }
-    let mut start: u256 = 0
+    var start: u256 = 0
     i = 0
     while i < n {
         start = group_components(

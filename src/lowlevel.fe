@@ -16,7 +16,7 @@ pub fn bubble_revert_if_affordable(msize_words: u256) uses (ctx: Ctx, ops: RawOp
     let size = ops.returndatasize()
     if size == 0 { return }
     let return_data_words = (size + 31) >> 5
-    let mut cost = 3 * return_data_words
+    var cost = 3 * return_data_words
     if return_data_words > msize_words {
         cost = cost
             + (return_data_words - msize_words) * 3

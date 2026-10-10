@@ -39,8 +39,8 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     let domain = domain_separator(env)
     let original_digest = derive_eip712_digest(domain_separator: domain, order_hash)
     let original_length = signature.len()
-    let mut digest = original_digest
-    let mut signature_length = original_length
+    var digest = original_digest
+    var signature_length = original_length
     if is_valid_bulk_order_size(original_length) {
         let (bulk_hash, ecdsa_length) = compute_bulk_order_proof(signature, leaf: order_hash)
         digest = derive_eip712_digest(domain_separator: domain, order_hash: bulk_hash)
@@ -69,12 +69,12 @@ pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) 
     let height = (full_length - signature_length) >> 5
     let key = signature.word_at(signature_length) >> 0xe8
     let first = signature.word_at(signature_length + 3)
-    let mut node = if key & 1 == 1 {
+    var node = if key & 1 == 1 {
         keccak_words([first, leaf])
     } else {
         keccak_words([leaf, first])
     }
-    let mut i: u256 = 1
+    var i: u256 = 1
     while i < height {
         let element = signature.word_at(signature_length + 3 + i * 32)
         node = if (key >> i) & 1 == 1 {
@@ -100,11 +100,11 @@ pub fn assert_valid_signature(
 )
 uses (ctx: Ctx, call: Call, ops: RawOps)
 {
-    let mut recovered: u256 = 0
-    let mut v: u256 = 0
+    var recovered: u256 = 0
+    var v: u256 = 0
     if signature_length == 64 || signature_length == 65 {
         let r = signature.word_at(0)
-        let mut s = signature.word_at(32)
+        var s = signature.word_at(32)
         if signature_length == 65 {
             v = signature.byte_at(64) as u256
         } else {
@@ -116,10 +116,10 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
             _ => 0,
         }
     }
-    let mut success = signer.inner == recovered && signer.inner != 0
+    var success = signer.inner == recovered && signer.inner != 0
     if !success {
         // isValidSignature(bytes32,bytes) with the unpadded signature bytes.
-        let mut args = Buffer::new(original_length + 0x64)
+        var args = Buffer::new(original_length + 0x64)
         args.write(offset: 0, value: EIP1271_SELECTOR_WORD)
         args.write(offset: 4, value: original_digest)
         args.write(offset: 0x24, value: 0x40)
@@ -130,7 +130,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         )
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
-        let mut ret = MemBuffer::with_capacity(32)
+        var ret = MemBuffer::with_capacity(32)
         success = call
             .raw_staticcall(
                 addr: signer,

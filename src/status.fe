@@ -142,8 +142,8 @@ pub fn set_basic_order_filled(_ order_hash: u256) uses (ops: mut RawOps) {
 }
 
 fn gcd(_ a: u256, _ b: u256) -> u256 {
-    let mut x = a
-    let mut y = b
+    var x = a
+    var y = b
     while y != 0 {
         let c = y
         y = x % c
@@ -167,9 +167,9 @@ pub fn adjust_fill_fraction(_ raw_status: u256, numerator: u256, denominator: u2
     if filled_denominator == 0 {
         return (numerator, denominator)
     }
-    let mut filled_numerator = (raw_status >> 16) & MAX_UINT120
-    let mut num = numerator
-    let mut den = denominator
+    var filled_numerator = (raw_status >> 16) & MAX_UINT120
+    var num = numerator
+    var den = denominator
     if den == 1 {
         return (filled_denominator - filled_numerator, filled_denominator)
     }
@@ -217,9 +217,9 @@ uses (ops: mut RawOps)
         ops.sload(slot)
     }
     let filled_denominator = raw >> 136
-    let mut has_carry = false
-    let mut filled_numerator = numerator
-    let mut den = denominator
+    var has_carry = false
+    var filled_numerator = numerator
+    var den = denominator
     if filled_denominator != 0 {
         filled_numerator = (raw >> 16) & MAX_UINT120
         if den == filled_denominator {
@@ -400,7 +400,7 @@ pub fn prepare_tload_test() -> Address uses (create: mut Create) {
 /// Whether TLOAD works, by calling the probe contract with a tenth of the
 /// remaining gas.
 pub fn test_tload(_ probe: Address) -> bool uses (ctx: Ctx, call: Call) {
-    let mut ret = MemBuffer::empty()
+    var ret = MemBuffer::empty()
     call.raw_staticcall(
         addr: probe,
         gas: ctx.gas() / 10,

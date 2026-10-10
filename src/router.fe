@@ -115,14 +115,14 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
     let seaports = params.seaportContracts
     let order_params = params.advancedOrderParams
     let count = seaports.len()
-    let mut available_parts = DynVec<DynArray<bool>>::filled(count, value: DynArray<bool>::empty())
-    let mut execution_parts = DynVec<DynArray<Execution>>::filled(
+    var available_parts = DynVec<DynArray<bool>>::filled(count, value: DynArray<bool>::empty())
+    var execution_parts = DynVec<DynArray<Execution>>::filled(
         count,
         value: DynArray<Execution>::empty(),
     )
-    let mut i: u256 = 0
+    var i: u256 = 0
     let maximum_fulfilled = params.maximumFulfilled
-    let mut fulfillments_left = maximum_fulfilled
+    var fulfillments_left = maximum_fulfilled
     let recipient = if params.recipient.inner == 0 {
         ctx.caller()
     } else {
@@ -152,7 +152,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             execution_parts.set(index: i, value: executions)
             // Upstream only advances `j` for available orders, so an
             // unavailable order loops until the call runs out of gas.
-            let mut j: u256 = 0
+            var j: u256 = 0
             while j < available.len() {
                 if available.get(j) {
                     fulfillments_left = fulfillments_left.wrapping_sub(1)

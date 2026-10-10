@@ -18,7 +18,7 @@ use super::types::{CONTRACT, OFFER}
 /// `_applyCriteriaResolvers`
 pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     let total_orders = book.orders.len()
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < resolvers.list.len() {
         let resolver = resolvers.list[(i) as usize]
         if resolver.order_index >= total_orders {
@@ -54,7 +54,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     while i < total_orders {
         let order = ref book.orders[(i) as usize]
         if order.numerator != 0 {
-            let mut j: u256 = 0
+            var j: u256 = 0
             while j < order.consideration_len {
                 if requires_resolution(
                     ref book.items[(order.consideration_start + j) as usize],
@@ -107,8 +107,8 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
 pub fn verify_proof(leaf: u256, root: u256, proofs: MemArray<u256>, start: u256, len: u256) {
-    let mut computed = keccak_words([leaf])
-    let mut i: u256 = 0
+    var computed = keccak_words([leaf])
+    var i: u256 = 0
     while i < len {
         let element = proofs[(start + i) as usize]
         computed = if computed > element {

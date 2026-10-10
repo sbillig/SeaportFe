@@ -157,7 +157,7 @@ uses (ctx: Ctx)
 
 fn conduit_init_code_hash() -> u256 uses (ops: mut RawOps) {
     let len = <Conduit as Contract>::init_code_len()
-    let mut code = MemBuffer::with_capacity(len)
+    var code = MemBuffer::with_capacity(len)
     ops.codecopy(
         dest: mut code,
         dest_offset: 0,
@@ -333,8 +333,8 @@ uses (storage: RawStorage)
     let length = unsafe {
         storage.sload(channels_slot(conduit))
     }
-    let mut channels = MemVec<Address>::zeroed(length)
-    let mut i: u256 = 0
+    var channels = MemVec<Address>::zeroed(length)
+    var i: u256 = 0
     while i < length {
         channels
             .set(

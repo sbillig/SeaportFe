@@ -27,8 +27,8 @@ pub fn cancel(_ env: Env, orders: DynArray<OrderComponents>) -> bool
 uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
 {
     assert_non_reentrant(env)
-    let mut any_invalid = false
-    let mut i: u256 = 0
+    var any_invalid = false
+    var i: u256 = 0
     while i < orders.len() {
         let order = orders.get(i)
         if order.orderType == CONTRACT
@@ -58,7 +58,7 @@ pub fn validate(_ env: Env, orders: DynArray<Order>) -> bool
 uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
 {
     assert_non_reentrant(env)
-    let mut i: u256 = 0
+    var i: u256 = 0
     while i < orders.len() {
         let book = single_order(orders.get(i))
         let order = ref book.orders[(0) as usize]
