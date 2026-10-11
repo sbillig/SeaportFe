@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
 use std::abi::{Bytes32, DynArray, MemVec}
-use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
 use super::buffer::Buffer
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
@@ -26,7 +26,7 @@ use super::executor::{
 use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
 use super::model::{Book, Groups, Item, OrderState, Resolvers}
-use super::status::{clear_reentrancy_guard, set_reentrancy_guard, update_status}
+use super::status::{OrderStore, clear_reentrancy_guard, set_reentrancy_guard, update_status}
 use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER, ReceivedItem}
 use super::zone::{
     assert_restricted_advanced_order_validity,
@@ -71,7 +71,15 @@ pub fn validate_orders_and_prepare_to_fulfill(
     recipient: Address,
     non_match: bool,
 ) -> (MemArray<u256>, bool)
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     set_reentrancy_guard(env, accept_native_tokens: true)
     let total_orders = book.orders.len()
@@ -123,7 +131,7 @@ fn prepare_available_orders(
     revert_on_invalid: bool,
     recipient: Address,
 )
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let total_orders = book.orders.len()
     var remaining = maximum_fulfilled
@@ -162,7 +170,7 @@ fn validate_and_prepare_order(
     index: u256,
     revert_on_invalid: bool,
 ) -> (bool, bool)
-uses (ctx: Ctx, call: Call, ops: RawOps)
+uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     order_hashes[(index) as usize] = 0
     let (order_hash, numerator, denominator) = validate_order(
@@ -224,7 +232,7 @@ fn prepare_available_order(
     revert_on_invalid: bool,
     recipient: Address,
 ) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     if remaining == 0 {
         skip_available_order(mut book, mut order_hashes, index)
@@ -261,7 +269,7 @@ fn prepare_standard_available_order(
     revert_on_invalid: bool,
     recipient: Address,
 ) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let order_hash_slot = ref order_hashes[index as usize]
     let order_hash = order_hash_slot
@@ -290,7 +298,7 @@ fn prepare_contract_available_order(
     revert_on_invalid: bool,
     recipient: Address,
 ) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let generated = generate_order(book, order_index: index, revert_on_invalid)
     order_hashes[(index) as usize] = generated.order_hash
@@ -318,7 +326,7 @@ fn authorize_and_record(
     index: u256,
     revert_on_invalid: bool,
 ) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = ref book.orders[(index) as usize]
     let authorized = check_restricted_advanced_order_authorization(
@@ -362,7 +370,15 @@ pub fn fulfill_available_advanced_orders(
     recipient: Address,
     maximum_fulfilled: u256,
 ) -> (DynArray<bool>, DynArray<Execution>)
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     let (order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
         env,
@@ -446,7 +462,15 @@ pub fn match_advanced_orders(
     fulfillments: Groups,
     recipient: Address,
 ) -> DynArray<Execution>
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     let maximum_fulfilled = book.orders.len()
     let (order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
@@ -499,7 +523,13 @@ fn perform_final_checks_and_execute_orders(
     recipient: Address,
     contains_non_open: bool,
 ) -> MemArray<bool>
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+uses (
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+)
 {
     let total_orders = book.orders.len()
     var available = MemArray<bool>::new_zeroed(total_orders)

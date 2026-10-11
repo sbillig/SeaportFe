@@ -3,8 +3,8 @@
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
 use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes32, DynArray, MemVec}
-use std::evm::{Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
+use std::abi::{Bytes, Bytes32, MemVec}
+use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
 use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
@@ -34,6 +34,7 @@ use super::hashing::{CONSIDERATION_ITEM_TYPEHASH, Env, OFFER_ITEM_TYPEHASH, ORDE
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::signature::verify_signature
 use super::status::{
+    OrderStore,
     clear_reentrancy_guard,
     get_counter,
     read_status,
@@ -116,7 +117,15 @@ fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
 
 /// `_validateAndFulfillBasicOrder`
 pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     let basic_order_type = cd(BASIC_ORDER_TYPE)
     let order_type = basic_order_type & 3
@@ -233,7 +242,15 @@ fn prepare_basic_fulfillment_from_calldata(
     additional_recipients_token: Address,
     offered_item_type: u256,
 ) -> u256
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     set_reentrancy_guard(env, accept_native_tokens: false)
     assert_valid_basic_order_parameters()

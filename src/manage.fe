@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
 use std::abi::{Bytes32, DynArray}
-use std::evm::{Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{TSlot, Call, Ctx, Log, RawOps, revert_error}
 use super::errors::{
     CannotCancelOrder,
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -13,6 +13,7 @@ use super::hashing::{Env, derive_components_hash}
 use super::model::single_order
 use super::signature::verify_signature
 use super::status::{
+    OrderStore,
     assert_non_reentrant,
     read_status,
     set_cancelled,
@@ -24,7 +25,13 @@ use super::types::{CONTRACT, Order, OrderComponents}
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled.
 pub fn cancel(_ env: Env, orders: DynArray<OrderComponents>) -> bool
-uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: u256,
+    transient_guard: TSlot<u256>,
+    ctx: Ctx,
+    log: mut Log,
+)
 {
     assert_non_reentrant(env)
     var any_invalid = false
@@ -55,7 +62,15 @@ uses (ctx: Ctx, ops: mut RawOps, log: mut Log)
 /// `_validate`: mark signed orders as validated so that later fulfillments
 /// skip signature verification.
 pub fn validate(_ env: Env, orders: DynArray<Order>) -> bool
-uses (ctx: Ctx, call: Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: u256,
+    transient_guard: TSlot<u256>,
+    ctx: Ctx,
+    call: Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     assert_non_reentrant(env)
     var i: u256 = 0

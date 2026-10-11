@@ -45,7 +45,7 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe's mutable value semantics (MVS) branch at
-`c329ceff361ae1e26d3b9a07358146bb53faa3b2`. Its committed Sonatina revision
+`d6c0f863ef8d25d990ee3684e795c4f67fdeeee0`. Its committed Sonatina revision
 `601010bc9364276e598143ebb5749f8273832df6` currently prevents a clean compiler
 build: Fe imports `EvmKeccak256Words`, which that dependency lacks. The
 compiler pin must be fixed before the draft bootstrap can build successfully.
@@ -56,7 +56,7 @@ with an isolated build of this MVS revision, which uses Sonatina
 `361e0e86a88413f12e0ef1cb16b7ef75bbb10034` through local path dependencies.
 The current MVS build passes all 482 Foundry tests (1,000 cases per fuzz
 test) and all 402 Hardhat tests, with the upstream one pending test. All eight
-contract ABIs are identical to the initial MVS migration.
+contracts retain the same ABI entry sets as the initial MVS migration.
 
 The source baseline is SeaportFe `6ffc19564ecc3121bfbf0cc7752b9c7a81cb7eea`,
 which passes `fe check` and builds all eight contracts on Fe master
@@ -73,9 +73,15 @@ signatures and extra data, and helpers use scoped MVS views or explicit mutable
 parameters. Generated orders replace the item pool
 in place. DynVec builds nested ABI arrays; exact protocol encoders use a
 checked, initialized owning byte buffer. Copyable raw pool and byte handles
-have been removed. Explicit unsafe blocks fell from 333 to 72: three implement
-the checked byte boundary, and the rest access the fixed Solidity storage
-layout.
+have been removed. Explicit unsafe blocks fell from 333 to three, all inside
+the checked byte boundary in `buffer.fe`. Storage uses declared owners:
+`OrderStore` at slot 0 contains the counter, status and nonce mappings;
+conduits use a rooted map and `SolEnumerableSet` for their channel registry;
+zones retain their exact packed words. Persistent and transient guard fields
+share the protocol's numeric slot in their respective address spaces. The
+guard takes short accesses before and after external calls, and its constructor
+probe uses an initialized word array. No application raw storage operations or
+copyable raw owner handles remain.
 `COMPILER_FIXES.md` and `compiler/seaport-integration.patch` describe the
 historical toolchain; neither is used to build this branch.
 
@@ -93,7 +99,27 @@ Seaport's own test suites run against the Fe bytecode:
 - `scripts/compare_abi.py` compares the Fe JSON ABIs with the Solidity
   artifacts (functions with outputs and mutability, events, errors).
 
-Current MVS verification uses Fe c329ceff3 / Sonatina 361e0e86 at `-O1`.
+`tests/rooted-storage.cjs` additionally compares exact map/record/array slots,
+packed status and zone updates, channel swap/removal and ownership, and both
+guard modes against the pinned Solidity artifacts. It records receipt gas for
+identical calls. The fallback case changes only test initcode's feature-probe
+payload to INVALID; production bytecode is unchanged. This exercises fallback
+on the compiler's supported Cancun target instead of trying to deploy Cancun
+instructions on an older fork. It then changes the deployed test probe to STOP
+to exercise activation. After compiling the reference artifacts and building
+Fe contracts into `build/fe`, run:
+
+```sh
+cd reference/seaport
+./node_modules/.bin/hardhat run --no-compile --config ../../tests/hardhat.config.ts ../../tests/rooted-storage.cjs
+```
+
+Set `SEAPORT_VARIANTS` to a JSON array of `[label, Fe build directory]` pairs
+(use `null` for pinned Solidity) to compare multiple Fe builds. Set
+`SEAPORT_REPORT` to save the gas results as JSON. Each variant and guard mode
+starts from a fresh chain.
+
+Current MVS verification uses Fe d6c0f863e / Sonatina 361e0e86 at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
 initial MVS port. The full upstream results match the documented pre-MVS
 results:
@@ -123,13 +149,14 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: this MVS build has a 57,412-byte Seaport runtime and a
-  57,418-byte Consideration runtime, above the 24 KB EIP-170 limit
-  (ISSUES.md #13). Both test scripts lift the size limit. The eight-contract
-  build uses Fe c329ceff3 / archived Sonatina 361e0e86 at `-O1`; periphery
-  runtimes are 4,815 to 13,466 bytes. Consideration grew from 49,815 bytes
-  on Fe 169ed8ce3 to 57,418 with this compiler update and the equivalent
-  `var` syntax. The compiler change responsible has not been isolated.
+- Code size: this MVS build has a 57,681-byte Seaport runtime and a
+  57,687-byte Consideration runtime, above the 24 KB EIP-170 limit
+  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe d6c0f863e /
+  archived Sonatina 361e0e86 at `-O1` produces periphery runtimes of 4,815 to
+  13,508 bytes. The previous raw-storage source on the same compiler produces
+  57,412-byte Seaport and 57,418-byte Consideration runtimes. The earlier
+  compiler-update growth from 49,815 bytes on Fe 169ed8ce3 to 57,418 on
+  c329ceff3 remains unexplained; it is separate from this storage refactor.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. The current upstream behavioral suites, including gas-budget
   cases, pass. The following pre-MVS measurements are historical; these calls
@@ -149,6 +176,33 @@ order entry points and the conduit batch functions use numeric selectors
   Most of the difference is fixed cost per call: ABI decoding into the
   in-memory order model and memory management, where seaport-core works on
   calldata pointers directly.
+
+  The rooted-storage differential benchmark compares the raw source at
+  d176b8c and this refactor, both built with d6c0f863e / Sonatina 361e0e86.
+  Transaction receipt gas includes the same calldata and intrinsic costs:
+
+  | Call | Raw storage | Rooted owners | Change |
+  | --- | ---: | ---: | ---: |
+  | Validate one order | 56,217 | 55,893 | -324 |
+  | Fulfill one advanced ERC721/native order | 128,666 | 128,857 | +191 |
+  | Open a channel | 120,442 | 120,635 | +193 |
+  | Cancel one order | 38,773 | 38,859 | +86 |
+  | Increment counter | 28,110 | 28,116 | +6 |
+
+  These are focused cases, not an overall gas claim. Cancel and validate use
+  empty item arrays; fulfillment uses one ERC721 and one native consideration
+  item. In each case the caller is the offerer, skipping signature checks.
+  Scoped entries avoid
+  repeated map lookup work within a phase. Further gains need the std map's
+  fixed-word keys to use the existing value-level word hash; its current
+  encoder allocates a preimage for each lookup.
+- MVS currently rejects generic `Ctx`/`Log` effects while a mutable storage
+  entry is open, although the equivalent contract-handler body passes. The
+  controller snapshots context before opening entries and closes them before
+  logging, preserving event/write ordering. The issue was reproduced on
+  d6c0f863e; no compiler or std source was changed. Explicit ABI view annotation
+  would also let `getOrderHash` match Solidity without retaining a read-only
+  context grant purely for ABI classification.
 - The SeaportValidator and SeaportNavigator helpers (off-chain view
   contracts in `contracts/helpers/`) are not ported; the Foundry tests that
   use them deploy the Solidity versions.

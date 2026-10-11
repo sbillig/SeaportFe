@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
 use std::abi::{Bytes32, DynArray, MemVec}
-use std::evm::{Address, Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
 use super::buffer::Buffer
 use super::amount::apply_fraction
 use core::ptr::MemArray
@@ -28,11 +28,12 @@ use super::hashing::{Env, derive_order_hash}
 use super::model::{Book, Item, OrderState, Resolvers}
 use super::signature::verify_signature
 use super::status::{
+    OrderStore,
     adjust_fill_fraction,
     clear_reentrancy_guard,
     get_counter,
     set_reentrancy_guard,
-    status_slot,
+    raw_status,
     unpack_status,
     update_status,
     verify_order_status,
@@ -58,7 +59,7 @@ uses (ctx: Ctx)
 
 /// `_assertConsiderationLengthAndGetOrderHash`
 pub fn consideration_length_checked_order_hash(_ book: Book, order: OrderState) -> u256
-uses (ops: RawOps)
+uses (store: OrderStore)
 {
     if order.consideration_len < order.total_original {
         revert_error(MissingOriginalConsiderationItems {})
@@ -74,7 +75,7 @@ pub fn validate_order(_ env: Env, book: Book, order: OrderState, revert_on_inval
     u256,
     u256,
 )
-uses (ctx: Ctx, call: Call, ops: RawOps)
+uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     if !verify_time(
         start_time: order.start_time,
@@ -98,9 +99,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         revert_error(PartialFillsNotEnabledForOrder {})
     }
     let order_hash = consideration_length_checked_order_hash(book, order)
-    let raw_status = unsafe {
-        ops.sload(status_slot(order_hash))
-    }
+    let raw_status = raw_status(order_hash)
     let status = unpack_status(raw_status)
     if !verify_order_status(
         order_hash,
@@ -382,7 +381,15 @@ pub fn validate_and_fulfill_advanced_order(
     fulfiller_conduit_key: u256,
     recipient: Address,
 ) -> bool
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (
+    store: mut OrderStore,
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+    log: mut Log,
+)
 {
     let order_type = book.orders[(0) as usize].order_type
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
@@ -402,7 +409,7 @@ fn fulfill_single_order(
     fulfiller_conduit_key: u256,
     recipient: Address,
 )
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let (order_hash, fill_numerator, fill_denominator) = prepare_single_order(
         env,
@@ -427,7 +434,7 @@ fn fulfill_single_contract_order(
     fulfiller_conduit_key: u256,
     recipient: Address,
 )
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let _ = prepare_single_order(env, mut book, resolvers, recipient)
     let generated = generate_order(book, order_index: 0, revert_on_invalid: true)
@@ -447,7 +454,7 @@ fn prepare_single_order(_ env: Env, book: mut Book, resolvers: Resolvers, recipi
     u256,
     u256,
 )
-uses (ctx: Ctx, call: Call, ops: RawOps)
+uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
@@ -473,7 +480,7 @@ fn authorize_single_order(
     fill_numerator: u256,
     fill_denominator: u256,
 )
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     var order_hashes = MemArray<u256>::new_zeroed(1)
     order_hashes[(0) as usize] = 0

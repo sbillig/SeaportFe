@@ -4,20 +4,18 @@
 use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol}
 use std::abi::sol::decode_output
-use std::evm::{Address, Call, Create, Ctx, RawOps, revert_error}
+use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error}
 use super::hashing::Env
 use super::buffer::return_word
 use super::seaport::SeaportMsg
 use super::status::{
-    NOT_ENTERED_SSTORE,
     REENTRANCY_GUARD_SLOT,
     activate_tstore,
     clear_reentrancy_guard,
-    prepare_tload_test,
     set_reentrancy_guard,
-    test_tload,
+    setup_reentrancy_guard,
 }
-use super::errors::{NoSpecifiedOrdersAvailable, TloadTestContractDeploymentFailed}
+use super::errors::{NoSpecifiedOrdersAvailable}
 use super::types::{AdvancedOrder, CriteriaResolver, Execution, FulfillmentComponent}
 
 #[abi]
@@ -70,18 +68,9 @@ impl Copy for RouterEnv {}
 
 /// Constructor, including the inherited ReentrancyGuard constructor.
 pub fn setup(seaport_v1_5: Address, seaport_v1_6: Address) -> RouterEnv
-uses (ctx: Ctx, call: Call, create: mut Create, ops: mut RawOps)
+uses (guard_state: mut u256, ctx: Ctx, call: Call, create: mut Create)
 {
-    let tload_test_contract = prepare_tload_test()
-    if tload_test_contract.inner == 0 {
-        revert_error(TloadTestContractDeploymentFailed {})
-    }
-    let tstore_initial_support = test_tload(tload_test_contract)
-    if !tstore_initial_support {
-        unsafe {
-            ops.sstore(slot: REENTRANCY_GUARD_SLOT, value: NOT_ENTERED_SSTORE)
-        }
-    }
+    let (tstore_initial_support, tload_test_contract) = setup_reentrancy_guard()
     RouterEnv {
         seaport_v1_5,
         seaport_v1_6,
@@ -109,7 +98,13 @@ pub fn fulfill_available_advanced_orders(
     _ env: RouterEnv,
     params: FulfillAvailableAdvancedOrdersParams,
 ) -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>)
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+uses (
+    guard_state: mut u256,
+    transient_guard: mut TSlot<u256>,
+    ctx: Ctx,
+    call: mut Call,
+    ops: mut RawOps,
+)
 {
     set_reentrancy_guard(env.guard, accept_native_tokens: true)
     let seaports = params.seaportContracts
@@ -210,9 +205,13 @@ pub fn get_allowed_seaport_contracts(_ env: RouterEnv) -> DynArray<Address> {
 
 pub contract SeaportRouter {
     env: RouterEnv,
+    #[slot(REENTRANCY_GUARD_SLOT)]
+    mut guard_state: u256,
+    #[slot(REENTRANCY_GUARD_SLOT)]
+    mut transient_guard: TSlot<u256>,
 
     init(seaportV1point5: Address, seaportV1point6: Address)
-    uses (mut env, ctx: Ctx, call: Call, create: mut Create, ops: mut RawOps)
+    uses (mut guard_state, mut env, ctx: Ctx, call: Call, create: mut Create)
     {
         env = setup(
             seaport_v1_5: seaportV1point5,
@@ -226,7 +225,7 @@ pub contract SeaportRouter {
             DynArray<DynArray<bool>>,
             DynArray<DynArray<Execution>>,
         )
-        uses (env, ctx: Ctx, call: mut Call, ops: mut RawOps)
+        uses (mut guard_state, mut transient_guard, env, ctx: Ctx, call: mut Call, ops: mut RawOps)
         {
             fulfill_available_advanced_orders(env, params)
         }
@@ -235,7 +234,7 @@ pub contract SeaportRouter {
         {
             get_allowed_seaport_contracts(env)
         }
-        SeaportRouterMsg::ActivateTstore {} uses (env, ctx: Ctx, call: Call, ops: mut RawOps) {
+        SeaportRouterMsg::ActivateTstore {} uses (mut guard_state, env, ctx: Ctx, call: Call) {
             activate_tstore(env.guard)
         }
         #[payable]

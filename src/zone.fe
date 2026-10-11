@@ -2,6 +2,7 @@
 // ZoneInteraction, the contract order parts of OrderValidator and the zone
 // and contract offerer calldata encodings of ConsiderationEncoder and
 // ConsiderationDecoder.
+use super::status::OrderStore
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes32}
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
@@ -441,7 +442,7 @@ impl Copy for GeneratedOrder {}
 /// Validation reads the current pool; installation then replaces the owned
 /// item allocation and updates this order's ranges under exclusive Book access.
 pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) -> GeneratedOrder
-uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
+uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = ref book.orders[(order_index) as usize]
     if order.consideration_len != order.total_original {
