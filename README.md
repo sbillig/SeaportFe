@@ -45,7 +45,8 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe's mutable value semantics (MVS) branch at
-`d6c0f863ef8d25d990ee3684e795c4f67fdeeee0`. Its committed Sonatina revision
+`420a3bd52e1f743c0b836d2de94bf007301ebd01` (currently local, not pushed).
+Its committed Sonatina revision
 `601010bc9364276e598143ebb5749f8273832df6` currently prevents a clean compiler
 build: Fe imports `EvmKeccak256Words`, which that dependency lacks. The
 compiler pin must be fixed before the draft bootstrap can build successfully.
@@ -100,8 +101,8 @@ Seaport's own test suites run against the Fe bytecode:
   artifacts (functions with outputs and mutability, events, errors).
 
 `tests/rooted-storage.cjs` additionally compares exact map/record/array slots,
-packed status and zone updates, channel swap/removal and ownership, and both
-guard modes against the pinned Solidity artifacts. It records receipt gas for
+packed status and zone updates, channel swap/removal and ownership events,
+and both guard modes against the pinned Solidity artifacts. It records receipt gas for
 identical calls. The fallback case changes only test initcode's feature-probe
 payload to INVALID; production bytecode is unchanged. This exercises fallback
 on the compiler's supported Cancun target instead of trying to deploy Cancun
@@ -117,9 +118,12 @@ cd reference/seaport
 Set `SEAPORT_VARIANTS` to a JSON array of `[label, Fe build directory]` pairs
 (use `null` for pinned Solidity) to compare multiple Fe builds. Set
 `SEAPORT_REPORT` to save the gas results as JSON. Each variant and guard mode
-starts from a fresh chain.
+starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
+`keccak256(conduit, 0)` map preimages and assert log/write ordering for
+transfer, cancellation and acceptance. The test compares full event bytes
+and checks that each event precedes its corresponding storage write.
 
-Current MVS verification uses Fe d6c0f863e / Sonatina 361e0e86 at `-O1`.
+Current MVS verification uses Fe 420a3bd52 / Sonatina 361e0e86 at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
 initial MVS port. The full upstream results match the documented pre-MVS
 results:
@@ -149,13 +153,13 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: this MVS build has a 57,681-byte Seaport runtime and a
-  57,687-byte Consideration runtime, above the 24 KB EIP-170 limit
-  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe d6c0f863e /
+- Code size: this MVS build has a 57,674-byte Seaport runtime and a
+  57,680-byte Consideration runtime, above the 24 KB EIP-170 limit
+  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe 420a3bd52 /
   archived Sonatina 361e0e86 at `-O1` produces periphery runtimes of 4,815 to
-  13,508 bytes. The previous raw-storage source on the same compiler produces
-  57,412-byte Seaport and 57,418-byte Consideration runtimes. The earlier
-  compiler-update growth from 49,815 bytes on Fe 169ed8ce3 to 57,418 on
+  13,508 bytes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
+  produced 57,412/57,681-byte Seaport and 57,418/57,687-byte Consideration
+  runtimes. The earlier compiler-update growth from 49,815 bytes on Fe 169ed8ce3 to 57,418 on
   c329ceff3 remains unexplained; it is separate from this storage refactor.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. The current upstream behavioral suites, including gas-budget
@@ -177,8 +181,9 @@ order entry points and the conduit batch functions use numeric selectors
   in-memory order model and memory management, where seaport-core works on
   calldata pointers directly.
 
-  The rooted-storage differential benchmark compares the raw source at
-  d176b8c and this refactor, both built with d6c0f863e / Sonatina 361e0e86.
+  The prior rooted-storage differential benchmark compared the raw source at
+  d176b8c and rooted owners at efd2b89, both built with d6c0f863e / Sonatina
+  361e0e86.
   Transaction receipt gas includes the same calldata and intrinsic costs:
 
   | Call | Raw storage | Rooted owners | Change |
@@ -196,13 +201,27 @@ order entry points and the conduit batch functions use numeric selectors
   repeated map lookup work within a phase. Further gains need the std map's
   fixed-word keys to use the existing value-level word hash; its current
   encoder allocates a preimage for each lookup.
-- MVS currently rejects generic `Ctx`/`Log` effects while a mutable storage
-  entry is open, although the equivalent contract-handler body passes. The
-  controller snapshots context before opening entries and closes them before
-  logging, preserving event/write ordering. The issue was reproduced on
-  d6c0f863e; no compiler or std source was changed. Explicit ABI view annotation
-  would also let `getOrderHash` match Solidity without retaining a read-only
-  context grant purely for ABI classification.
+  Fe 420a3bd52 fixes the generic `Ctx`/`Log` conflict. Ownership helpers now
+  keep one mutable entry across caller reads, logs and writes in Solidity's
+  order. Accesses still close before external calls. Both efd2b89 and the
+  updated source were rebuilt with this compiler and Sonatina 361e0e86:
+
+  | Ownership call | efd2b89 gas | Current gas | Map hashes, before → after |
+  | --- | ---: | ---: | ---: |
+  | Transfer | 49,956 | 49,882 | 2 → 1 |
+  | Cancel transfer | 27,701 | 27,635 | 2 → 1 |
+  | Accept | 32,438 | 32,315 | 3 → 1 |
+
+  The hash counts come from exact 64-byte controller map preimages in EVM
+  traces. The same savings hold in both guard modes. Channel open/remove save
+  6/5 gas; the other measured calls are unchanged. ConduitController shrinks
+  from 8,522 to 8,467 runtime bytes. Comparing efd2b89 under d6c0f863e and
+  420a3bd52 shows unchanged receipt gas in these cases and a separate seven
+  byte reduction in Seaport and Consideration. No operand-order rejections
+  occurred in either source version. Full evidence is recorded in
+  `build/sealed-capabilities-420/validation.json`.
+- Explicit ABI view annotation would let `getOrderHash` match Solidity without
+  retaining a read-only context grant purely for ABI classification.
 - The SeaportValidator and SeaportNavigator helpers (off-chain view
   contracts in `contracts/helpers/`) are not ported; the Foundry tests that
   use them deploy the Solidity versions.

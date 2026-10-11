@@ -28,9 +28,76 @@ async function run(label, build, fallback) {
   await network.provider.send("hardhat_reset");
   const [owner, next, a, b, c] = await ethers.getSigners();
   const gas = {};
+  const hashes = {};
   async function tx(name, pending) {
     const receipt = await (await pending).wait();
     gas[name] = receipt.gasUsed.toNumber();
+    if (name.endsWith("ConduitOwner")) {
+      const cleared =
+        name === "cancelConduitOwner" || name === "acceptConduitOwner";
+      const events = [
+        controller.interface.encodeEventLog(
+          controller.interface.getEvent("PotentialOwnerUpdated"),
+          [cleared ? ethers.constants.AddressZero : next.address]
+        ),
+      ];
+      if (name === "acceptConduitOwner")
+        events.push(
+          controller.interface.encodeEventLog(
+            controller.interface.getEvent("OwnershipTransferred"),
+            [addr, owner.address, next.address]
+          )
+        );
+      assert.deepEqual(
+        receipt.logs.map(({ topics, data }) => ({ topics, data })),
+        events
+      );
+    }
+    if (process.env.SEAPORT_TRACE_HASHES && name.endsWith("ConduitOwner")) {
+      const trace = await network.provider.send("debug_traceTransaction", [
+        receipt.transactionHash,
+        { disableStorage: true },
+      ]);
+      assert.equal(trace.failed, false);
+      const expectedPreimage = abi
+        .encode(["address", "uint256"], [addr, 0])
+        .slice(2)
+        .toLowerCase();
+      const operations = [];
+      let total = 0;
+      let controllerMap = 0;
+      for (const step of trace.structLogs) {
+        if (step.depth !== 1) continue;
+        if (step.op === "KECCAK256" || step.op === "SHA3") {
+          total++;
+          const offset = parseInt(step.stack.at(-1), 16);
+          const size = parseInt(step.stack.at(-2), 16);
+          if (
+            size === 64 &&
+            step.memory
+              .join("")
+              .slice(offset * 2, (offset + size) * 2)
+              .toLowerCase() === expectedPreimage
+          )
+            controllerMap++;
+        } else if (step.op.startsWith("LOG")) {
+          operations.push(step.op);
+        } else if (step.op === "SSTORE") {
+          const slot = BN.from("0x" + step.stack.at(-1));
+          assert(slot.eq(base.add(1)) || slot.eq(base.add(2)));
+          operations.push(
+            slot.eq(base.add(1)) ? "writeOwner" : "writePotentialOwner"
+          );
+        }
+      }
+      assert.deepEqual(
+        operations,
+        name === "acceptConduitOwner"
+          ? ["LOG2", "writePotentialOwner", "LOG4", "writeOwner"]
+          : ["LOG2", "writePotentialOwner"]
+      );
+      hashes[name] = { total, controllerMap, operations };
+    }
     return receipt;
   }
   async function deploy(name, args = []) {
@@ -148,8 +215,21 @@ async function run(label, build, fallback) {
   );
   await tx("reopenChannel", controller.updateChannel(addr, b.address, true));
   assert.deepEqual(await controller.getChannels(addr), [b.address]);
+  await reverts(
+    controller,
+    "cancelOwnershipTransfer",
+    [addr],
+    "NoPotentialOwnerCurrentlySet(address)"
+  );
   await tx(
     "transferConduitOwner",
+    controller.transferOwnership(addr, next.address)
+  );
+  assert((await read(controller.address, base.add(2))).eq(next.address));
+  await tx("cancelConduitOwner", controller.cancelOwnershipTransfer(addr));
+  assert((await read(controller.address, base.add(2))).isZero());
+  await tx(
+    "restartConduitOwner",
     controller.transferOwnership(addr, next.address)
   );
   assert((await read(controller.address, base.add(2))).eq(next.address));
@@ -337,7 +417,7 @@ async function run(label, build, fallback) {
     assert(persistent.isZero());
     await reverts(seaport, "__activateTstore", [], "TStoreAlreadyActivated()");
   }
-  return { label, fallback, gas };
+  return { label, fallback, gas, hashes };
 }
 
 async function main() {

@@ -114,9 +114,9 @@ impl ConduitProperties {
         }
     }
 
-    fn assert_owner(self, _ conduit: Address, caller: Address) {
+    fn assert_owner(self, _ conduit: Address) uses (ctx: Ctx) {
         self.assert_exists()
-        if caller.inner != self.owner {
+        if ctx.caller().inner != self.owner {
             revert_error(CallerIsNotOwner { conduit })
         }
     }
@@ -173,11 +173,9 @@ uses (
         revert_error(ConduitAlreadyExists { conduit })
     }
     create.create2<Conduit>(value: 0, args: (), salt: conduit_key)
-    {
-        let properties = mut conduits[conduit]
-        properties.owner = initial_owner.inner
-        properties.key = conduit_key
-    }
+    let properties = mut conduits[conduit]
+    properties.owner = initial_owner.inner
+    properties.key = conduit_key
     log.emit(
         NewConduit { conduit, conduitKey: Bytes32 { val: conduit_key } },
     )
@@ -190,10 +188,9 @@ uses (
 pub fn update_channel(_ conduit: Address, channel: Address, is_open: bool)
 uses (ctx: Ctx, call: mut Call, conduits: mut StorageMap<Address, ConduitProperties>)
 {
-    let caller = ctx.caller()
     {
         let properties = ref conduits[conduit]
-        properties.assert_owner(conduit, caller)
+        properties.assert_owner(conduit)
     }
     conduit.call(ConduitMsg::UpdateChannel { channel, isOpen: is_open })
     // Acquire the entry only after the external conduit has accepted the
@@ -209,62 +206,56 @@ uses (ctx: Ctx, call: mut Call, conduits: mut StorageMap<Address, ConduitPropert
 pub fn transfer_ownership(_ conduit: Address, new_potential_owner: Address)
 uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut Log)
 {
-    let caller = ctx.caller()
-    {
-        let properties = ref conduits[conduit]
-        properties.assert_owner(conduit, caller)
-        if new_potential_owner.inner == 0 {
-            revert_error(NewPotentialOwnerIsZeroAddress { conduit })
-        }
-        if new_potential_owner.inner == properties.potential_owner {
-            revert_error(
-                NewPotentialOwnerAlreadySet { conduit, newPotentialOwner: new_potential_owner },
-            )
-        }
+    let properties = mut conduits[conduit]
+    properties.assert_owner(conduit)
+    if new_potential_owner.inner == 0 {
+        revert_error(NewPotentialOwnerIsZeroAddress { conduit })
+    }
+    if new_potential_owner.inner == properties.potential_owner {
+        revert_error(
+            NewPotentialOwnerAlreadySet { conduit, newPotentialOwner: new_potential_owner },
+        )
     }
     log.emit(
         PotentialOwnerUpdated { newPotentialOwner: new_potential_owner },
     )
-    conduits[conduit].potential_owner = new_potential_owner.inner
+    properties.potential_owner = new_potential_owner.inner
 }
 
 pub fn cancel_ownership_transfer(_ conduit: Address)
 uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut Log)
 {
-    let caller = ctx.caller()
-    {
-        let properties = ref conduits[conduit]
-        properties.assert_owner(conduit, caller)
-        if properties.potential_owner == 0 {
-            revert_error(NoPotentialOwnerCurrentlySet { conduit })
-        }
+    let properties = mut conduits[conduit]
+    properties.assert_owner(conduit)
+    if properties.potential_owner == 0 {
+        revert_error(NoPotentialOwnerCurrentlySet { conduit })
     }
     log.emit(
         PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
     )
-    conduits[conduit].potential_owner = 0
+    properties.potential_owner = 0
 }
 
 pub fn accept_ownership(_ conduit: Address)
 uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut Log)
 {
-    let caller = ctx.caller()
-    let previous_owner = {
-        let properties = ref conduits[conduit]
-        properties.assert_exists()
-        if caller.inner != properties.potential_owner {
-            revert_error(CallerIsNotNewPotentialOwner { conduit })
-        }
-        Address { inner: properties.owner }
+    let properties = mut conduits[conduit]
+    properties.assert_exists()
+    if ctx.caller().inner != properties.potential_owner {
+        revert_error(CallerIsNotNewPotentialOwner { conduit })
     }
     log.emit(
         PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
     )
-    conduits[conduit].potential_owner = 0
+    properties.potential_owner = 0
     log.emit(
-        OwnershipTransferred { conduit, previousOwner: previous_owner, newOwner: caller },
+        OwnershipTransferred {
+            conduit,
+            previousOwner: Address { inner: properties.owner },
+            newOwner: ctx.caller(),
+        },
     )
-    conduits[conduit].owner = caller.inner
+    properties.owner = ctx.caller().inner
 }
 
 pub fn get_channels(_ conduit: Address) -> DynArray<Address>
