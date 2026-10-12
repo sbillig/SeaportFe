@@ -28,10 +28,16 @@ async function run(label, build, fallback) {
   await network.provider.send("hardhat_reset");
   const [owner, next, a, b, c] = await ethers.getSigners();
   const gas = {};
+  const intrinsicGas = {};
   const hashes = {};
   async function tx(name, pending) {
-    const receipt = await (await pending).wait();
+    const transaction = await pending;
+    const receipt = await transaction.wait();
     gas[name] = receipt.gasUsed.toNumber();
+    intrinsicGas[name] = (transaction.data.slice(2).match(/../g) ?? []).reduce(
+      (sum, byte) => sum + (byte === "00" ? 4 : 16),
+      21000
+    );
     if (name.endsWith("ConduitOwner")) {
       const cleared =
         name === "cancelConduitOwner" || name === "acceptConduitOwner";
@@ -417,7 +423,25 @@ async function run(label, build, fallback) {
     assert(persistent.isZero());
     await reverts(seaport, "__activateTstore", [], "TStoreAlreadyActivated()");
   }
-  return { label, fallback, gas, hashes };
+  // Send view calls as transactions to measure cold execution plus intrinsic
+  // gas. Keep these last so earlier receipts remain comparable to prior runs.
+  for (const [name, contract, method, args] of [
+    ["getCounter", seaport, "getCounter", [owner.address]],
+    ["getOrderStatus", seaport, "getOrderStatus", [word(1)]],
+    ["getName", seaport, "name", []],
+    ["getOwnerOf", controller, "ownerOf", [addr]],
+    ["getZoneOperator", zone, "operator", []],
+    ["getZonePaused", zone, "isPaused", []],
+  ]) {
+    await tx(
+      name,
+      owner.sendTransaction({
+        to: contract.address,
+        data: contract.interface.encodeFunctionData(method, args),
+      })
+    );
+  }
+  return { label, fallback, gas, intrinsicGas, hashes };
 }
 
 async function main() {

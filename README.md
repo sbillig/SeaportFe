@@ -45,16 +45,17 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe's mutable value semantics (MVS) branch at
-`420a3bd52e1f743c0b836d2de94bf007301ebd01` (currently local, not pushed).
-Its committed Sonatina revision
-`601010bc9364276e598143ebb5749f8273832df6` currently prevents a clean compiler
-build: Fe imports `EvmKeccak256Words`, which that dependency lacks. The
-compiler pin must be fixed before the draft bootstrap can build successfully.
-No compiler patches or dependency overrides are applied by the bootstrap.
+`093ff36d546844a943c4be58da040d2e65f4bb8e` (currently local, not pushed).
+It commits Sonatina main `11722eacb49ce1f565191145d290bd25618c7342`.
+The isolated compiler build uses the committed manifest and lockfile with
+`cargo build --offline --locked --release -p fe`: no dependency substitutions
+or compiler patches. The previous Sonatina 361e0e86 path override is no longer
+needed. Cargo metadata confirms that all Sonatina packages use the pinned
+Git source, and every compiler source file, including Cargo.toml/Cargo.lock,
+is verified against the commit archive.
 
 The source migration builds all eight contracts and passes all twelve Fe tests
-with an isolated build of this MVS revision, which uses Sonatina
-`361e0e86a88413f12e0ef1cb16b7ef75bbb10034` through local path dependencies.
+with this pinned compiler.
 The current MVS build passes all 482 Foundry tests (1,000 cases per fuzz
 test) and all 402 Hardhat tests, with the upstream one pending test. All eight
 contracts retain the same ABI entry sets as the initial MVS migration.
@@ -102,9 +103,10 @@ Seaport's own test suites run against the Fe bytecode:
 
 `tests/rooted-storage.cjs` additionally compares exact map/record/array slots,
 packed status and zone updates, channel swap/removal and ownership events,
-and both guard modes against the pinned Solidity artifacts. It records receipt gas for
-identical calls. The fallback case changes only test initcode's feature-probe
-payload to INVALID; production bytecode is unchanged. This exercises fallback
+and both guard modes against the pinned Solidity artifacts. It records receipt
+gas for identical calls, including cold getters sent as transactions. The
+fallback case changes only test initcode's feature-probe payload to INVALID;
+production bytecode is unchanged. This exercises fallback
 on the compiler's supported Cancun target instead of trying to deploy Cancun
 instructions on an older fork. It then changes the deployed test probe to STOP
 to exercise activation. After compiling the reference artifacts and building
@@ -123,7 +125,7 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Current MVS verification uses Fe 420a3bd52 / Sonatina 361e0e86 at `-O1`.
+Current MVS verification uses Fe 093ff36d5 / Sonatina 11722eac at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
 initial MVS port. The full upstream results match the documented pre-MVS
 results:
@@ -153,14 +155,15 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: this MVS build has a 57,674-byte Seaport runtime and a
-  57,680-byte Consideration runtime, above the 24 KB EIP-170 limit
-  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe 420a3bd52 /
-  archived Sonatina 361e0e86 at `-O1` produces periphery runtimes of 4,815 to
-  13,508 bytes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
+- Code size: this MVS build has a 57,600-byte Seaport runtime and a
+  57,606-byte Consideration runtime, above the 24 KB EIP-170 limit
+  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe 093ff36d5 /
+  committed Sonatina 11722eac at `-O1` produces periphery runtimes of 4,559 to
+  13,214 bytes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
   produced 57,412/57,681-byte Seaport and 57,418/57,687-byte Consideration
-  runtimes. The earlier compiler-update growth from 49,815 bytes on Fe 169ed8ce3 to 57,418 on
-  c329ceff3 remains unexplained; it is separate from this storage refactor.
+  runtimes. The earlier compiler-update growth from 49,815 bytes on Fe
+  169ed8ce3 to 57,418 on c329ceff3 remains unexplained; it is separate from
+  this storage refactor.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
   seaport-core. The current upstream behavioral suites, including gas-budget
   cases, pass. The following pre-MVS measurements are historical; these calls
@@ -203,10 +206,10 @@ order entry points and the conduit batch functions use numeric selectors
   encoder allocates a preimage for each lookup.
   Fe 420a3bd52 fixes the generic `Ctx`/`Log` conflict. Ownership helpers now
   keep one mutable entry across caller reads, logs and writes in Solidity's
-  order. Accesses still close before external calls. Both efd2b89 and the
-  updated source were rebuilt with this compiler and Sonatina 361e0e86:
+  order. Accesses still close before external calls. Both efd2b89 and
+  78c170e were rebuilt with that compiler and Sonatina 361e0e86:
 
-  | Ownership call | efd2b89 gas | Current gas | Map hashes, before → after |
+  | Ownership call | efd2b89 gas | 78c170e gas | Map hashes, before → after |
   | --- | ---: | ---: | ---: |
   | Transfer | 49,956 | 49,882 | 2 → 1 |
   | Cancel transfer | 27,701 | 27,635 | 2 → 1 |
@@ -218,8 +221,32 @@ order entry points and the conduit batch functions use numeric selectors
   from 8,522 to 8,467 runtime bytes. Comparing efd2b89 under d6c0f863e and
   420a3bd52 shows unchanged receipt gas in these cases and a separate seven
   byte reduction in Seaport and Consideration. No operand-order rejections
-  occurred in either source version. Full evidence is recorded in
+  occurred in either source version. Historical evidence is recorded in
   `build/sealed-capabilities-420/validation.json`.
+
+  The current locked Fe 093ff36d5 / Sonatina 11722eac build leaves contract
+  source unchanged from 78c170e. Re-running its previous artifacts reproduces
+  every prior receipt exactly. The update changes focused receipt gas:
+
+  | Call | Previous build | Current build | Change |
+  | --- | ---: | ---: | ---: |
+  | Cancel one order | 38,859 | 39,221 | +362 |
+  | Validate one order | 55,893 | 56,274 | +381 |
+  | Advanced ERC721/native self fulfillment | 128,857 | 129,529 | +672 |
+  | Name getter | 22,446 | 22,834 | +388 |
+  | Create conduit | 1,077,606 | 1,026,126 | -51,480 |
+  | Create zone | 1,468,559 | 1,447,815 | -20,744 |
+
+  The same deltas hold in both guard modes. Getters are sent as cold
+  transactions; the name case was added and measured on both old and new
+  artifacts in this run. Counter, empty order-status, conduit-owner and zone
+  getters are cheaper by 13 to 75 gas. The harness records intrinsic calldata
+  gas separately; it is equal across these comparisons. Ownership map hashes
+  remain one per call. These larger increases are reported without source
+  workarounds. Sonatina #392 fixes recovered-pointer liveness, but this
+  Seaport comparison does not attribute each cost to #392 alone: the update
+  also includes #398–#402 and rebased PR 397. Evidence, all receipt deltas and
+  runtime sizes are in `build/committed-sonatina-093/validation.json`.
 - Explicit ABI view annotation would let `getOrderHash` match Solidity without
   retaining a read-only context grant purely for ABI classification.
 - The SeaportValidator and SeaportNavigator helpers (off-chain view
