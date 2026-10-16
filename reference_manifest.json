@@ -7,7 +7,7 @@
   "compiler": {
     "url": "https://github.com/argotorg/fe.git",
     "branch": "master",
-    "revision": "1f3fde2730bab39b8f8cebf9da645045033484c1",
+    "revision": "33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959",
     "sonatina_revision": "cdb34cbb9563333cde4d2c64b594a0807d23e80c"
   }
 }

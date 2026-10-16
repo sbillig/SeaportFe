@@ -45,7 +45,7 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe master
-[`1f3fde2730bab39b8f8cebf9da645045033484c1`](https://github.com/argotorg/fe/commit/1f3fde2730bab39b8f8cebf9da645045033484c1),
+[`33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959`](https://github.com/argotorg/fe/commit/33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959),
 which includes mutable value semantics (MVS). Its committed Cargo dependencies
 pin Sonatina `cdb34cbb9563333cde4d2c64b594a0807d23e80c`.
 `scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
@@ -120,7 +120,7 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Current Fe master 1f3fde273 builds all eight production contracts at `-O1`,
+Current Fe master 33ee9be28 builds all eight production contracts at `-O1`,
 passes all 14 Fe tests, all 482 Foundry tests (1,000 cases per fuzz test),
 and the full Hardhat suite (402 passing, one pending).
 All eight ABI entry sets are unchanged from the previous MVS checkpoint.
@@ -176,7 +176,7 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: Fe master 1f3fde273 / committed Sonatina cdb34cbb at `-O1`
+- Code size: Fe master 33ee9be28 / committed Sonatina cdb34cbb at `-O1`
   produces a 58,266-byte Seaport runtime and a 58,272-byte Consideration
   runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
   harnesses lift the size limit. Periphery runtimes range from 4,450 to
