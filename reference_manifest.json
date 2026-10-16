@@ -6,8 +6,8 @@
   },
   "compiler": {
     "url": "https://github.com/argotorg/fe.git",
-    "branch": "mvs",
-    "revision": "093ff36d546844a943c4be58da040d2e65f4bb8e",
-    "sonatina_revision": "11722eacb49ce1f565191145d290bd25618c7342"
+    "branch": "master",
+    "revision": "1f3fde2730bab39b8f8cebf9da645045033484c1",
+    "sonatina_revision": "cdb34cbb9563333cde4d2c64b594a0807d23e80c"
   }
 }

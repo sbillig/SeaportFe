@@ -9,7 +9,7 @@
    upstream tests deploy (`reference-out`, `optimized-out`). Unless
    `--no-hardhat`, also install the Node dependencies and compile the
    Hardhat artifacts.
-2. Clone argotorg/fe at the pinned MVS revision into toolchain/fe. Use its
+2. Clone argotorg/fe at the pinned master revision into toolchain/fe. Use its
    committed Cargo dependencies without compiler patches or local overrides.
 3. Build the compiler and the Fe contracts into build/fe.
 """
@@ -54,7 +54,7 @@ def compiler():
     if head != pinned["revision"]:
         raise SystemExit(f"{fe} must be at {pinned['revision']}; found {head}")
     if subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], cwd=fe).returncode:
-        raise SystemExit(f"{fe} has tracked changes; the MVS build requires the pinned sources")
+        raise SystemExit(f"{fe} has tracked changes; the build requires the pinned sources")
     run("npm", "ci", "--prefix", "crates/tree-sitter-fe", cwd=fe)
     run("cargo", "build", "--locked", "--release", "-p", "fe", cwd=fe)
 

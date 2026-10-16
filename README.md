@@ -44,21 +44,13 @@ and write order status slots directly).
 
 ## Compiler
 
-This branch targets Fe's mutable value semantics (MVS) branch at
-`093ff36d546844a943c4be58da040d2e65f4bb8e` (currently local, not pushed).
-It commits Sonatina main `11722eacb49ce1f565191145d290bd25618c7342`.
-The isolated compiler build uses the committed manifest and lockfile with
-`cargo build --offline --locked --release -p fe`: no dependency substitutions
-or compiler patches. The previous Sonatina 361e0e86 path override is no longer
-needed. Cargo metadata confirms that all Sonatina packages use the pinned
-Git source, and every compiler source file, including Cargo.toml/Cargo.lock,
-is verified against the commit archive.
-
-The source migration builds all eight contracts and passes all twelve Fe tests
-with this pinned compiler.
-The current MVS build passes all 482 Foundry tests (1,000 cases per fuzz
-test) and all 402 Hardhat tests, with the upstream one pending test. All eight
-contracts retain the same ABI entry sets as the initial MVS migration.
+This branch targets Fe master
+[`1f3fde2730bab39b8f8cebf9da645045033484c1`](https://github.com/argotorg/fe/commit/1f3fde2730bab39b8f8cebf9da645045033484c1),
+which includes mutable value semantics (MVS). Its committed Cargo dependencies
+pin Sonatina `cdb34cbb9563333cde4d2c64b594a0807d23e80c`.
+`scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
+--release -p fe`, without dependency substitutions or compiler patches.
+The compiler and reference revisions are recorded in `reference_manifest.json`.
 
 The source baseline is SeaportFe `6ffc19564ecc3121bfbf0cc7752b9c7a81cb7eea`,
 which passes `fe check` and builds all eight contracts on Fe master
@@ -75,8 +67,11 @@ signatures and extra data, and helpers use scoped MVS views or explicit mutable
 parameters. Generated orders replace the item pool
 in place. DynVec builds nested ABI arrays; exact protocol encoders use a
 checked, initialized owning byte buffer. Copyable raw pool and byte handles
-have been removed. Explicit unsafe blocks fell from 333 to three, all inside
-the checked byte boundary in `buffer.fe`. Storage uses declared owners:
+have been removed. Explicit unsafe blocks fell from 333 to six: three inside
+the checked byte boundary in `buffer.fe`, and three order-pool allocations in
+`model.fe`. Every order record, including its immutable Bytes handles, is
+fully initialized before the pool is read or returned; these records cannot
+be constructed by zeroing bytes. Storage uses declared owners:
 `OrderStore` at slot 0 contains the counter, status and nonce mappings;
 conduits use a rooted map and `SolEnumerableSet` for their channel registry;
 zones retain their exact packed words. Persistent and transient guard fields
@@ -125,7 +120,33 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Current MVS verification uses Fe 093ff36d5 / Sonatina 11722eac at `-O1`.
+Current Fe master 1f3fde273 builds all eight production contracts at `-O1`,
+passes all 14 Fe tests, all 482 Foundry tests (1,000 cases per fuzz test),
+and the full Hardhat suite (402 passing, one pending).
+All eight ABI entry sets are unchanged from the previous MVS checkpoint.
+The rooted-storage differential passes against pinned Solidity and the previous
+Fe artifacts in both transient and forced persistent guard modes, including
+exact storage slots, event bytes, map hashes, and log/write ordering.
+
+The refreshed build retains the two documented `--both` Foundry differences:
+480 pass and `testRevertErc20Transfer` / `testMatchAuthRevertAndInvMagicValue`
+fail when the optimized port also replaces Solidity's reference behavior.
+
+Focused receipt measurements against the previous 093ff36d5 build are shown
+below. Both source initialization and compiler dependencies changed, so these
+are combined build deltas; they do not isolate a compiler optimization.
+The table uses transient guards. Persistent guards have the same deltas
+except fulfillment, which rises by 729 gas instead of 725. Intrinsic calldata
+gas is equal in each comparison.
+
+| Call | Previous build | Refreshed build |
+| --- | ---: | ---: |
+| Cancel one order | 39,221 | 40,999 |
+| Validate one order | 56,274 | 58,462 |
+| Advanced ERC721/native self fulfillment | 129,529 | 130,254 |
+| Create zone | 1,447,815 | 1,607,485 |
+
+Historical October 11 verification used Fe 093ff36d5 / Sonatina 11722eac at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
 initial MVS port. The full upstream results match the documented pre-MVS
 results:
@@ -155,17 +176,18 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
-- Code size: this MVS build has a 57,600-byte Seaport runtime and a
-  57,606-byte Consideration runtime, above the 24 KB EIP-170 limit
-  (ISSUES.md #13). Both upstream harnesses lift the size limit. Fe 093ff36d5 /
-  committed Sonatina 11722eac at `-O1` produces periphery runtimes of 4,559 to
-  13,214 bytes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
+- Code size: Fe master 1f3fde273 / committed Sonatina cdb34cbb at `-O1`
+  produces a 58,266-byte Seaport runtime and a 58,272-byte Consideration
+  runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
+  harnesses lift the size limit. Periphery runtimes range from 4,450 to
+  14,538 bytes. The historical Fe 093ff36d5 / Sonatina 11722eac build
+  produced 57,600/57,606-byte Seaport/Consideration runtimes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
   produced 57,412/57,681-byte Seaport and 57,418/57,687-byte Consideration
   runtimes. The earlier compiler-update growth from 49,815 bytes on Fe
   169ed8ce3 to 57,418 on c329ceff3 remains unexplained; it is separate from
   this storage refactor.
 - Gas: Fe code uses more gas than the hand-optimized assembly of
-  seaport-core. The current upstream behavioral suites, including gas-budget
+  seaport-core. The October 11 upstream behavioral suites, including gas-budget
   cases, pass. The following pre-MVS measurements are historical; these calls
   came from one Foundry test (`test_fuzzCoverage_x`):
 
@@ -224,7 +246,7 @@ order entry points and the conduit batch functions use numeric selectors
   occurred in either source version. Historical evidence is recorded in
   `build/sealed-capabilities-420/validation.json`.
 
-  The current locked Fe 093ff36d5 / Sonatina 11722eac build leaves contract
+  The historical locked Fe 093ff36d5 / Sonatina 11722eac build leaves contract
   source unchanged from 78c170e. Re-running its previous artifacts reproduces
   every prior receipt exactly. The update changes focused receipt gas:
 
@@ -262,7 +284,7 @@ scripts/hardhat_suite.py
 ```
 
 `bootstrap.py` clones the pinned Seaport revision and builds its Foundry and
-Hardhat artifacts, then builds the pinned Fe MVS compiler and contracts into
+Hardhat artifacts, then builds the pinned Fe master compiler and contracts into
 `build/fe`. An existing `toolchain/fe` must be at the exact pinned revision
 with no tracked changes. Required tools: git, Rust, Node with npm, Foundry.
 Yarn 1.22.22 is invoked through npx for the reference's frozen lockfile.

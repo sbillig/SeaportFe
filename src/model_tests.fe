@@ -1,12 +1,13 @@
 use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol::Uint120}
 use std::evm::Address
 use super::applier::aggregate_offer_items
-use super::model::{advanced_orders, nested_components, single_advanced}
+use super::model::{advanced_orders, nested_components, orders_as_advanced, single_advanced}
 use super::types::{
     AdvancedOrder,
     ConsiderationItem,
     FulfillmentComponent,
     OfferItem,
+    Order,
     OrderParameters,
 }
 
@@ -87,4 +88,41 @@ fn repeated_fulfillment_indices_observe_prior_mutation() {
         group: ref groups.list[0],
         recipient: Address { inner: 0xdef },
     )
+}
+
+#[test]
+fn empty_order_batches_have_initialized_empty_pools() {
+    let advanced = advanced_orders(DynArray<AdvancedOrder>::empty())
+    assert(advanced.orders.len() == 0)
+    assert(advanced.items.len() == 0)
+    assert(advanced.used == 0)
+    let regular = orders_as_advanced(DynArray<Order>::empty())
+    assert(regular.orders.len() == 0)
+    assert(regular.items.len() == 0)
+    assert(regular.used == 0)
+}
+
+#[test]
+fn regular_orders_initialize_signature_and_empty_extra_data() {
+    let first = order(4, amount: 7)
+    let second = order(5, amount: 13)
+    var input = DynVec<Order>::new()
+    input.push(
+            Order { parameters: first.parameters, signature: first.signature },
+        )
+    input.push(
+            Order { parameters: second.parameters, signature: second.signature },
+        )
+    let book = orders_as_advanced(input.to_dyn_array())
+    assert(book.used == 2)
+    assert(book.orders[0].offer_start == 0)
+    assert(book.orders[1].offer_start == 1)
+    assert(book.orders[0].signature.byte_at(0) == 4)
+    assert(book.orders[1].signature.byte_at(0) == 5)
+    assert(book.orders[0].extra_data.len() == 0)
+    assert(book.orders[1].extra_data.len() == 0)
+    assert(book.orders[0].numerator == 1)
+    assert(book.orders[1].denominator == 1)
+    assert(book.items[0].amount == 7)
+    assert(book.items[1].amount == 13)
 }

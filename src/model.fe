@@ -193,23 +193,24 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    var book = Book {
-        orders: MemArray<OrderState>::new_zeroed(n),
-        items: MemArray<Item>::new_zeroed(total),
-        used: total,
+    // Bytes handles are not zero-initializable. Every order slot is assigned
+    // below before any order is read or the initialized pool is returned.
+    var states = unsafe {
+        MemArray<OrderState>::new_uninit(n)
     }
+    var items = MemArray<Item>::new_zeroed(total)
     var start: u256 = 0
     i = 0
     while i < n {
         let order = orders.get(i)
         let p = order.parameters
         fill_items(
-            mut book.items,
+            mut items,
             start,
             offer: p.offer,
             consideration: p.consideration,
         )
-        book.orders[(i) as usize] = order_state(
+        states[(i) as usize] = order_state(
             orders.get(i).parameters,
             items_start: start,
             numerator: order.numerator.val as u256,
@@ -220,7 +221,7 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    book
+    Book { orders: states, items, used: total }
 }
 
 pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
@@ -231,23 +232,24 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    var book = Book {
-        orders: MemArray<OrderState>::new_zeroed(n),
-        items: MemArray<Item>::new_zeroed(total),
-        used: total,
+    // Bytes handles are not zero-initializable. Every order slot is assigned
+    // below before any order is read or the initialized pool is returned.
+    var states = unsafe {
+        MemArray<OrderState>::new_uninit(n)
     }
+    var items = MemArray<Item>::new_zeroed(total)
     var start: u256 = 0
     i = 0
     while i < n {
         let order = orders.get(i)
         let p = order.parameters
         fill_items(
-            mut book.items,
+            mut items,
             start,
             offer: p.offer,
             consideration: p.consideration,
         )
-        book.orders[(i) as usize] = order_state(
+        states[(i) as usize] = order_state(
             orders.get(i).parameters,
             items_start: start,
             numerator: 1,
@@ -258,7 +260,7 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    book
+    Book { orders: states, items, used: total }
 }
 
 pub fn single_advanced(_ order: AdvancedOrder) -> Book {
@@ -292,32 +294,21 @@ fn single_book(
     let consideration = p.consideration
     let offer_len = offer.len()
     let consideration_len = consideration.len()
-    var book = Book {
-        orders: MemArray<OrderState>::new_zeroed(1),
-        items: MemArray<Item>::new_zeroed(offer_len + consideration_len),
-        used: offer_len + consideration_len,
+    // Initialize the sole order, including both Bytes handles, before use.
+    var states = unsafe {
+        MemArray<OrderState>::new_uninit(1)
     }
-    fill_items(mut book.items, start: 0, offer, consideration)
-    book.orders[(0) as usize] = OrderState {
-        offerer: p.offerer,
-        zone: p.zone,
-        offer_start: 0,
-        offer_len,
-        consideration_start: offer_len,
-        consideration_len,
-        order_type: p.orderType as u256,
-        start_time: p.startTime,
-        end_time: p.endTime,
-        zone_hash: p.zoneHash.val,
-        salt: p.salt,
-        conduit_key: p.conduitKey.val,
-        total_original: p.totalOriginalConsiderationItems,
+    states[0] = order_state(
+        p,
+        items_start: 0,
         numerator,
         denominator,
         signature,
         extra_data,
-    }
-    book
+    )
+    var items = MemArray<Item>::new_zeroed(offer_len + consideration_len)
+    fill_items(mut items, start: 0, offer, consideration)
+    Book { orders: states, items, used: offer_len + consideration_len }
 }
 
 pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
