@@ -355,11 +355,7 @@ uses (store: OrderStore)
 }
 
 pub fn information(_ env: Env) -> (DynString, Bytes32, Address) uses (ctx: Ctx) {
-    (
-        DynString::from_word_prefix(word: 0x312e36 << 232, len: 3),
-        Bytes32 { val: domain_separator(env) },
-        env.conduit_controller,
-    )
+    ("1.6", Bytes32 { val: domain_separator(env) }, env.conduit_controller)
 }
 
 /// Plain ETH transfers are only accepted while an order that allows them is
@@ -622,7 +618,7 @@ pub contract Seaport {
             get_contract_nonce(contractOfferer)
         }
         SeaportMsg::Name {} -> DynString {
-            DynString::from_word_prefix(word: 0x536561706f7274 << 200, len: 7)
+            "Seaport"
         }
         SeaportMsg::ActivateTstore {} uses (mut guard_state, env, ctx: Ctx, call: Call) {
             activate_tstore(env)
@@ -883,7 +879,7 @@ pub contract Consideration {
             get_contract_nonce(contractOfferer)
         }
         SeaportMsg::Name {} -> DynString {
-            DynString::from_word_prefix(word: 0x436f6e73696465726174696f6e << 152, len: 13)
+            "Consideration"
         }
         SeaportMsg::ActivateTstore {} uses (mut guard_state, env, ctx: Ctx, call: Call) {
             activate_tstore(env)
