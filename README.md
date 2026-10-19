@@ -44,15 +44,13 @@ and write order status slots directly).
 
 ## Compiler
 
-This branch targets Fe
-[`b428098abbf8bab0324670612075511db446494a`](https://github.com/sbillig/fe/commit/b428098abbf8bab0324670612075511db446494a),
-Fe master `10c46169e` with the fix in
-[argotorg/fe#1831](https://github.com/argotorg/fe/pull/1831). Master alone
-panics in runtime lowering on recv arms that return a constant `Bytes4` or
-`Bytes32`, so it builds none of the contracts. The pin moves to master once
-that PR merges. Fe master includes mutable value semantics (MVS). Its
-committed Cargo dependencies pin Sonatina
-`6bef907f7e5854d0c77cf18624b7042213526960`.
+This branch targets Fe master
+[`735827147e606a2d164846759de853faf1053421`](https://github.com/argotorg/fe/commit/735827147e606a2d164846759de853faf1053421),
+which includes mutable value semantics (MVS) and
+[argotorg/fe#1831](https://github.com/argotorg/fe/pull/1831). Before that fix,
+master panicked in runtime lowering on recv arms that return a constant
+`Bytes4` or `Bytes32`, so it built none of the contracts. Its committed Cargo
+dependencies pin Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`.
 `scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
 --release -p fe`, without dependency substitutions or compiler patches.
 The compiler and reference revisions are recorded in `reference_manifest.json`.
@@ -125,9 +123,11 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Fe b428098ab builds all eight production contracts at `-O1`, passes all 14 Fe
-tests, all 482 Foundry tests (1,000 cases per fuzz test), and the full Hardhat
-suite (402 passing, one pending). The ABIs differ from the previous Fe master
+Fe master 735827147 builds all eight production contracts at `-O1`, passes all
+14 Fe tests, all 482 Foundry tests (1,000 cases per fuzz test), and the full
+Hardhat suite (402 passing, one pending). Its 24 output files are
+byte-identical to those of the fix branch commit b428098ab, on which the
+behavioral suites ran. The ABIs differ from the previous Fe master
 33ee9be28 build only in no longer listing the implicit `Panic(uint256)` error.
 The rooted-storage differential passes against pinned Solidity and the
 33ee9be28 artifacts in both transient and forced persistent guard modes,
@@ -190,7 +190,7 @@ order entry points and the conduit batch functions use numeric selectors
   high bits in an extra offer item's token or in a recipient the original
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
-- Code size: Fe b428098ab / committed Sonatina 6bef907f at `-O1`
+- Code size: Fe master 735827147 / committed Sonatina 6bef907f at `-O1`
   produces a 57,339-byte Seaport runtime and a 57,345-byte Consideration
   runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
   harnesses lift the size limit. Periphery runtimes range from 4,200 to

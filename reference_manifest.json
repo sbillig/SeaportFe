@@ -5,9 +5,9 @@
     "seaport_core": "1.6.5"
   },
   "compiler": {
-    "url": "https://github.com/sbillig/fe.git",
-    "branch": "fix/const-fixed-bytes-recv-return",
-    "revision": "b428098abbf8bab0324670612075511db446494a",
+    "url": "https://github.com/argotorg/fe.git",
+    "branch": "master",
+    "revision": "735827147e606a2d164846759de853faf1053421",
     "sonatina_revision": "6bef907f7e5854d0c77cf18624b7042213526960"
   }
 }
