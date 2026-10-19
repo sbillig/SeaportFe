@@ -80,7 +80,7 @@ pub fn transfer(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if item.item_type == NATIVE as u256 {
-        if (item.token.inner | item.identifier) != 0 {
+        if (item.token.word() | item.identifier) != 0 {
             revert_error(UnusedItemParameters {})
         }
         transfer_native_tokens(to: item.recipient, amount: item.amount)
@@ -147,7 +147,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             offset: 0,
             value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
         )
-    failure.write(offset: 0x04, value: to.inner)
+    failure.write(offset: 0x04, value: to.word())
     failure.write(offset: 0x24, value: amount)
     var ret = MemBuffer::empty()
     let outcome = call
@@ -343,9 +343,9 @@ fn insert(
     }
     let at = acc.count * 0xc0
     buf.write(offset: at, value: item_type)
-    buf.write(offset: at + 0x20, value: token.inner)
-    buf.write(offset: at + 0x40, value: from.inner)
-    buf.write(offset: at + 0x60, value: to.inner)
+    buf.write(offset: at + 0x20, value: token.word())
+    buf.write(offset: at + 0x40, value: from.word())
+    buf.write(offset: at + 0x60, value: to.word())
     buf.write(offset: at + 0x80, value: identifier)
     buf.write(offset: at + 0xa0, value: amount)
     acc.count = acc.count + 1
@@ -358,8 +358,8 @@ pub fn perform_erc20_transfer(token: Address, from: Address, to: Address, amount
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(mut args, 0, from.inner)
-    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
     set_arg(mut args, 2, amount)
     var ret = MemBuffer::with_capacity(32)
     let outcome = call
@@ -401,8 +401,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_error(NoContract { account: token })
     }
     var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(mut args, 0, from.inner)
-    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
     set_arg(mut args, 2, identifier)
     var ret = MemBuffer::empty()
     let outcome = call
@@ -434,8 +434,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_error(NoContract { account: token })
     }
     var args = calldata_with_selector(ERC1155_SAFE_TRANSFER_FROM_SELECTOR, 6)
-    set_arg(mut args, 0, from.inner)
-    set_arg(mut args, 1, to.inner)
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
     set_arg(mut args, 2, identifier)
     set_arg(mut args, 3, amount)
     set_arg(mut args, 4, 0xa0)

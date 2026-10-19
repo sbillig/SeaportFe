@@ -9,7 +9,7 @@
    upstream tests deploy (`reference-out`, `optimized-out`). Unless
    `--no-hardhat`, also install the Node dependencies and compile the
    Hardhat artifacts.
-2. Clone argotorg/fe at the pinned master revision into toolchain/fe. Use its
+2. Clone the pinned Fe repository and revision into toolchain/fe. Use its
    committed Cargo dependencies without compiler patches or local overrides.
 3. Build the compiler and the Fe contracts into build/fe.
 """

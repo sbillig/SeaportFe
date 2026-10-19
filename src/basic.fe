@@ -80,8 +80,12 @@ fn cd(_ offset: u256) -> u256 uses (ops: RawOps) {
     ops.calldataload(offset)
 }
 
+/// The address at `offset`, truncated to 160 bits.
+/// `assert_valid_basic_order_parameters` and the additional recipients check
+/// reject words with higher bits before any address read here is used, so
+/// truncation keeps seaport-core's error precedence.
 fn cd_address(_ offset: u256) -> Address uses (ops: RawOps) {
-    Address { inner: ops.calldataload(offset) }
+    Address::from_word_truncate(ops.calldataload(offset))
 }
 
 fn byte_at(_ index: u256, _ word: u256) -> u256 {
@@ -280,7 +284,7 @@ uses (
                     cd(CONSIDERATION_IDENTIFIER),
                     cd(CONSIDERATION_AMOUNT),
                     cd(CONSIDERATION_AMOUNT),
-                    offerer.inner,
+                    offerer.word(),
                 ],
             ),
         )
@@ -309,7 +313,7 @@ uses (
                         [
                             CONSIDERATION_ITEM_TYPEHASH,
                             additional_recipients_item_type,
-                            additional_recipients_token.inner,
+                            additional_recipients_token.word(),
                             0,
                             amount,
                             amount,
@@ -327,7 +331,7 @@ uses (
                     token: additional_recipients_token,
                     identifier: 0,
                     amount,
-                    recipient: Address { inner: recipient },
+                    recipient: Address::from_word_truncate(recipient),
                 },
             )
         i += 1
@@ -350,7 +354,7 @@ uses (
     let order_hash = keccak_words(
         [
             ORDER_TYPEHASH,
-            offerer.inner,
+            offerer.word(),
             cd(ZONE),
             keccak_words([offer_item_hash]),
             received_items_hash,
@@ -446,7 +450,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
     data.write(offset: head, value: order_hash)
-    data.write(offset: head + 0x20, value: ctx.caller().inner)
+    data.write(offset: head + 0x20, value: ctx.caller().word())
     data.write(offset: head + 0x40, value: cd(OFFERER))
     data.write(offset: head + 0x60, value: 0x140)
     data.write(offset: head + 0x80, value: 0x1e0)
@@ -546,9 +550,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         data.write(offset: 0x04, value: 0x20)
         data.write(offset: 0x24, value: 1)
         data.write(offset: 0x44, value: item_type)
-        data.write(offset: 0x64, value: token.inner)
-        data.write(offset: 0x84, value: from.inner)
-        data.write(offset: 0xa4, value: ctx.caller().inner)
+        data.write(offset: 0x64, value: token.word())
+        data.write(offset: 0x84, value: from.word())
+        data.write(offset: 0xa4, value: ctx.caller().word())
         data.write(offset: 0xc4, value: identifier)
         data.write(offset: 0xe4, value: amount)
         call_conduit(env, conduit_key, args: data.span())

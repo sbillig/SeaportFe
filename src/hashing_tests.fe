@@ -10,8 +10,8 @@ fn hash_components(
 ) -> u256 {
     derive_components_hash(
         OrderComponents {
-            offerer: Address { inner: 0xabc },
-            zone: Address { inner: 0xdef },
+            offerer: Address::new(0xabc),
+            zone: Address::new(0xdef),
             offer,
             consideration,
             orderType: 1,
@@ -44,7 +44,7 @@ fn components_hash_distinct_item_types_and_full_width_counter() {
         [
             OfferItem {
                 itemType: 2,
-                token: Address { inner: 0x123 },
+                token: Address::new(0x123),
                 identifierOrCriteria: 4,
                 startAmount: 1,
                 endAmount: 1,
@@ -55,11 +55,11 @@ fn components_hash_distinct_item_types_and_full_width_counter() {
         [
             ConsiderationItem {
                 itemType: 0,
-                token: Address { inner: 0 },
+                token: Address::zero(),
                 identifierOrCriteria: 0,
                 startAmount: 200,
                 endAmount: 200,
-                recipient: Address { inner: 0x456 },
+                recipient: Address::new(0x456),
             },
         ],
     )

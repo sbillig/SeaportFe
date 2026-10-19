@@ -14,13 +14,13 @@ use super::types::{
 fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
     AdvancedOrder {
         parameters: OrderParameters {
-            offerer: Address { inner: 0xabc },
+            offerer: Address::new(0xabc),
             zone: Address::zero(),
             offer: dyn_array_from(
                 [
                     OfferItem {
                         itemType: 2,
-                        token: Address { inner: 0x123 },
+                        token: Address::new(0x123),
                         identifierOrCriteria: identifier,
                         startAmount: amount,
                         endAmount: amount,
@@ -86,7 +86,7 @@ fn repeated_fulfillment_indices_observe_prior_mutation() {
         mut book,
         groups,
         group: ref groups.list[0],
-        recipient: Address { inner: 0xdef },
+        recipient: Address::new(0xdef),
     )
 }
 

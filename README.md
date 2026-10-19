@@ -44,10 +44,15 @@ and write order status slots directly).
 
 ## Compiler
 
-This branch targets Fe master
-[`33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959`](https://github.com/argotorg/fe/commit/33ee9be2820f2d296e6d9c7a9d3f6f081a5f1959),
-which includes mutable value semantics (MVS). Its committed Cargo dependencies
-pin Sonatina `cdb34cbb9563333cde4d2c64b594a0807d23e80c`.
+This branch targets Fe
+[`b428098abbf8bab0324670612075511db446494a`](https://github.com/sbillig/fe/commit/b428098abbf8bab0324670612075511db446494a),
+Fe master `10c46169e` with the fix in
+[argotorg/fe#1831](https://github.com/argotorg/fe/pull/1831). Master alone
+panics in runtime lowering on recv arms that return a constant `Bytes4` or
+`Bytes32`, so it builds none of the contracts. The pin moves to master once
+that PR merges. Fe master includes mutable value semantics (MVS). Its
+committed Cargo dependencies pin Sonatina
+`6bef907f7e5854d0c77cf18624b7042213526960`.
 `scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
 --release -p fe`, without dependency substitutions or compiler patches.
 The compiler and reference revisions are recorded in `reference_manifest.json`.
@@ -165,7 +170,7 @@ port follows the optimized one.
 
 The ABIs match except for listings: Solidity lists every error of the
 inherited interfaces and the shared events of `PausableZone` and its
-controller, Fe lists the errors a contract can raise (plus `Panic`), and Fe
+controller, Fe lists the errors a contract can raise, and Fe
 marks `PausableZone.supportsInterface` as `pure`, not `view`. The basic
 order entry points and the conduit batch functions use numeric selectors
 (their calldata is read raw), so they have no ABI entry.
@@ -176,6 +181,14 @@ order entry points and the conduit batch functions use numeric selectors
   calldata can be rejected earlier than the optimized Solidity implementation,
   which sometimes reads raw words with zero padding. The deferred manual
   decoder changes address those differences.
+- A Fe `Address` holds no bits above the low 160. Raw words become addresses
+  either after the check Solidity performs (basic orders, conduit transfers)
+  or by truncation, like Solidity's masked storage reads. The conduit batch
+  path reports the raw token word in its errors, as seaport-core does. One
+  difference remains: a contract offerer whose `generateOrder` returndata has
+  high bits in an extra offer item's token or in a recipient the original
+  order leaves open gets the truncated address. seaport-core keeps the raw
+  word. Returned items that have an original are still compared word for word.
 - Code size: Fe master 33ee9be28 / committed Sonatina cdb34cbb at `-O1`
   produces a 58,266-byte Seaport runtime and a 58,272-byte Consideration
   runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream

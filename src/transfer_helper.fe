@@ -162,7 +162,7 @@ uses (ctx: Ctx, call: mut Call)
         return
     }
     match try_decode_error_string(outcome.returndata()) {
-        Option::Some(reason,) => revert_error(
+        Option::Some(reason) => revert_error(
             ERC721ReceiverErrorRevertString {
                 reason,
                 receiver: recipient,
@@ -211,7 +211,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     while i < transfers.len() {
         let transfer = transfers.get(i)
         let recipient = transfer.recipient
-        if recipient.inner == 0 {
+        if recipient.word() == 0 {
             revert_error(RecipientCannotBeZeroAddress {})
         }
         let call_erc721_receiver = transfer.validateERC721Receiver
@@ -264,7 +264,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     let data = outcome.returndata()
     match try_decode_error_string(data) {
-        Option::Some(reason,) => revert_error(
+        Option::Some(reason) => revert_error(
             ConduitErrorRevertString { reason, conduitKey: Bytes32 { val: conduit_key }, conduit },
         ),
         Option::None => {},

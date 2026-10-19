@@ -120,7 +120,7 @@ pub msg PausableZoneMsg {
 const OPERATOR_MASK: u256 = 0xffffffffffffffffffffffffffffffffffffffff
 
 fn zone_operator(_ zone_state: u256) -> Address {
-    Address { inner: zone_state & OPERATOR_MASK }
+    Address::from_word_truncate(zone_state)
 }
 
 fn zone_is_paused(_ zone_state: u256) -> bool {
@@ -179,10 +179,10 @@ pub contract PausableZone {
             log: mut Log,
         ) {
             assert_controller(controller)
-            if operatorToAssign.inner == 0 {
+            if operatorToAssign.word() == 0 {
                 revert_error(PauserCanNotBeSetAsZero {})
             }
-            zone_state = (zone_state & !OPERATOR_MASK) | operatorToAssign.inner
+            zone_state = (zone_state & !OPERATOR_MASK) | operatorToAssign.word()
             log.emit(OperatorUpdated { newOperator: operatorToAssign })
         }
         #[payable]
@@ -304,7 +304,7 @@ pub msg PausableZoneControllerMsg {
 }
 
 fn assert_owner(_ owner: u256) uses (ctx: Ctx) {
-    if ctx.caller().inner != owner {
+    if ctx.caller().word() != owner {
         revert_error(CallerIsNotOwner {})
     }
 }
@@ -333,7 +333,7 @@ pub contract PausableZoneController {
     init(ownerAddress: Address)
     uses (mut zone_creation_code, mut owner, ops: mut RawOps)
     {
-        owner = ownerAddress.inner
+        owner = ownerAddress.word()
         zone_creation_code = zone_init_code_hash()
     }
 
@@ -359,7 +359,7 @@ pub contract PausableZoneController {
             derived
         }
         Pause { zone } -> bool uses (owner, pauser, ctx: Ctx, call: mut Call) {
-            if ctx.caller().inner != pauser && ctx.caller().inner != owner {
+            if ctx.caller().word() != pauser && ctx.caller().word() != owner {
                 revert_error(InvalidPauser {})
             }
             zone.call(PausableZoneMsg::Pause {})
@@ -425,11 +425,11 @@ pub contract PausableZoneController {
             log: mut Log,
         ) {
             assert_owner(owner)
-            if newPotentialOwner.inner == 0 {
+            if newPotentialOwner.word() == 0 {
                 revert_error(OwnerCanNotBeSetAsZero {})
             }
             log.emit(PotentialOwnerUpdated { newPotentialOwner })
-            potential_owner = newPotentialOwner.inner
+            potential_owner = newPotentialOwner.word()
         }
         CancelOwnershipTransfer {} uses (owner, mut potential_owner, ctx: Ctx, log: mut Log) {
             assert_owner(owner)
@@ -439,7 +439,7 @@ pub contract PausableZoneController {
             potential_owner = 0
         }
         AcceptOwnership {} uses (mut owner, mut potential_owner, ctx: Ctx, log: mut Log) {
-            if ctx.caller().inner != potential_owner {
+            if ctx.caller().word() != potential_owner {
                 revert_error(CallerIsNotPotentialOwner {})
             }
             log.emit(
@@ -448,18 +448,18 @@ pub contract PausableZoneController {
             potential_owner = 0
             log.emit(
                 OwnershipTransferred {
-                    previousOwner: Address { inner: owner },
+                    previousOwner: Address::from_word_truncate(owner),
                     newOwner: ctx.caller(),
                 },
             )
-            owner = ctx.caller().inner
+            owner = ctx.caller().word()
         }
         AssignPauser { pauserToAssign } uses (owner, mut pauser, ctx: Ctx, log: mut Log) {
             assert_owner(owner)
-            if pauserToAssign.inner == 0 {
+            if pauserToAssign.word() == 0 {
                 revert_error(PauserCanNotBeSetAsZero {})
             }
-            pauser = pauserToAssign.inner
+            pauser = pauserToAssign.word()
             log.emit(PauserUpdated { newPauser: pauserToAssign })
         }
         AssignOperator { pausableZoneAddress, operatorToAssign }
@@ -469,13 +469,13 @@ pub contract PausableZoneController {
             pausableZoneAddress.call(PausableZoneMsg::AssignOperator { operatorToAssign })
         }
         Owner {} -> Address uses (owner) {
-            Address { inner: owner }
+            Address::from_word_truncate(owner)
         }
         PotentialOwner {} -> Address uses (potential_owner) {
-            Address { inner: potential_owner }
+            Address::from_word_truncate(potential_owner)
         }
         Pauser {} -> Address uses (pauser) {
-            Address { inner: pauser }
+            Address::from_word_truncate(pauser)
         }
         ZoneCreationCode {} -> Bytes32 uses (zone_creation_code) {
             Bytes32 { val: zone_creation_code }

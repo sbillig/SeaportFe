@@ -59,7 +59,7 @@ fn write_spent_items(
         let item = ref book.items[(start + i) as usize]
         let out = offset + 32 + i * 128
         dst.write(offset: out, value: item.item_type)
-        dst.write(offset: out + 32, value: item.token.inner)
+        dst.write(offset: out + 32, value: item.token.word())
         dst.write(offset: out + 64, value: item.identifier)
         dst.write(offset: out + 96, value: item_amount(item, use_original))
         i += 1
@@ -80,10 +80,10 @@ fn write_received_items(
         let item = ref book.items[(start + i) as usize]
         let out = offset + 32 + i * 160
         dst.write(offset: out, value: item.item_type)
-        dst.write(offset: out + 32, value: item.token.inner)
+        dst.write(offset: out + 32, value: item.token.word())
         dst.write(offset: out + 64, value: item.identifier)
         dst.write(offset: out + 96, value: item.original)
-        dst.write(offset: out + 128, value: item.receiver.inner)
+        dst.write(offset: out + 128, value: item.receiver.word())
         i += 1
     }
     32 + count * 160
@@ -139,8 +139,8 @@ uses (ctx: Ctx)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
     data.write(offset: head, value: order_hash)
-    data.write(offset: head + 0x20, value: ctx.caller().inner)
-    data.write(offset: head + 0x40, value: order.offerer.inner)
+    data.write(offset: head + 0x20, value: ctx.caller().word())
+    data.write(offset: head + 0x40, value: order.offerer.word())
     var tail: u256 = 0x140
     data.write(offset: head + 0x60, value: tail)
     tail = tail
@@ -339,7 +339,7 @@ fn encode_ratify_order(
     let head: u256 = 4
     data.write(
         offset: head + 0x80,
-        value: order_hash ^ (order.offerer.inner << 96),
+        value: order_hash ^ (order.offerer.word() << 96),
     )
     var tail: u256 = 0xa0
     data.write(offset: head, value: tail)
@@ -388,7 +388,7 @@ uses (ctx: Ctx)
     var data = Buffer::new(size)
     data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
     let head: u256 = 4
-    data.write(offset: head, value: ctx.caller().inner)
+    data.write(offset: head, value: ctx.caller().word())
     var tail: u256 = 0x80
     data.write(offset: head + 0x20, value: tail)
     tail = tail
@@ -461,7 +461,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
         )
         .success()
     let contract_nonce = take_contract_nonce(offerer)
-    let order_hash = contract_nonce ^ (offerer.inner << 96)
+    let order_hash = contract_nonce ^ (offerer.word() << 96)
     if !success {
         if revert_on_invalid {
             revert_with_reason_if_one_is_returned()
@@ -550,8 +550,8 @@ uses (ops: mut RawOps)
         let base = consideration_offset + 32 + i * 160
         let original = ref book.items[(order.consideration_start + i) as usize]
         let recipient = returndata_word(base + 128)
-        let recipient_mismatch = original.receiver.inner != 0
-            && recipient != original.receiver.inner
+        let recipient_mismatch = original.receiver.word() != 0
+            && recipient != original.receiver.word()
         bad = bad
             || items_differ(
                 original,
@@ -580,6 +580,11 @@ uses (ops: mut RawOps)
 
 /// `_getGeneratedOrder`, second half: copy the validated items from the
 /// returndata into a new pool and point the order at them.
+///
+/// Returned tokens and recipients become the addresses in their low 160 bits.
+/// Validation compares the full words of items with an original counterpart,
+/// so this differs from seaport-core, which keeps the words unchanged, only for
+/// extra offer items and for recipients the original order leaves open.
 pub fn install_generated_order(_ book: mut Book, order_index: u256, generated: GeneratedOrder)
 uses (ops: mut RawOps)
 {
@@ -631,7 +636,7 @@ uses (ops: mut RawOps)
     let amount = returndata_word(base + 96)
     items[(slot) as usize] = Item {
         item_type: returndata_word(base),
-        token: Address { inner: returndata_word(base + 32) },
+        token: Address::from_word_truncate(returndata_word(base + 32)),
         identifier: returndata_word(base + 64),
         start_amount: amount,
         end_amount: amount,
@@ -646,10 +651,10 @@ fn write_generated_consideration_item(_ items: mut MemArray<Item>, slot: u256, b
 uses (ops: mut RawOps)
 {
     let amount = returndata_word(base + 96)
-    let recipient = Address { inner: returndata_word(base + 128) }
+    let recipient = Address::from_word_truncate(returndata_word(base + 128))
     items[(slot) as usize] = Item {
         item_type: returndata_word(base),
-        token: Address { inner: returndata_word(base + 32) },
+        token: Address::from_word_truncate(returndata_word(base + 32)),
         identifier: returndata_word(base + 64),
         start_amount: amount,
         end_amount: amount,
@@ -669,7 +674,7 @@ fn items_differ(_ original: Item, item_type: u256, token: u256, identifier: u256
         expected_type = expected_type - 2
         expected_identifier = identifier
     }
-    !(original.token.inner == token
+    !(original.token.word() == token
         && expected_type == item_type
         && expected_identifier == identifier)
 }

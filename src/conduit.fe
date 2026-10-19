@@ -3,7 +3,7 @@
 use core::ptr::MemBuffer
 use std::abi::{Bytes4, DynArray, sol}
 use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap, revert_error}
-use super::errors::{InvalidERC721TransferAmount, NoContract, Invalid1155BatchTransferEncoding}
+use super::errors::{InvalidERC721TransferAmount, Invalid1155BatchTransferEncoding}
 use super::buffer::Buffer
 use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
 use super::lowlevel::bubble_revert_if_affordable
@@ -57,6 +57,8 @@ const EXECUTE_BATCH_1155_SELECTOR: u256 = 0x8df25d92
 const EXECUTE_WITH_BATCH_1155_SELECTOR: u256 = 0x899e104c
 /// safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)
 const SAFE_BATCH_TRANSFER_FROM_SELECTOR: u256 = 0x2eb2c2d6
+/// NoContract(address)
+const NO_CONTRACT_SELECTOR: u256 = 0x5f15d672
 /// ERC1155BatchTransferGenericFailure(address,address,address,uint256[],uint256[])
 const ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR: u256 = 0xafc445e2
 
@@ -133,9 +135,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         transfer_item(
             ConduitTransfer {
                 itemType: item_type.downcast_truncate(),
-                token: Address { inner: token },
-                from: Address { inner: from },
-                to: Address { inner: to },
+                token: Address::from_word_truncate(token),
+                from: Address::from_word_truncate(from),
+                to: Address::from_word_truncate(to),
                 identifier: ops.calldataload(at + 0x80),
                 amount: ops.calldataload(at + 0xa0),
             },
@@ -174,9 +176,16 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var i: u256 = 0
     while i < length {
         let element = heads + ops.calldataload(heads + i * 32)
-        let token = Address { inner: ops.calldataload(element) }
-        if ctx.extcodesize(token) == 0 {
-            revert_error(NoContract { account: token })
+        // seaport-core reports the token's calldata word, high bits included,
+        // in NoContract and ERC1155BatchTransferGenericFailure. The EVM
+        // ignores those bits when it inspects and calls the account.
+        let token = ops.calldataload(element)
+        let account = Address::from_word_truncate(token)
+        if ctx.extcodesize(account) == 0 {
+            var failure = Buffer::new(0x24)
+            failure.write(offset: 0, value: NO_CONTRACT_SELECTOR << 224)
+            failure.write(offset: 0x04, value: token)
+            ops.revert(data: failure.span())
         }
         let ids_length = ops.calldataload(element + 0xa0)
         let expected_amounts_offset = 0xc0 + (ids_length << 5)
@@ -219,7 +228,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         var ret = MemBuffer::empty()
         let outcome = call
             .raw_call(
-                addr: token,
+                addr: account,
                 gas: ctx.gas(),
                 value: 0,
                 args: mem.slice(offset: data, len: size),
@@ -235,7 +244,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
                 offset: 0,
                 value: ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
             )
-            mem.write(offset: 0x04, value: token.inner)
+            mem.write(offset: 0x04, value: token)
             mem.write(offset: 0x64, value: 0xc0)
             mem.write(offset: 0x84, value: mem.word(0x84) + 0x20)
             ops.revert(data: mem.slice(offset: 0, len: size))

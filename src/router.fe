@@ -118,7 +118,7 @@ uses (
     var i: u256 = 0
     let maximum_fulfilled = params.maximumFulfilled
     var fulfillments_left = maximum_fulfilled
-    let recipient = if params.recipient.inner == 0 {
+    let recipient = if params.recipient.word() == 0 {
         ctx.caller()
     } else {
         params.recipient

@@ -34,7 +34,7 @@ impl Copy for Env {}
 
 pub fn derive_domain_separator(name_hash: u256, chain_id: u256, this: Address) -> u256 {
     keccak_words(
-        [EIP712_DOMAIN_TYPEHASH, name_hash, VERSION_HASH, chain_id, this.inner],
+        [EIP712_DOMAIN_TYPEHASH, name_hash, VERSION_HASH, chain_id, this.word()],
     )
 }
 
@@ -56,8 +56,8 @@ pub fn derive_order_hash(_ book: Book, order: OrderState, counter: u256) -> u256
     keccak_words(
         [
             ORDER_TYPEHASH,
-            order.offerer.inner,
-            order.zone.inner,
+            order.offerer.word(),
+            order.zone.word(),
             offer_hash,
             consideration_hash,
             order.order_type,
@@ -82,7 +82,7 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
             [
                 OFFER_ITEM_TYPEHASH,
                 item.itemType as u256,
-                item.token.inner,
+                item.token.word(),
                 item.identifierOrCriteria,
                 item.startAmount,
                 item.endAmount,
@@ -99,11 +99,11 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
             [
                 CONSIDERATION_ITEM_TYPEHASH,
                 item.itemType as u256,
-                item.token.inner,
+                item.token.word(),
                 item.identifierOrCriteria,
                 item.startAmount,
                 item.endAmount,
-                item.recipient.inner,
+                item.recipient.word(),
             ],
         )
         i += 1
@@ -113,8 +113,8 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     keccak_words(
         [
             ORDER_TYPEHASH,
-            order.offerer.inner,
-            order.zone.inner,
+            order.offerer.word(),
+            order.zone.word(),
             offer_hash,
             consideration_hash,
             order.orderType as u256,
@@ -138,11 +138,11 @@ fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: 
                 [
                     CONSIDERATION_ITEM_TYPEHASH,
                     item.item_type,
-                    item.token.inner,
+                    item.token.word(),
                     item.identifier,
                     item.start_amount,
                     item.end_amount,
-                    item.recipient.inner,
+                    item.recipient.word(),
                 ],
             )
         } else {
@@ -150,7 +150,7 @@ fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: 
                 [
                     OFFER_ITEM_TYPEHASH,
                     item.item_type,
-                    item.token.inner,
+                    item.token.word(),
                     item.identifier,
                     item.start_amount,
                     item.end_amount,

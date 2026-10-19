@@ -388,7 +388,7 @@ pub fn setup_reentrancy_guard() -> (bool, Address)
 uses (ctx: Ctx, call: Call, create: mut Create, guard_state: mut u256)
 {
     let probe = prepare_tload_test()
-    if probe.inner == 0 {
+    if probe.word() == 0 {
         revert_error(TloadTestContractDeploymentFailed {})
     }
     let supported = test_tload(probe)
