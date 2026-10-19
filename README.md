@@ -125,31 +125,32 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Current Fe master 33ee9be28 builds all eight production contracts at `-O1`,
-passes all 14 Fe tests, all 482 Foundry tests (1,000 cases per fuzz test),
-and the full Hardhat suite (402 passing, one pending).
-All eight ABI entry sets are unchanged from the previous MVS checkpoint.
-The rooted-storage differential passes against pinned Solidity and the previous
-Fe artifacts in both transient and forced persistent guard modes, including
-exact storage slots, event bytes, map hashes, and log/write ordering.
+Fe b428098ab builds all eight production contracts at `-O1`, passes all 14 Fe
+tests, all 482 Foundry tests (1,000 cases per fuzz test), and the full Hardhat
+suite (402 passing, one pending). The ABIs differ from the previous Fe master
+33ee9be28 build only in no longer listing the implicit `Panic(uint256)` error.
+The rooted-storage differential passes against pinned Solidity and the
+33ee9be28 artifacts in both transient and forced persistent guard modes,
+including exact storage slots, event bytes, map hashes, and log/write ordering.
 
-The refreshed build retains the two documented `--both` Foundry differences:
+The build retains the two documented `--both` Foundry differences:
 480 pass and `testRevertErc20Transfer` / `testMatchAuthRevertAndInvMagicValue`
 fail when the optimized port also replaces Solidity's reference behavior.
 
-Focused receipt measurements against the previous 093ff36d5 build are shown
-below. Both source initialization and compiler dependencies changed, so these
-are combined build deltas; they do not isolate a compiler optimization.
-The table uses transient guards. Persistent guards have the same deltas
-except fulfillment, which rises by 729 gas instead of 725. Intrinsic calldata
-gas is equal in each comparison.
+Focused receipt measurements against the 33ee9be28 build are shown below.
+Both the source (addresses, string literals) and the compiler changed, so
+these are combined build deltas. Both guard modes have the same deltas, and
+intrinsic calldata gas is equal in each comparison. The other measured calls
+change by at most 14 gas.
 
-| Call | Previous build | Refreshed build |
+| Call | 33ee9be28 build | Current build |
 | --- | ---: | ---: |
-| Cancel one order | 39,221 | 40,999 |
-| Validate one order | 56,274 | 58,462 |
-| Advanced ERC721/native self fulfillment | 129,529 | 130,254 |
-| Create zone | 1,447,815 | 1,607,485 |
+| Cancel one order | 40,999 | 40,962 |
+| Validate one order | 58,462 | 58,340 |
+| Advanced ERC721/native self fulfillment | 130,254 | 128,818 |
+| Name getter | 22,836 | 22,693 |
+| Create conduit | 1,004,310 | 954,081 |
+| Create zone | 1,607,485 | 1,607,463 |
 
 Historical October 11 verification used Fe 093ff36d5 / Sonatina 11722eac at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
@@ -189,11 +190,13 @@ order entry points and the conduit batch functions use numeric selectors
   high bits in an extra offer item's token or in a recipient the original
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
-- Code size: Fe master 33ee9be28 / committed Sonatina cdb34cbb at `-O1`
-  produces a 58,266-byte Seaport runtime and a 58,272-byte Consideration
+- Code size: Fe b428098ab / committed Sonatina 6bef907f at `-O1`
+  produces a 57,339-byte Seaport runtime and a 57,345-byte Consideration
   runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
-  harnesses lift the size limit. Periphery runtimes range from 4,450 to
-  14,538 bytes. The historical Fe 093ff36d5 / Sonatina 11722eac build
+  harnesses lift the size limit. Periphery runtimes range from 4,200 to
+  14,554 bytes. Fe master 33ee9be28 / Sonatina cdb34cbb produced
+  58,266/58,272-byte Seaport/Consideration runtimes, and periphery runtimes of
+  4,450 to 14,538 bytes. The historical Fe 093ff36d5 / Sonatina 11722eac build
   produced 57,600/57,606-byte Seaport/Consideration runtimes. The prior raw-storage/rooted-owner comparison on Fe d6c0f863e
   produced 57,412/57,681-byte Seaport and 57,418/57,687-byte Consideration
   runtimes. The earlier compiler-update growth from 49,815 bytes on Fe
