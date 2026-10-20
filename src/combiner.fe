@@ -166,9 +166,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 /// Validate order `index` and derive its current amounts. Returns whether it
 /// is restricted or a contract order, and whether a non-contract order
 /// offers native tokens. Unavailable orders get a zero hash and numerator.
-/// Kept out of line so its frame does not join its caller's.
 #[arithmetic(unchecked)]
-#[inline(never)]
 fn validate_and_prepare_order(
     _ env: Env,
     book: mut Book,
@@ -526,9 +524,9 @@ uses (
     execution_array(executions)
 }
 
-/// Kept out of line, like `validate_and_prepare_order`, so that the values
-/// it keeps across calls take a frame of its own instead of its caller's,
-/// which lies below every heap allocation.
+/// Kept out of line so that the values it keeps across calls take a frame
+/// of its own instead of its caller's, which lies below every heap
+/// allocation.
 #[inline(never)]
 fn apply_fulfillment_into(
     _ book: mut Book,
