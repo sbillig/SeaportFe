@@ -205,19 +205,14 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
 }
 
 /// `_decodeAdvancedOrders`, `_decodeOrdersAsAdvancedOrders` and their
-/// single-order forms: `count` orders, element `i` of the array `input` (or
-/// `input` itself when `single`), as `AdvancedOrder`s (`advanced`) or
-/// `Order`s.
+/// single-order forms: the first `count` elements of the array `input`, as
+/// `AdvancedOrder`s (`advanced`) or `Order`s.
 #[arithmetic(unchecked)]
-fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool) -> Book {
+fn build_book(_ input: CalldataView, count: usize, advanced: bool) -> Book {
     var total: usize = 0
     var i: usize = 0
     while i < count {
-        let order = if single {
-            input
-        } else {
-            input.dynamic_element(i as u256)
-        }
+        let order = input.dynamic_element(i as u256)
         let p = order.child(0)
         total += (p.child(64).len() + p.child(96).len()) as usize
         i += 1
@@ -232,11 +227,7 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool)
     var start: usize = 0
     i = 0
     while i < count {
-        let order = if single {
-            input
-        } else {
-            input.dynamic_element(i as u256)
-        }
+        let order = input.dynamic_element(i as u256)
         let p = order.child(0)
         let offer = p.child(64)
         let consideration = p.child(96)
@@ -288,17 +279,12 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool)
 
 /// The orders of the `AdvancedOrder[]` (`advanced`) or `Order[]` at `input`.
 pub fn orders_book(_ input: CalldataView, advanced: bool) -> Book {
-    build_book(
-        input,
-        count: input.len() as usize,
-        advanced,
-        single: false,
-    )
+    build_book(input, count: input.len() as usize, advanced)
 }
 
-/// The `AdvancedOrder` (`advanced`) or `Order` at `input`.
-pub fn single_order(_ input: CalldataView, advanced: bool) -> Book {
-    build_book(input, count: 1, advanced, single: true)
+/// The `AdvancedOrder` (`advanced`) or `Order` that is the first of `args`.
+pub fn single_order(_ args: CalldataView, advanced: bool) -> Book {
+    build_book(args.heads(), count: 1, advanced)
 }
 
 /// `_decodeCriteriaResolvers`

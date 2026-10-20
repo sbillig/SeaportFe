@@ -223,7 +223,8 @@ uses (
 )
 {
     let args = CalldataView::arguments(64)
-    var book = single_order(args.struct_argument(offset: 0, size: 64), advanced: false)
+    let _ = args.struct_argument(offset: 0, size: 64)
+    var book = single_order(args, advanced: false)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
@@ -245,10 +246,10 @@ uses (
 )
 {
     let args = CalldataView::arguments(128)
-    let order = args.struct_argument(offset: 0, size: 160)
+    let _ = args.struct_argument(offset: 0, size: 160)
     let criteria = args.array_argument(32)
     let recipient = args.checked_address(96)
-    var book = single_order(order, advanced: true)
+    var book = single_order(args, advanced: true)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
