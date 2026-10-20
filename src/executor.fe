@@ -226,12 +226,20 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     disarmed
 }
 
+/// `derive_conduit`, kept out of line: a function without calls keeps its
+/// CREATE2 preimage in the shared scratch area, while inlined the preimage
+/// took three words of the caller's frame.
+#[inline(never)]
+fn conduit_address(_ env: Env, conduit_key: u256) -> Address {
+    derive_conduit(env, conduit_key)
+}
+
 /// `_callConduitUsingOffsets`: call the conduit and require the `execute`
 /// magic value.
 pub fn call_conduit(_ env: Env, conduit_key: u256, args: MemSpan)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let conduit = derive_conduit(env, conduit_key)
+    let conduit = conduit_address(env, conduit_key)
     var ret = MemBuffer::with_capacity(32)
     // Short returndata overwrites only a prefix of this zero word, as
     // `return_word` with a zero initial word reads it.
