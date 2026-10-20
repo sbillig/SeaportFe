@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
-use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Call, Ctx, Log, RawOps, revert_error}
+use core::abi::store_word
+use core::ptr
+use std::abi::Bytes32
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_empty, revert_error}
+use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -10,7 +13,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::single_order
+use super::model::{OrderState, checked_enum, orders_book}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -20,11 +23,13 @@ use super::status::{
     set_validated,
     verify_order_status,
 }
-use super::types::{CONTRACT, Order, OrderComponents}
+use super::types::CONTRACT
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
-/// cannot be cancelled.
-pub fn cancel(_ env: Env, orders: DynArray<OrderComponents>) -> bool
+/// cannot be cancelled. The fields read through Solidity's typed calldata
+/// accessors get their checks; the hash covers the raw words.
+#[arithmetic(unchecked)]
+pub fn cancel(_ env: Env, orders: CalldataView) -> bool
 uses (
     store: mut OrderStore,
     guard_state: u256,
@@ -35,21 +40,23 @@ uses (
 {
     assert_non_reentrant(env)
     var any_invalid = false
-    var i: usize = 0
-    while i < orders.len() {
-        let order = orders.get(i)
-        if order.orderType == CONTRACT
-            || (ctx.caller() != order.offerer && ctx.caller() != order.zone) {
+    var i: u256 = 0
+    let len = orders.len()
+    while i < len {
+        let order = orders.components_element(i)
+        let offerer = order.checked_address(0)
+        let zone = order.checked_address(32)
+        let order_type = order.word(128)
+        if order_type > 4 {
+            revert_empty()
+        }
+        if order_type == CONTRACT as u256 || (ctx.caller() != offerer && ctx.caller() != zone) {
             any_invalid = true
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
         log.emit(
-            OrderCancelled {
-                orderHash: Bytes32 { val: order_hash },
-                offerer: order.offerer,
-                zone: order.zone,
-            },
+            OrderCancelled { orderHash: Bytes32 { val: order_hash }, offerer, zone },
         )
         i += 1
     }
@@ -60,8 +67,8 @@ uses (
 }
 
 /// `_validate`: mark signed orders as validated so that later fulfillments
-/// skip signature verification.
-pub fn validate(_ env: Env, orders: DynArray<Order>) -> bool
+/// skip signature verification. Seaport decodes all orders first.
+pub fn validate(_ env: Env, orders: CalldataView) -> bool
 uses (
     store: mut OrderStore,
     guard_state: u256,
@@ -72,13 +79,13 @@ uses (
     log: mut Log,
 )
 {
+    let book = orders_book(orders, advanced: false)
     assert_non_reentrant(env)
     var i: usize = 0
-    while i < orders.len() {
-        let book = single_order(orders.get(i))
-        let order = ref book.orders[(0) as usize]
-        if order.order_type != CONTRACT as u256 {
-            let order_hash = consideration_length_checked_order_hash(book, order)
+    while i < book.orders.len() {
+        let order = ref book.orders[i]
+        if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
+            let order_hash = consideration_length_checked_order_hash(order)
             let status = read_status(order_hash)
             verify_order_status(
                 order_hash,
@@ -97,15 +104,90 @@ uses (
                     signature: order.signature,
                 )
                 set_validated(order_hash)
-                log.emit(
-                    OrderValidated {
-                        orderHash: Bytes32 { val: order_hash },
-                        orderParameters: orders.get(i).parameters,
-                    },
-                )
+                emit_order_validated(order, order_hash)
             }
         }
         i += 1
     }
     true
+}
+
+/// `OrderValidated(orderHash, orderParameters)`, as Solidity encodes
+/// Seaport's memory copy of the unchanged order: the raw calldata words with
+/// addresses cleaned and item types checked. The order type is checked.
+#[arithmetic(unchecked)]
+fn emit_order_validated(_ order: OrderState, order_hash: u256)
+uses (log: mut Log)
+{
+    let offer_size = 32 + order.offer_len * 160
+    let consideration_at = 0x1a0 + offer_size
+    let consideration_size = 32 + order.consideration_len * 192
+    let size = consideration_at + consideration_size
+    let data = ptr::alloc_bytes(size)
+    let offer = ptr::offset_bytes(data, 0x1a0)
+    let consideration = ptr::offset_bytes(data, consideration_at)
+    let p = order.params
+    // Every word of the `size` bytes allocated above is written: the order
+    // type through the original consideration count, then each item array
+    // with its masked length, come from calldata.
+    unsafe {
+        store_word(ptr: data, value: order_hash)
+        store_word(ptr: ptr::offset_bytes(data, 0x20), value: 0x40)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x40),
+            value: order.offerer.word(),
+        )
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x60),
+            value: order.zone.word(),
+        )
+        store_word(ptr: ptr::offset_bytes(data, 0x80), value: 0x160)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0xa0),
+            value: consideration_at - 0x40,
+        )
+        p.offset(128).copy_to(ptr::offset_bytes(data, 0xc0), len: 224)
+        p.child(64).copy_to(offer, len: offer_size)
+        store_word(ptr: offer, value: order.offer_len)
+        p.child(96).copy_to(consideration, len: consideration_size)
+        store_word(ptr: consideration, value: order.consideration_len)
+    }
+    clean_items(offer, count: order.offer_len, consideration: false)
+    clean_items(
+        consideration,
+        count: order.consideration_len,
+        consideration: true,
+    )
+    log.log1(
+        data: unsafe {
+            ptr::MemSpan::from_raw_parts(ptr: data, len: size as usize)
+        },
+        topic0: OrderValidated::TOPIC0,
+    )
+}
+
+/// Check the item types and clean the addresses of the ABI item array at
+/// `items`, as Solidity's encoder reads them from memory.
+#[arithmetic(unchecked)]
+fn clean_items(_ items: *u8, count: u256, consideration: bool) {
+    let stride: u256 = if consideration { 192 } else { 160 }
+    var i: u256 = 0
+    while i < count {
+        let item = ptr::offset_bytes(items, 32 + i * stride)
+        // The item lies in the event buffer written by the caller.
+        unsafe {
+            let _ = checked_enum(*ptr::cast<u8, u256>(item), variants: 6)
+            clean_address(ptr::offset_bytes(item, 32))
+            if consideration {
+                clean_address(ptr::offset_bytes(item, 160))
+            }
+        }
+        i += 1
+    }
+}
+
+/// Truncate the word at `at` to an address; `at` must be a live word.
+unsafe fn clean_address(_ at: *u8) {
+    let word = ptr::cast<u8, u256>(at)
+    *word = Address::from_word_truncate(*word).word()
 }

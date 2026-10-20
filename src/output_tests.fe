@@ -1,0 +1,63 @@
+use core::ptr::MemArray
+use std::evm::Address
+use super::applier::ExecutionState
+use super::combiner::{bool_array, execution_array}
+
+#[test]
+fn execution_output_truncates_item_types_and_keeps_words() {
+    var executions = MemArray<ExecutionState>::new_zeroed(2)
+    executions[0] = ExecutionState {
+        item_type: 0x102,
+        token: Address::new(17),
+        identifier: 1 << 255,
+        amount: 5,
+        recipient: Address::new(23),
+        offerer: Address::new(29),
+        conduit_key: !(0 as u256),
+    }
+    executions[1] = ExecutionState {
+        item_type: 1,
+        token: Address::new(18),
+        identifier: 0,
+        amount: 6,
+        recipient: Address::new(24),
+        offerer: Address::new(30),
+        conduit_key: 7,
+    }
+    let output = execution_array(executions)
+    assert(output.len() == 2 && output.encoded_size() == 32 + 2 * 224)
+    let first = output.get(0)
+    assert(
+        first.item.itemType == 2 && first.item.token == Address::new(17),
+    )
+    assert(
+        first.item.identifier == 1 << 255 && first.item.amount == 5,
+    )
+    assert(
+        first.item.recipient == Address::new(23) && first.offerer == Address::new(29),
+    )
+    assert(first.conduitKey.val == !(0 as u256))
+    let second = output.get(1)
+    assert(
+        second.item.itemType == 1 && second.item.token == Address::new(18),
+    )
+    assert(second.item.identifier == 0 && second.item.amount == 6)
+    assert(
+        second.item.recipient == Address::new(24) && second.offerer == Address::new(30),
+    )
+    assert(second.conduitKey.val == 7)
+    let empty = execution_array(MemArray<ExecutionState>::new_zeroed(0))
+    assert(empty.len() == 0 && empty.encoded_size() == 32)
+}
+
+#[test]
+fn bool_output_encodes_each_flag_as_a_word() {
+    var values = MemArray<bool>::new_zeroed(3)
+    values[0] = true
+    values[2] = true
+    let output = bool_array(values)
+    assert(output.len() == 3 && output.encoded_size() == 128)
+    assert(output.get(0) && !output.get(1) && output.get(2))
+    let empty = bool_array(MemArray<bool>::new_zeroed(0))
+    assert(empty.len() == 0 && empty.encoded_size() == 32)
+}

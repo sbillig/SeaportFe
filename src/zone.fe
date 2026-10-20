@@ -5,7 +5,7 @@
 #![arithmetic(unchecked)]
 use super::status::OrderStore
 use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes32}
+use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
 use core::ptr::MemArray
 use super::errors::{
@@ -14,6 +14,7 @@ use super::errors::{
     InvalidRestrictedOrder,
 }
 use super::lowlevel::revert_with_reason_if_one_is_returned
+use super::abi_view::CalldataView
 use super::buffer::{Buffer, read_word, return_word}
 use super::model::{Book, Item, OrderState}
 use super::status::take_contract_nonce
@@ -94,11 +95,11 @@ fn padded(_ len: u256) -> u256 {
     (len + 31) & !(31 as u256)
 }
 
-fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: Bytes) -> u256 {
-    let size = 32 + padded(bytes.len() as u256)
-    dst.write(offset, value: bytes.len() as u256)
-    dst.copy_from(offset: offset + 32, source: bytes.payload_span())
-    size
+fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: CalldataView) -> u256 {
+    let len = bytes.len()
+    dst.write(offset, value: len)
+    dst.copy_calldata(offset: offset + 32, source: bytes.offset(32), len)
+    32 + padded(len)
 }
 
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
@@ -358,7 +359,7 @@ uses (ctx: Ctx)
         + 32
         + order.consideration_len * 128
         + 32
-        + padded(order.extra_data.len() as u256)
+        + padded(order.extra_data.len())
     var data = Buffer::new(size)
     data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
     let head: u256 = 4

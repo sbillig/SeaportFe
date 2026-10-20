@@ -4,8 +4,9 @@
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
 use core::ptr::{MemArray, MemBuffer}
 use std::abi::{Bytes, Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
-use super::buffer::Buffer
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, keccak_words, keccak256, revert_error}
+use super::abi_view::CalldataView
+use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
@@ -38,7 +39,7 @@ use super::status::{
     set_reentrancy_guard,
     verify_order_status,
 }
-use super::types::{ReceivedItem, SpentItem}
+use super::types::{ERC721, ReceivedItem, SpentItem}
 use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
@@ -268,13 +269,22 @@ uses (
                 ],
             ),
         )
-    var received = MemArray<ReceivedItem>::new_zeroed((total_recipients + 1) as usize)
-    received[0] = ReceivedItem {
-        itemType: received_item_type.downcast_truncate(),
-        token: cd_address(CONSIDERATION_TOKEN),
-        identifier: cd(CONSIDERATION_IDENTIFIER),
-        amount: cd(CONSIDERATION_AMOUNT),
-        recipient: offerer,
+    // OrderFulfilled data: orderHash, recipient, the offer and consideration
+    // offsets, the offer (one SpentItem) and the consideration (the primary
+    // item and one ReceivedItem per additional recipient). Item types come
+    // from byte maps, so they are their own `uint8` truncation.
+    var event = Buffer::new(0x140 + (total_recipients + 1) * 160)
+    // The buffer holds every word written to it below.
+    unsafe {
+        event.put(offset: 0x120, value: total_recipients + 1)
+        event.put(offset: 0x140, value: received_item_type)
+        event.put(
+                offset: 0x160,
+                value: cd_address(CONSIDERATION_TOKEN).word(),
+            )
+        event.put(offset: 0x180, value: cd(CONSIDERATION_IDENTIFIER))
+        event.put(offset: 0x1a0, value: cd(CONSIDERATION_AMOUNT))
+        event.put(offset: 0x1c0, value: offerer.word())
     }
     var combined_recipients: u256 = 0
     var i: u256 = 0
@@ -299,12 +309,17 @@ uses (
                 )
         }
         combined_recipients = combined_recipients | recipient
-        received[(i + 1) as usize] = ReceivedItem {
-            itemType: additional_recipients_item_type.downcast_truncate(),
-            token: additional_recipients_token,
-            identifier: 0,
-            amount,
-            recipient: Address::from_word_truncate(recipient),
+        // The identifier stays zero. Only clean recipient words pass the
+        // check below, before the event is emitted.
+        let out = 0x1e0 + i * 160
+        unsafe {
+            event.put(offset: out, value: additional_recipients_item_type)
+            event.put(
+                    offset: out + 32,
+                    value: additional_recipients_token.word(),
+                )
+            event.put(offset: out + 96, value: amount)
+            event.put(offset: out + 128, value: recipient)
         }
         i += 1
     }
@@ -340,24 +355,22 @@ uses (
         ],
     )
 
-    var spent = MemArray<SpentItem>::new_zeroed(1)
-    spent[0] = SpentItem {
-        itemType: offered_item_type.downcast_truncate(),
-        token: cd_address(OFFER_TOKEN),
-        identifier: cd(OFFER_IDENTIFIER),
-        amount: cd(OFFER_AMOUNT),
+    unsafe {
+        event.put(offset: 0, value: order_hash)
+        event.put(offset: 0x20, value: ctx.caller().word())
+        event.put(offset: 0x40, value: 0x80)
+        event.put(offset: 0x60, value: 0x120)
+        event.put(offset: 0x80, value: 1)
+        event.put(offset: 0xa0, value: offered_item_type)
+        event.put(offset: 0xc0, value: cd_address(OFFER_TOKEN).word())
+        event.put(offset: 0xe0, value: cd(OFFER_IDENTIFIER))
+        event.put(offset: 0x100, value: cd(OFFER_AMOUNT))
     }
-    let offer_items = DynArray::from_slice(spent.as_slice())
-    let consideration_items = DynArray::from_slice(received.as_slice())
-    log.emit(
-        OrderFulfilled {
-            orderHash: Bytes32 { val: order_hash },
-            offerer,
-            zone: cd_address(ZONE),
-            recipient: ctx.caller(),
-            offer: offer_items,
-            consideration: consideration_items,
-        },
+    log.log3(
+        data: event.span(),
+        topic0: OrderFulfilled::TOPIC0,
+        topic1: offerer.word(),
+        topic2: cd_address(ZONE).word(),
     )
 
     // _validateBasicOrder
@@ -373,7 +386,8 @@ uses (
             env,
             offerer,
             order_hash,
-            signature: basic_order_signature(),
+            // Read in place with the length masked like seaport-core's decoder.
+            signature: CalldataView::at(cd(SIGNATURE_HEAD) + 0x24),
         )
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
@@ -381,22 +395,6 @@ uses (
     }
     set_basic_order_filled(order_hash)
     order_hash
-}
-
-/// The signature `bytes`, with the length masked to 32 bits like
-/// seaport-core's decoder.
-#[arithmetic(unchecked)]
-fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
-    let at = cd(SIGNATURE_HEAD) + 0x24
-    let len = cd(at) & 0xffffffff
-    var payload = MemBuffer::with_capacity(len as usize)
-    ops.calldatacopy(
-        dest: mut payload,
-        dest_offset: 0,
-        src_offset: at + 32,
-        len,
-    )
-    Bytes::from_payload(source: payload.span())
 }
 
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the

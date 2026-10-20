@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
 use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
+use super::buffer::Buffer
 use super::amount::apply_fraction
 use core::ptr::MemArray
 use super::criteria::apply_criteria_resolvers
@@ -23,7 +24,7 @@ use super::executor::{
     trigger_if_armed,
 }
 use super::hashing::{Env, derive_order_hash}
-use super::model::{Book, Item, OrderState, Resolvers}
+use super::model::{Book, Item, OrderState, Resolvers, checked_enum}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -36,7 +37,7 @@ use super::status::{
     update_status,
     verify_order_status,
 }
-use super::types::{CONTRACT, NATIVE, ReceivedItem, SpentItem}
+use super::types::{CONTRACT, NATIVE}
 use super::zone::{
     assert_restricted_advanced_order_validity,
     check_restricted_advanced_order_authorization,
@@ -56,24 +57,24 @@ uses (ctx: Ctx)
 }
 
 /// `_assertConsiderationLengthAndGetOrderHash`
-pub fn consideration_length_checked_order_hash(_ book: Book, order: OrderState) -> u256
+pub fn consideration_length_checked_order_hash(_ order: OrderState) -> u256
 uses (store: OrderStore)
 {
     if order.consideration_len < order.total_original {
         revert_error(MissingOriginalConsiderationItems {})
     }
-    derive_order_hash(book, order, counter: get_counter(order.offerer))
+    derive_order_hash(
+        order.params,
+        consideration_count: order.total_original,
+        counter: get_counter(order.offerer),
+    )
 }
 
 /// `_validateOrder`: the order hash and the fraction that can be filled now,
 /// or a zero fraction for an order that is not fillable (only when
 /// `revert_on_invalid` is false). Contract orders yield `(1, 1, 1)`.
 #[arithmetic(unchecked)]
-pub fn validate_order(_ env: Env, book: Book, order: OrderState, revert_on_invalid: bool) -> (
-    u256,
-    u256,
-    u256,
-)
+pub fn validate_order(_ env: Env, order: OrderState, revert_on_invalid: bool) -> (u256, u256, u256)
 uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     if !verify_time(
@@ -85,7 +86,8 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     }
     let numerator = order.numerator
     let denominator = order.denominator
-    if order.order_type == CONTRACT as u256 {
+    let order_type = checked_enum(order.order_type, variants: 5)
+    if order_type == CONTRACT as u256 {
         if numerator * denominator != 1 {
             revert_error(BadFraction {})
         }
@@ -94,10 +96,10 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     if numerator > denominator || numerator == 0 {
         revert_error(BadFraction {})
     }
-    if numerator < denominator && order.order_type & 1 == 0 {
+    if numerator < denominator && order_type & 1 == 0 {
         revert_error(PartialFillsNotEnabledForOrder {})
     }
-    let order_hash = consideration_length_checked_order_hash(book, order)
+    let order_hash = consideration_length_checked_order_hash(order)
     let raw_status = raw_status(order_hash)
     let status = unpack_status(raw_status)
     if !verify_order_status(
@@ -239,55 +241,77 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem> {
-    var out = MemArray<SpentItem>::new_zeroed(count as usize)
+/// Write `count` items of `book` from `start` at `offset` as an ABI
+/// `SpentItem[]`, or with `received` as a `ReceivedItem[]`; returns its size.
+/// The words are those of the typed event fields: the item type truncated to
+/// `uint8`, the current amount and the receiver.
+#[arithmetic(unchecked)]
+fn write_fulfilled_items(
+    _ dst: mut Buffer,
+    offset: u256,
+    book: Book,
+    start: u256,
+    count: u256,
+    received: bool,
+) -> u256 {
+    let stride: u256 = if received { 160 } else { 128 }
+    let size = dst.check_array(offset, count, stride)
+    // Every word below lies in the checked range, so no offset overflows.
+    unsafe {
+        dst.put(offset, value: count)
+    }
     var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
-        out[i as usize] = SpentItem {
-            itemType: item.item_type.downcast_truncate(),
-            token: item.token,
-            identifier: item.identifier,
-            amount: item.amount,
+        let out = offset + 32 + i * stride
+        unsafe {
+            dst.put(offset: out, value: item.item_type & 0xff)
+            dst.put(offset: out + 32, value: item.token.word())
+            dst.put(offset: out + 64, value: item.identifier)
+            dst.put(offset: out + 96, value: item.amount)
+            if received {
+                dst.put(offset: out + 128, value: item.receiver.word())
+            }
         }
         i += 1
     }
-    DynArray::from_slice(out.as_slice())
+    size
 }
 
-pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
-    var out = MemArray<ReceivedItem>::new_zeroed(count as usize)
-    var i: u256 = 0
-    while i < count {
-        let item = ref book.items[(start + i) as usize]
-        out[i as usize] = ReceivedItem {
-            itemType: item.item_type.downcast_truncate(),
-            token: item.token,
-            identifier: item.identifier,
-            amount: item.amount,
-            recipient: item.receiver,
-        }
-        i += 1
-    }
-    DynArray::from_slice(out.as_slice())
-}
-
+/// `OrderFulfilled`, encoded directly into the log data.
 pub fn emit_order_fulfilled(_ order_hash: u256, book: Book, order: OrderState, recipient: Address)
 uses (log: mut Log)
 {
-    log.emit(
-        OrderFulfilled {
-            orderHash: Bytes32 { val: order_hash },
-            offerer: order.offerer,
-            zone: order.zone,
-            recipient,
-            offer: spent_items(book, start: order.offer_start, count: order.offer_len),
-            consideration: received_items(
-                book,
-                start: order.consideration_start,
-                count: order.consideration_len,
-            ),
-        },
+    // Head: orderHash, recipient and the offer and consideration offsets.
+    let consideration_at = 0xa0 + order.offer_len * 128
+    var data = Buffer::new(consideration_at + 32 + order.consideration_len * 160)
+    unsafe {
+        data.put(offset: 0, value: order_hash)
+        data.put(offset: 32, value: recipient.word())
+        data.put(offset: 64, value: 0x80)
+        data.put(offset: 96, value: consideration_at)
+    }
+    write_fulfilled_items(
+        mut data,
+        offset: 0x80,
+        book,
+        start: order.offer_start,
+        count: order.offer_len,
+        received: false,
+    )
+    write_fulfilled_items(
+        mut data,
+        offset: consideration_at,
+        book,
+        start: order.consideration_start,
+        count: order.consideration_len,
+        received: true,
+    )
+    log.log3(
+        data: data.span(),
+        topic0: OrderFulfilled::TOPIC0,
+        topic1: order.offerer.word(),
+        topic2: order.zone.word(),
     )
 }
 
@@ -311,7 +335,7 @@ uses (
     log: mut Log,
 )
 {
-    let order_type = book.orders[(0) as usize].order_type
+    let order_type = checked_enum(book.orders[(0) as usize].order_type, variants: 5)
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
     if order_type != CONTRACT as u256 {
         fulfill_single_order(env, mut book, resolvers, fulfiller_conduit_key, recipient)
@@ -373,7 +397,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
-        book,
         order: ref book.orders[(0) as usize],
         revert_on_invalid: true,
     )

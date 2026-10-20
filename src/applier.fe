@@ -3,7 +3,6 @@
 #![arithmetic(unchecked)]
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
 use std::evm::keccak_words
-use core::ptr::MemArray
 use super::errors::{
     InvalidFulfillmentComponentData,
     MismatchedFulfillmentOfferAndConsiderationComponents,
@@ -11,7 +10,7 @@ use super::errors::{
     MissingItemAmount,
     OfferAndConsiderationRequiredOnFulfillment,
 }
-use super::model::{Book, Component, Group, Groups, Item, OrderState}
+use super::model::{Book, Group, Groups}
 use super::types::OFFER
 
 /// An `Execution`: a `ReceivedItem` plus the source and conduit key.
@@ -58,7 +57,6 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 /// the front of the array.
 pub fn aggregate_items(
     _ book: mut Book,
-    groups: Groups,
     group: Group,
     consideration: bool,
     offerer: Address,
@@ -71,8 +69,8 @@ pub fn aggregate_items(
     var amount: u256 = 0
     var error_buffer: u256 = 0
     var k: u256 = 0
-    while k < group.len {
-        let component = groups.components[(group.start + k) as usize]
+    while k < group.len() {
+        let component = group.component(k)
         if component.order_index >= book.orders.len() as u256 {
             revert_error(InvalidFulfillmentComponentData {})
         }
@@ -142,14 +140,13 @@ pub fn apply_fulfillment(
     groups: Groups,
     fulfillment_index: u256,
 ) -> ExecutionState {
-    let offer_group = groups.list[(2 * fulfillment_index) as usize]
-    let consideration_group = groups.list[(2 * fulfillment_index + 1) as usize]
-    if offer_group.len == 0 || consideration_group.len == 0 {
+    let offer_group = groups.group(2 * fulfillment_index)
+    let consideration_group = groups.group(2 * fulfillment_index + 1)
+    if offer_group.len() == 0 || consideration_group.len() == 0 {
         revert_error(OfferAndConsiderationRequiredOnFulfillment {})
     }
     let (consideration, consideration_first) = aggregate_items(
         mut book,
-        groups,
         group: consideration_group,
         consideration: true,
         offerer: Address::zero(),
@@ -161,7 +158,6 @@ pub fn apply_fulfillment(
     }
     let (offered, offer_first) = aggregate_items(
         mut book,
-        groups,
         group: offer_group,
         consideration: false,
         offerer: Address::zero(),
@@ -180,12 +176,11 @@ pub fn apply_fulfillment(
     }
     // The unmatched rest stays on the first used item of the larger side.
     let consideration_left = consideration.amount > execution.amount
-    let component = if consideration_left {
-        consideration_group.start + consideration_first
+    let target = if consideration_left {
+        consideration_group.component(consideration_first)
     } else {
-        offer_group.start + offer_first
+        offer_group.component(offer_first)
     }
-    let target = groups.components[(component) as usize]
     let order = ref book.orders[(target.order_index) as usize]
     let start = if consideration_left {
         order.consideration_start
@@ -213,13 +208,12 @@ pub fn aggregate_available(
 ) -> ExecutionState
 uses (ctx: Ctx)
 {
-    let group = groups.list[(index) as usize]
-    if group.len == 0 {
+    let group = groups.group(index)
+    if group.len() == 0 {
         revert_error(MissingFulfillmentComponentOnAggregation { side })
     }
     let (execution, _) = aggregate_items(
         mut book,
-        groups,
         group,
         consideration: side != OFFER,
         offerer: ctx.caller(),

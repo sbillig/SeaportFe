@@ -1,33 +1,51 @@
+use core::abi::store_word
+use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::{Bytes32, DynArray, dyn_array_from}
-use std::evm::Address
-use super::hashing::{bulk_order_typehash, derive_components_hash}
+use std::evm::{Address, Evm}
+use super::conduit_controller::ConduitController
+use super::hashing::bulk_order_typehash
+use super::seaport::{Seaport, SeaportMsg}
 use super::types::{ConsiderationItem, OfferItem, OrderComponents}
 
+pub fn deploy_seaport() -> Address uses (evm: mut Evm) {
+    let controller = evm.create2<ConduitController>(value: 0, args: (), salt: 0)
+    evm.create2<Seaport>(value: 0, args: (controller,), salt: 1)
+}
+
+/// `getOrderHash`, which hashes its calldata argument.
 fn hash_components(
     offer: DynArray<OfferItem>,
     consideration: DynArray<ConsiderationItem>,
     counter: u256,
-) -> u256 {
-    derive_components_hash(
-        OrderComponents {
-            offerer: Address::new(0xabc),
-            zone: Address::new(0xdef),
-            offer,
-            consideration,
-            orderType: 1,
-            startTime: 7,
-            endTime: 123,
-            zoneHash: Bytes32 { val: 0x42 },
-            salt: 9,
-            conduitKey: Bytes32 { val: 0x99 },
-            counter,
-        },
-    )
+) -> u256
+uses (evm: mut Evm)
+{
+    let order = OrderComponents {
+        offerer: Address::new(0xabc),
+        zone: Address::new(0xdef),
+        offer,
+        consideration,
+        orderType: 1,
+        startTime: 7,
+        endTime: 123,
+        zoneHash: Bytes32 { val: 0x42 },
+        salt: 9,
+        conduitKey: Bytes32 { val: 0x99 },
+        counter,
+    }
+    let hash: Bytes32 = evm
+        .call(
+            addr: deploy_seaport(),
+            gas: 10000000,
+            value: 0,
+            message: SeaportMsg::GetOrderHash { order },
+        )
+    hash.val
 }
 
 // Expected hashes come from the deployed, pinned Solidity Seaport reference.
 #[test]
-fn components_hash_empty_item_arrays() {
+fn components_hash_empty_item_arrays() uses (evm: mut Evm) {
     assert(
         hash_components(
                 offer: DynArray<OfferItem>::empty(),
@@ -39,7 +57,9 @@ fn components_hash_empty_item_arrays() {
 }
 
 #[test]
-fn components_hash_distinct_item_types_and_full_width_counter() {
+fn components_hash_distinct_item_types_and_full_width_counter()
+uses (evm: mut Evm)
+{
     let offer = dyn_array_from(
         [
             OfferItem {
@@ -195,4 +215,193 @@ fn bulk_order_typehash_preserves_default_inputs() {
             )
             == fallback,
     )
+}
+
+/// Call `addr` with `selector` and `words`, sending the first `len` bytes.
+/// Returns whether it succeeded, the returndata length and its first word.
+pub fn call_component_words<const N: usize>(
+    _ addr: Address,
+    selector: u256,
+    words: [u256; N],
+    len: u256,
+) -> (bool, u256, u256)
+uses (evm: mut Evm)
+{
+    let data = MemBuffer::alloc((36 + (N as u256) * 32) as usize)
+    // `data` holds the selector and every word.
+    unsafe {
+        store_word(ptr: data.ptr(), value: selector << 224)
+    }
+    var i: usize = 0
+    while i < N {
+        unsafe {
+            store_word(
+                ptr: ptr::offset_bytes(data.ptr(), 4 + (i as u256) * 32),
+                value: words[i],
+            )
+        }
+        i += 1
+    }
+    var ret = MemBuffer::alloc(32)
+    let result = evm
+        .raw_call(
+            addr,
+            gas: 100000,
+            value: 0,
+            args: unsafe {
+                MemSpan::from_raw_parts(ptr: data.ptr(), len: len as usize)
+            },
+            ret: mut ret,
+        )
+    (result.success(), result.returndata_len(), ret.span().word_at(0))
+}
+
+// Raw-calldata results are pinned to the deployed optimized Solidity contract,
+// whose custom decoder differs from normal Solidity ABI materialization.
+#[test]
+fn components_hash_keeps_raw_words_and_masks_lengths() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    var words = [
+        32,
+        0xabc,
+        0xdef,
+        352,
+        544,
+        1,
+        7,
+        123,
+        0x42,
+        9,
+        0x99,
+        0,
+        1,
+        2,
+        0x123,
+        4,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        200,
+        200,
+        0x456,
+    ]
+    words[1] = 0xabc | (1 << 200)
+    let dirty_address = call_component_words(addr, selector: 0x79df72bd, words, len: 804)
+    assert(
+        dirty_address.0
+            && dirty_address.2
+                == 0x7e431fca3f1ca1a98ee37387b350bb68e4f3d05db3b56b4ec01521699995b123,
+    )
+    words[1] = 0xabc
+    words[13] = 256
+    let wide_type = call_component_words(addr, selector: 0x79df72bd, words, len: 804)
+    assert(
+        wide_type.0
+            && wide_type.2 == 0xa55a3426753b1d523d996ec3933913344f2f5eb5135a2973d6af93eef56488f7,
+    )
+    words[13] = 2
+    words[12] = 1 << 64
+    let masked_length = call_component_words(addr, selector: 0x79df72bd, words, len: 804)
+    assert(
+        masked_length.0
+            && masked_length.2
+                == 0x18df4f8111e29345fd8693dd4521f78facadc3fd726bfe81ee1f4246b3649b12,
+    )
+}
+
+#[test]
+fn components_hash_checks_head_and_zero_pads_tails() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    let words = [
+        32,
+        0xabc,
+        0xdef,
+        352,
+        544,
+        1,
+        7,
+        123,
+        0x42,
+        9,
+        0x99,
+        0,
+        1,
+        2,
+        0x123,
+        4,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        200,
+        200,
+        0x456,
+    ]
+    let missing_head = call_component_words(addr, selector: 0x79df72bd, words, len: 387)
+    assert(!missing_head.0 && missing_head.1 == 0)
+    let missing_tails = call_component_words(addr, selector: 0x79df72bd, words, len: 388)
+    assert(
+        missing_tails.0
+            && missing_tails.2
+                == 0x5550392b8abc641298481c4eef6a7c124628b7fa5795743525f4c55d794fe933,
+    )
+    let partial_item = call_component_words(addr, selector: 0x79df72bd, words, len: 500)
+    assert(
+        partial_item.0
+            && partial_item.2 == 0x9842b55c8b1c4cd874f1c6702262b63e4396b16ef2517dae293330c7262c90ed,
+    )
+}
+
+// `cancel` reads the offerer, zone and order type through Solidity's typed
+// calldata accessors, which reject dirty words with empty revert data.
+#[test]
+fn cancellation_fields_keep_typed_calldata_checks() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    var words = [32, 1, 32, evm.address().word(), 0, 352, 352, 0, 0, 0, 0, 0, 0, 0, 0]
+    let valid = call_component_words(addr, selector: 0xfd9f1e10, words, len: 484)
+    assert(valid.0 && valid.2 == 1)
+    words[7] = 4
+    let contract_order = call_component_words(addr, selector: 0xfd9f1e10, words, len: 484)
+    assert(
+        !contract_order.0 && contract_order.1 == 4 && contract_order.2 >> 224 == 0xfed398fc,
+    )
+    words[7] = 5
+    let bad_enum = call_component_words(addr, selector: 0xfd9f1e10, words, len: 484)
+    assert(!bad_enum.0 && bad_enum.1 == 0)
+    words[7] = 0
+    words[3] = evm.address().word() | (1 << 200)
+    let bad_offerer = call_component_words(addr, selector: 0xfd9f1e10, words, len: 484)
+    assert(!bad_offerer.0 && bad_offerer.1 == 0)
+    words[3] = evm.address().word()
+    words[4] = 1 << 200
+    let bad_zone = call_component_words(addr, selector: 0xfd9f1e10, words, len: 484)
+    assert(!bad_zone.0 && bad_zone.1 == 0)
+}
+
+// solc bounds a calldata struct-array element's relative offset with a
+// signed comparison, so a negative offset wraps to zero-padded calldata.
+#[test]
+fn cancellation_array_offsets_match_solc_signed_bound() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    let negative_offset = call_component_words(
+        addr,
+        selector: 0xfd9f1e10,
+        words: [32, 1, 1 << 255],
+        len: 100,
+    )
+    assert(
+        !negative_offset.0 && negative_offset.1 == 4 && negative_offset.2 >> 224 == 0xfed398fc,
+    )
+    let out_of_bounds = call_component_words(
+        addr,
+        selector: 0xfd9f1e10,
+        words: [32, 1, 32],
+        len: 100,
+    )
+    assert(!out_of_bounds.0 && out_of_bounds.1 == 0)
 }
