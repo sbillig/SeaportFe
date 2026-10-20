@@ -3,7 +3,7 @@
 // GettersAndDerivers.
 use std::evm::{Address, keccak256, keccak_words, create2_address}
 use core::abi::store_word
-use core::ptr::{self, MemArray, MemSpan}
+use core::ptr::{self, MemSpan}
 use super::abi_view::CalldataView
 use super::buffer::Buffer
 
@@ -82,11 +82,12 @@ pub fn derive_components_hash(_ order: CalldataView) -> u256 {
 #[arithmetic(unchecked)]
 fn hash_items(_ items: CalldataView, count: u256, consideration: bool) -> u256 {
     let stride: u256 = if consideration { 192 } else { 160 }
-    let scratch = ptr::alloc_bytes(224)
-    var hashes = unsafe {
-        MemArray<u256>::new_uninit(count as usize)
+    // The item hashes, then the typehash and one item to hash.
+    let hashes = ptr::alloc_bytes(count * 32 + 32 + stride)
+    let scratch = ptr::offset_bytes(hashes, count * 32)
+    let typed = unsafe {
+        MemSpan::from_raw_parts(ptr: scratch, len: (32 + stride) as usize)
     }
-    // `scratch` holds the typehash and one item.
     unsafe {
         store_word(
             ptr: scratch,
@@ -101,15 +102,18 @@ fn hash_items(_ items: CalldataView, count: u256, consideration: bool) -> u256 {
     while i < count {
         unsafe {
             items.element(index: i, stride).copy_to(ptr::offset_bytes(scratch, 32), len: stride)
+            store_word(
+                ptr: ptr::offset_bytes(hashes, i * 32),
+                value: keccak256(typed),
+            )
         }
-        hashes[i as usize] = keccak256(
-            unsafe {
-                MemSpan::from_raw_parts(ptr: scratch, len: (32 + stride) as usize)
-            },
-        )
         i += 1
     }
-    keccak256(hashes.span())
+    keccak256(
+        unsafe {
+            MemSpan::from_raw_parts(ptr: hashes, len: (count * 32) as usize)
+        },
+    )
 }
 
 /// keccak256(0x1901 ++ domainSeparator ++ orderHash)
