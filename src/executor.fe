@@ -58,22 +58,14 @@ pub fn transfer_buffer(_ transfers: u256) -> Buffer {
     Buffer::new(transfers * 0xc0)
 }
 
-/// Calldata of `words` argument words; `set_arg` fills them in.
 fn calldata_with_selector(_ selector: u256, _ words: u256) -> Buffer {
-    // The buffer holds the selector.
     var data = Buffer::new(4 + words * 32)
-    unsafe {
-        data.put(offset: 0, value: selector << 224)
-    }
+    data.write(offset: 0, value: selector << 224)
     data
 }
 
-/// Argument word `index`, which must be below the `words` of
-/// `calldata_with_selector`.
-unsafe fn set_arg(_ data: mut Buffer, _ index: u256, _ value: u256) {
-    unsafe {
-        data.put(offset: 4 + index * 32, value)
-    }
+fn set_arg(_ data: mut Buffer, _ index: u256, _ value: u256) {
+    data.write(offset: 4 + index * 32, value)
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
@@ -150,16 +142,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // all forwarded gas, and seaport-core still reverts with the custom error
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
-    // The buffer holds the three words written below.
     var failure = Buffer::new(0x44)
-    unsafe {
-        failure.put(
-                offset: 0,
-                value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
-            )
-        failure.put(offset: 0x04, value: to.word())
-        failure.put(offset: 0x24, value: amount)
-    }
+    failure.write(
+            offset: 0,
+            value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+        )
+    failure.write(offset: 0x04, value: to.word())
+    failure.write(offset: 0x24, value: amount)
     var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
@@ -296,14 +285,10 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if !acc.armed { return acc }
     let count = acc.count
     let size = 0x44 + count * 0xc0
-    // The buffer holds the selector, the offset and length words and then
-    // the transfers.
     var data = Buffer::new(size)
-    unsafe {
-        data.put(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-        data.put(offset: 4, value: 0x20)
-        data.put(offset: 0x24, value: count)
-    }
+    data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+    data.write(offset: 4, value: 0x20)
+    data.write(offset: 0x24, value: count)
     data.copy_from(
         offset: 0x44,
         source: buf.slice(offset: 0, len: count * 0xc0),
@@ -357,16 +342,12 @@ fn insert(
         acc.count = 0
     }
     let at = acc.count * 0xc0
-    buf.check_range(offset: at, len: 0xc0)
-    // The transfer lies in the checked range.
-    unsafe {
-        buf.put(offset: at, value: item_type)
-        buf.put(offset: at + 0x20, value: token.word())
-        buf.put(offset: at + 0x40, value: from.word())
-        buf.put(offset: at + 0x60, value: to.word())
-        buf.put(offset: at + 0x80, value: identifier)
-        buf.put(offset: at + 0xa0, value: amount)
-    }
+    buf.write(offset: at, value: item_type)
+    buf.write(offset: at + 0x20, value: token.word())
+    buf.write(offset: at + 0x40, value: from.word())
+    buf.write(offset: at + 0x60, value: to.word())
+    buf.write(offset: at + 0x80, value: identifier)
+    buf.write(offset: at + 0xa0, value: amount)
     acc.count = acc.count + 1
     acc
 }
@@ -377,12 +358,9 @@ pub fn perform_erc20_transfer(token: Address, from: Address, to: Address, amount
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    // Each index is below the argument count.
-    unsafe {
-        set_arg(mut args, 0, from.word())
-        set_arg(mut args, 1, to.word())
-        set_arg(mut args, 2, amount)
-    }
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
+    set_arg(mut args, 2, amount)
     var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_call(
@@ -423,12 +401,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_error(NoContract { account: token })
     }
     var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    // Each index is below the argument count.
-    unsafe {
-        set_arg(mut args, 0, from.word())
-        set_arg(mut args, 1, to.word())
-        set_arg(mut args, 2, identifier)
-    }
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
+    set_arg(mut args, 2, identifier)
     var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
@@ -458,16 +433,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if ctx.extcodesize(token) == 0 {
         revert_error(NoContract { account: token })
     }
-    // The empty `data` argument keeps its zeroed length word.
     var args = calldata_with_selector(ERC1155_SAFE_TRANSFER_FROM_SELECTOR, 6)
-    // Each index is below the argument count.
-    unsafe {
-        set_arg(mut args, 0, from.word())
-        set_arg(mut args, 1, to.word())
-        set_arg(mut args, 2, identifier)
-        set_arg(mut args, 3, amount)
-        set_arg(mut args, 4, 0xa0)
-    }
+    set_arg(mut args, 0, from.word())
+    set_arg(mut args, 1, to.word())
+    set_arg(mut args, 2, identifier)
+    set_arg(mut args, 3, amount)
+    set_arg(mut args, 4, 0xa0)
+    set_arg(mut args, 5, 0)
     var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
