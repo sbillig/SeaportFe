@@ -426,16 +426,19 @@ fn authorize_single_order(
 )
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
-    var order_hashes = MemArray<u256>::new_zeroed(1)
-    order_hashes[(0) as usize] = 0
-    let _ = check_restricted_advanced_order_authorization(
-        book,
-        order: ref book.orders[(0) as usize],
-        order_hashes,
-        order_hash,
-        order_index: 0,
-        revert_on_invalid: true,
-    )
+    // Only restricted orders consult their zone.
+    let order = ref book.orders[(0) as usize]
+    if order.order_type > 1 {
+        let order_hashes = MemArray<u256>::new_zeroed(1)
+        let _ = check_restricted_advanced_order_authorization(
+            book,
+            order,
+            order_hashes,
+            order_hash,
+            order_index: 0,
+            revert_on_invalid: true,
+        )
+    }
     let _ = update_status(
         order_hash,
         numerator: fill_numerator,
@@ -454,25 +457,19 @@ fn finish_single_order(
 )
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
+    let order = ref book.orders[(0) as usize]
     transfer_each(
         env,
         items: book.items,
-        order: ref book.orders[(0) as usize],
+        order,
         fulfiller_conduit_key,
         recipient,
     )
-    var order_hashes = MemArray<u256>::new_zeroed(1)
-    order_hashes[(0) as usize] = order_hash
-    assert_restricted_advanced_order_validity(
-        book,
-        order: ref book.orders[(0) as usize],
-        order_hashes,
-        order_hash,
-    )
-    emit_order_fulfilled(
-        order_hash,
-        book,
-        order: ref book.orders[(0) as usize],
-        recipient,
-    )
+    // Only restricted and contract orders call their zone or offerer.
+    if order.order_type > 1 {
+        var order_hashes = MemArray<u256>::new_zeroed(1)
+        order_hashes[(0) as usize] = order_hash
+        assert_restricted_advanced_order_validity(book, order, order_hashes, order_hash)
+    }
+    emit_order_fulfilled(order_hash, book, order, recipient)
 }

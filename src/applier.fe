@@ -175,15 +175,23 @@ pub fn apply_fulfillment(
             fulfillment_index,
         )
     }
-    if consideration.amount > execution.amount {
-        let target = consideration_group.component(consideration_first)
-        let order = ref book.orders[(target.order_index) as usize]
-        let item = mut book.items[(order.consideration_start + target.item_index) as usize]
+    // The unmatched rest stays on the first used item of the larger side.
+    let consideration_left = consideration.amount > execution.amount
+    let target = if consideration_left {
+        consideration_group.component(consideration_first)
+    } else {
+        offer_group.component(offer_first)
+    }
+    let order = ref book.orders[(target.order_index) as usize]
+    let start = if consideration_left {
+        order.consideration_start
+    } else {
+        order.offer_start
+    }
+    let item = mut book.items[(start + target.item_index) as usize]
+    if consideration_left {
         item.amount = consideration.amount - execution.amount
     } else {
-        let target = offer_group.component(offer_first)
-        let order = ref book.orders[(target.order_index) as usize]
-        let item = mut book.items[(order.offer_start + target.item_index) as usize]
         item.amount = execution.amount - consideration.amount
         execution.amount = consideration.amount
     }
