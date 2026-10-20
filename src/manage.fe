@@ -3,7 +3,7 @@
 use core::abi::store_word
 use core::ptr
 use std::abi::Bytes32
-use std::evm::{TSlot, Call, Ctx, Event, Log, RawOps, revert_empty, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_empty, revert_error}
 use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
@@ -13,7 +13,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::{Book, OrderState, checked_enum, orders_book}
+use super::model::{OrderState, checked_enum, orders_book}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -104,7 +104,7 @@ uses (
                     signature: order.signature,
                 )
                 set_validated(order_hash)
-                emit_order_validated(book, order, order_hash)
+                emit_order_validated(order, order_hash)
             }
         }
         i += 1
@@ -112,17 +112,24 @@ uses (
     true
 }
 
-/// `OrderValidated(orderHash, orderParameters)` from the unchanged order, as
-/// Solidity encodes Seaport's memory copy: addresses cleaned (the model holds
-/// them so) and item types checked.
+/// `OrderValidated(orderHash, orderParameters)`, as Solidity encodes
+/// Seaport's memory copy of the unchanged order: the raw calldata words with
+/// addresses cleaned and item types checked. The order type is checked.
 #[arithmetic(unchecked)]
-fn emit_order_validated(_ book: Book, _ order: OrderState, order_hash: u256)
+fn emit_order_validated(_ order: OrderState, order_hash: u256)
 uses (log: mut Log)
 {
-    let consideration_at = 0x1c0 + order.offer_len * 160
-    let size = consideration_at + 32 + order.consideration_len * 192
+    let offer_size = 32 + order.offer_len * 160
+    let consideration_at = 0x1a0 + offer_size
+    let consideration_size = 32 + order.consideration_len * 192
+    let size = consideration_at + consideration_size
     let data = ptr::alloc_bytes(size)
-    // Every word of the `size` bytes allocated above is written.
+    let offer = ptr::offset_bytes(data, 0x1a0)
+    let consideration = ptr::offset_bytes(data, consideration_at)
+    let p = order.params
+    // Every word of the `size` bytes allocated above is written: the order
+    // type through the original consideration count, then each item array
+    // with its masked length, come from calldata.
     unsafe {
         store_word(ptr: data, value: order_hash)
         store_word(ptr: ptr::offset_bytes(data, 0x20), value: 0x40)
@@ -139,40 +146,15 @@ uses (log: mut Log)
             ptr: ptr::offset_bytes(data, 0xa0),
             value: consideration_at - 0x40,
         )
-        store_word(
-            ptr: ptr::offset_bytes(data, 0xc0),
-            value: order.order_type,
-        )
-        store_word(
-            ptr: ptr::offset_bytes(data, 0xe0),
-            value: order.start_time,
-        )
-        store_word(ptr: ptr::offset_bytes(data, 0x100), value: order.end_time)
-        store_word(
-            ptr: ptr::offset_bytes(data, 0x120),
-            value: order.zone_hash,
-        )
-        store_word(ptr: ptr::offset_bytes(data, 0x140), value: order.salt)
-        store_word(
-            ptr: ptr::offset_bytes(data, 0x160),
-            value: order.conduit_key,
-        )
-        store_word(
-            ptr: ptr::offset_bytes(data, 0x180),
-            value: order.total_original,
-        )
+        p.offset(128).copy_to(ptr::offset_bytes(data, 0xc0), len: 224)
+        p.child(64).copy_to(offer, len: offer_size)
+        store_word(ptr: offer, value: order.offer_len)
+        p.child(96).copy_to(consideration, len: consideration_size)
+        store_word(ptr: consideration, value: order.consideration_len)
     }
-    write_items(
-        ptr::offset_bytes(data, 0x1a0),
-        book,
-        start: order.offer_start,
-        count: order.offer_len,
-        consideration: false,
-    )
-    write_items(
-        ptr::offset_bytes(data, consideration_at),
-        book,
-        start: order.consideration_start,
+    clean_items(offer, count: order.offer_len, consideration: false)
+    clean_items(
+        consideration,
         count: order.consideration_len,
         consideration: true,
     )
@@ -184,31 +166,28 @@ uses (log: mut Log)
     )
 }
 
-/// The ABI array of `count` items of `book` from `start`, written to `out`,
-/// which must have room for it.
+/// Check the item types and clean the addresses of the ABI item array at
+/// `items`, as Solidity's encoder reads them from memory.
 #[arithmetic(unchecked)]
-fn write_items(_ out: *u8, _ book: Book, start: u256, count: u256, consideration: bool) {
+fn clean_items(_ items: *u8, count: u256, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
-    unsafe {
-        store_word(ptr: out, value: count)
-    }
     var i: u256 = 0
     while i < count {
-        let item = ref book.items[(start + i) as usize]
-        let at = ptr::offset_bytes(out, 32 + i * stride)
+        let item = ptr::offset_bytes(items, 32 + i * stride)
+        // The item lies in the event buffer written by the caller.
         unsafe {
-            store_word(ptr: at, value: checked_enum(item.item_type, variants: 6))
-            store_word(ptr: ptr::offset_bytes(at, 32), value: item.token.word())
-            store_word(ptr: ptr::offset_bytes(at, 64), value: item.identifier)
-            store_word(ptr: ptr::offset_bytes(at, 96), value: item.start_amount)
-            store_word(ptr: ptr::offset_bytes(at, 128), value: item.end_amount)
+            let _ = checked_enum(*ptr::cast<u8, u256>(item), variants: 6)
+            clean_address(ptr::offset_bytes(item, 32))
             if consideration {
-                store_word(
-                    ptr: ptr::offset_bytes(at, 160),
-                    value: item.recipient.word(),
-                )
+                clean_address(ptr::offset_bytes(item, 160))
             }
         }
         i += 1
     }
+}
+
+/// Truncate the word at `at` to an address; `at` must be a live word.
+unsafe fn clean_address(_ at: *u8) {
+    let word = ptr::cast<u8, u256>(at)
+    *word = Address::from_word_truncate(*word).word()
 }
