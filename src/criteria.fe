@@ -60,24 +60,24 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     }
     i = 0
     while i < total_orders {
+        // `i` is below the order count, and each range lies in the pool.
         let order = unsafe {
-            *element(book.orders.ptr(), i)
+            ref *element(book.orders.ptr(), i)
         }
         if order.numerator != 0 {
+            let contract_order = order.order_type == CONTRACT as u256
             ensure_resolved(
-                book,
-                order_index: i,
-                start: order.consideration_start,
+                element(book.items.ptr(), order.consideration_start),
                 count: order.consideration_len,
-                order_type: order.order_type,
+                order_index: i,
+                contract_order,
                 selector: error_selector<UnresolvedConsiderationCriteria>(),
             )
             ensure_resolved(
-                book,
-                order_index: i,
-                start: order.offer_start,
+                element(book.items.ptr(), order.offer_start),
                 count: order.offer_len,
-                order_type: order.order_type,
+                order_index: i,
+                contract_order,
                 selector: error_selector<UnresolvedOfferCriteria>(),
             )
         }
@@ -85,25 +85,24 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     }
 }
 
-/// `_ensureAllRequiredCriteriaResolved`: criteria items stay unresolved only
-/// as wildcards of contract orders; `selector` names the side's error.
+/// `_ensureAllRequiredCriteriaResolved` for the `count` items at `items`:
+/// criteria items stay unresolved only as wildcards of contract orders;
+/// `selector` names the side's error.
 #[arithmetic(unchecked)]
 fn ensure_resolved(
-    _ book: Book,
-    order_index: u256,
-    start: u256,
+    _ items: *Item,
     count: u256,
-    order_type: u256,
+    order_index: u256,
+    contract_order: bool,
     selector: u256,
 ) {
     var j: u256 = 0
     while j < count {
-        // `start + j` lies in the pool: the order's range is part of it.
         let item = unsafe {
-            *element(book.items.ptr(), start + j)
+            ref *element(items, j)
         }
         if checked_enum(item.item_type, variants: 6) > 3
-            && (order_type != CONTRACT as u256 || item.identifier != 0) {
+            && (!contract_order || item.identifier != 0) {
             revert_with2(selector, order_index, j)
         }
         j += 1
