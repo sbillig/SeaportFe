@@ -464,8 +464,9 @@ fn aggregate_into(
 )
 uses (ctx: Ctx)
 {
-    executions[(slot) as usize] = aggregate_available(
+    aggregate_available(
         mut book,
+        execution: mut executions[(slot) as usize],
         side,
         groups,
         index,
@@ -532,7 +533,12 @@ fn apply_fulfillment_into(
     groups: Groups,
     index: u256,
 ) {
-    executions[(index) as usize] = apply_fulfillment(mut book, groups, fulfillment_index: index)
+    apply_fulfillment(
+        mut book,
+        execution: mut executions[(index) as usize],
+        groups,
+        fulfillment_index: index,
+    )
 }
 
 /// `_performFinalChecksAndExecuteOrders`: run the executions, transfer
