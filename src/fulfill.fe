@@ -2,7 +2,6 @@
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
 use std::abi::{Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
-use super::buffer::Buffer
 use super::amount::apply_fraction
 use core::ptr::MemArray
 use super::criteria::apply_criteria_resolvers
@@ -16,7 +15,6 @@ use super::errors::{
     PartialFillsNotEnabledForOrder,
 }
 use super::executor::{
-    Accumulator,
     Transfer,
     new_accumulator,
     transfer,
@@ -126,29 +124,32 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     (order_hash, fill_numerator, fill_denominator)
 }
 
-/// `_applyFractions`: current amounts of the partial fill; offer items go to
-/// `recipient`.
+/// `_applyFractions`: current amounts of the partial fill.
 #[arithmetic(unchecked)]
 fn apply_fractions(
     _ items: mut MemArray<Item>,
     order: OrderState,
     numerator: u256,
     denominator: u256,
-    recipient: Address,
 )
 uses (ctx: Ctx)
 {
     var any_native = false
     var i: u256 = 0
     while i < order.offer_len {
-        if apply_offer_fraction(
-            mut items,
-            order,
-            index: i,
+        let item = mut items[(order.offer_start + i) as usize]
+        let amount = apply_fraction(
+            start_amount: item.start_amount,
+            end_amount: item.end_amount,
             numerator,
             denominator,
-            recipient,
-        ) {
+            start_time: order.start_time,
+            end_time: order.end_time,
+            round_up: false,
+        )
+        item.amount = amount
+        item.original = amount
+        if item.item_type == NATIVE as u256 {
             any_native = true
         }
         i += 1
@@ -158,109 +159,76 @@ uses (ctx: Ctx)
     }
     i = 0
     while i < order.consideration_len {
-        apply_consideration_fraction(mut items, order, index: i, numerator, denominator)
+        let item = mut items[(order.consideration_start + i) as usize]
+        let amount = apply_fraction(
+            start_amount: item.start_amount,
+            end_amount: item.end_amount,
+            numerator,
+            denominator,
+            start_time: order.start_time,
+            end_time: order.end_time,
+            round_up: true,
+        )
+        item.amount = amount
+        item.original = amount
+        item.receiver = item.recipient
         i += 1
     }
 }
 
-/// Returns whether the item is a native token item.
-#[arithmetic(unchecked)]
-fn apply_offer_fraction(
-    _ items: mut MemArray<Item>,
-    order: OrderState,
-    index: u256,
-    numerator: u256,
-    denominator: u256,
-    recipient: Address,
-) -> bool
-uses (ctx: Ctx)
-{
-    let item = mut items[(order.offer_start + index) as usize]
-    let amount = apply_fraction(
-        start_amount: item.start_amount,
-        end_amount: item.end_amount,
-        numerator,
-        denominator,
-        start_time: order.start_time,
-        end_time: order.end_time,
-        round_up: false,
-    )
-    item.amount = amount
-    item.original = amount
-    item.receiver = recipient
-    item.item_type == NATIVE as u256
-}
-
-#[arithmetic(unchecked)]
-fn apply_consideration_fraction(
-    _ items: mut MemArray<Item>,
-    order: OrderState,
-    index: u256,
-    numerator: u256,
-    denominator: u256,
-)
-uses (ctx: Ctx)
-{
-    let item = mut items[(order.consideration_start + index) as usize]
-    let amount = apply_fraction(
-        start_amount: item.start_amount,
-        end_amount: item.end_amount,
-        numerator,
-        denominator,
-        start_time: order.start_time,
-        end_time: order.end_time,
-        round_up: true,
-    )
-    item.amount = amount
-    item.original = amount
-    item.receiver = item.recipient
-}
-
-pub fn item_transfer(_ item: Item) -> Transfer {
-    Transfer {
-        item_type: item.item_type,
-        token: item.token,
-        identifier: item.identifier,
-        amount: item.amount,
-        recipient: item.receiver,
-    }
-}
-
-/// `_transferEach`: offer items from the offerer, consideration items from
-/// the caller, then refund any native tokens left in the contract.
+/// `_transferEach`: offer items from the offerer to `recipient`,
+/// consideration items from the caller, then refund any native tokens left in
+/// the contract.
 #[arithmetic(unchecked)]
 fn transfer_each(
     _ env: Env,
-    items: mut MemArray<Item>,
+    items: MemArray<Item>,
     order: OrderState,
     fulfiller_conduit_key: u256,
     recipient: Address,
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var i: u256 = 0
-    while i < order.offer_len {
-        let item = mut items[(order.offer_start + i) as usize]
-        item.receiver = recipient
-        i += 1
-    }
     var buf = transfer_buffer(order.offer_len + order.consideration_len)
     var acc = new_accumulator()
-    i = 0
+    var i: u256 = 0
     while i < order.offer_len {
-        acc = transfer_offer_item(env, items, order, index: i, recipient, acc, mut buf)
+        let item = ref items[(order.offer_start + i) as usize]
+        acc = transfer(
+            Transfer {
+                item_type: item.item_type,
+                token: item.token,
+                identifier: item.identifier,
+                amount: item.amount,
+                recipient,
+            },
+            from: order.offerer,
+            conduit_key: order.conduit_key,
+            acc,
+            mut buf,
+            env,
+        )
         i += 1
     }
     i = 0
     while i < order.consideration_len {
-        acc = transfer_consideration_item(
-            env,
-            items,
-            order,
-            index: i,
-            fulfiller_conduit_key,
+        let item = ref items[(order.consideration_start + i) as usize]
+        if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
+            revert_error(InsufficientNativeTokensSupplied {})
+        }
+        acc = transfer(
+            Transfer {
+                item_type: item.item_type,
+                token: item.token,
+                identifier: item.identifier,
+                amount: item.amount,
+                recipient: item.receiver,
+            },
+            from: ctx.caller(),
+            conduit_key: fulfiller_conduit_key,
             acc,
             mut buf,
+            env,
         )
         i += 1
     }
@@ -269,55 +237,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if balance != 0 {
         transfer_native_tokens(to: ctx.caller(), amount: balance)
     }
-}
-
-#[arithmetic(unchecked)]
-fn transfer_offer_item(
-    _ env: Env,
-    items: MemArray<Item>,
-    order: OrderState,
-    index: u256,
-    recipient: Address,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    let item = ref items[(order.offer_start + index) as usize]
-    transfer(
-        item_transfer(item),
-        from: order.offerer,
-        conduit_key: order.conduit_key,
-        acc,
-        mut buf,
-        env,
-    )
-}
-
-#[arithmetic(unchecked)]
-fn transfer_consideration_item(
-    _ env: Env,
-    items: MemArray<Item>,
-    order: OrderState,
-    index: u256,
-    fulfiller_conduit_key: u256,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    let item = ref items[(order.consideration_start + index) as usize]
-    if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
-        revert_error(InsufficientNativeTokensSupplied {})
-    }
-    transfer(
-        item_transfer(item),
-        from: ctx.caller(),
-        conduit_key: fulfiller_conduit_key,
-        acc,
-        mut buf,
-        env,
-    )
 }
 
 pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem> {
@@ -416,7 +335,6 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
         env,
         mut book,
         resolvers,
-        recipient,
     )
     authorize_single_order(book, order_hash, fill_numerator, fill_denominator)
     finish_single_order(
@@ -437,7 +355,7 @@ fn fulfill_single_contract_order(
 )
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let _ = prepare_single_order(env, mut book, resolvers, recipient)
+    let _ = prepare_single_order(env, mut book, resolvers)
     let generated = generate_order(book, order_index: 0, revert_on_invalid: true)
     install_generated_order(mut book, order_index: 0, generated)
     finish_single_order(
@@ -450,11 +368,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 }
 
 /// Validate the order, resolve criteria and apply the fill fraction.
-fn prepare_single_order(_ env: Env, book: mut Book, resolvers: Resolvers, recipient: Address) -> (
-    u256,
-    u256,
-    u256,
-)
+fn prepare_single_order(_ env: Env, book: mut Book, resolvers: Resolvers) -> (u256, u256, u256)
 uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
@@ -469,7 +383,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
         order: ref book.orders[(0) as usize],
         numerator: fill_numerator,
         denominator: fill_denominator,
-        recipient,
     )
     (order_hash, fill_numerator, fill_denominator)
 }
@@ -513,7 +426,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     transfer_each(
         env,
-        items: mut book.items,
+        items: book.items,
         order: ref book.orders[(0) as usize],
         fulfiller_conduit_key,
         recipient,
