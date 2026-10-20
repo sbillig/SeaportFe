@@ -13,7 +13,6 @@ use super::abi_view::CalldataView
 use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
 use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
 use super::lowlevel::revert_with_reason_if_one_is_returned
-use super::buffer::return_word
 
 const EIP1271_SELECTOR_WORD: u256 = 0x1626ba7e00000000000000000000000000000000000000000000000000000000
 const ALL_BUT_HIGHEST_BIT: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -133,6 +132,9 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
         var ret = MemBuffer::with_capacity(32)
+        unsafe {
+            store_word(ptr: ret.ptr(), value: recovered)
+        }
         success = call
             .raw_staticcall(
                 addr: signer,
@@ -143,7 +145,8 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
                 ret: mut ret,
             )
             .success()
-        if success && return_word(ret.span(), initial: recovered) != EIP1271_SELECTOR_WORD {
+        // The call wrote at most the 32 bytes of `ret`'s capacity.
+        if success && unsafe { *ptr::cast<u8, u256>(ret.ptr()) } != EIP1271_SELECTOR_WORD {
             if ctx.extcodesize(signer) != 0 {
                 revert_with0(error_selector<BadContractSignature>())
             }
