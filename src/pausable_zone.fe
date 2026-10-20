@@ -8,17 +8,10 @@ use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, dyn_array_from, sol}
 use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, create2_address, keccak256}
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
+use super::abi_view::CalldataView
 use super::buffer::Buffer
 use super::seaport::SeaportMsg
-use super::types::{
-    AdvancedOrder,
-    CriteriaResolver,
-    Execution,
-    Fulfillment,
-    Order,
-    OrderComponents,
-    ZoneParameters,
-}
+use super::types::{AdvancedOrder, CriteriaResolver, Execution, Fulfillment, Order, OrderComponents}
 
 #[event]
 pub struct Paused {}
@@ -92,14 +85,6 @@ pub msg PausableZoneMsg {
         criteriaResolvers: DynArray<CriteriaResolver>,
         fulfillments: DynArray<Fulfillment>,
     } -> DynArray<Execution>,
-    #[selector = sol(
-        "authorizeOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))",
-    )]
-    AuthorizeOrder { zoneParameters: ZoneParameters } -> Bytes4,
-    #[selector = sol(
-        "validateOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))",
-    )]
-    ValidateOrder { zoneParameters: ZoneParameters } -> Bytes4,
     #[selector = sol("getSeaportMetadata()")]
     GetSeaportMetadata {} -> (DynString, DynArray<Schema>),
     #[selector = sol("supportsInterface(bytes4)")]
@@ -108,6 +93,23 @@ pub msg PausableZoneMsg {
     Operator {} -> Address,
     #[selector = sol("isPaused()")]
     IsPaused {} -> bool,
+}
+
+/// The zone interface, whose `ZoneParameters` argument the zone never reads.
+/// As in Solidity, only the argument head is checked.
+msg PausableZoneCalldataMsg {
+    // authorizeOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))
+    #[selector = 0x01e4d72a]
+    AuthorizeOrder {} -> Bytes4,
+    // validateOrder((bytes32,address,address,(uint8,address,uint256,uint256)[],(uint8,address,uint256,uint256,address)[],bytes,bytes32[],uint256,uint256,bytes32))
+    #[selector = 0x17b1f942]
+    ValidateOrder {} -> Bytes4,
+}
+
+/// Solidity's checks of a `ZoneParameters calldata` argument: its offset and
+/// its 320-byte head lie in the calldata.
+fn check_zone_parameters_argument() {
+    let _ = CalldataView::arguments(32).struct_argument(offset: 0, size: 0x140)
 }
 
 const OPERATOR_MASK: u256 = 0xffffffffffffffffffffffffffffffffffffffff
@@ -241,18 +243,6 @@ pub contract PausableZone {
                 },
             )
         }
-        AuthorizeOrder { zoneParameters } -> Bytes4
-        uses (zone_state)
-        {
-            assert_not_paused(zone_state)
-            Bytes4 { val: AUTHORIZE_ORDER_SELECTOR }
-        }
-        ValidateOrder { zoneParameters } -> Bytes4
-        uses (zone_state)
-        {
-            assert_not_paused(zone_state)
-            Bytes4 { val: VALIDATE_ORDER_SELECTOR }
-        }
         GetSeaportMetadata {} -> (DynString, DynArray<Schema>) {
             // "PausableZone"
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
@@ -266,6 +256,19 @@ pub contract PausableZone {
         }
         IsPaused {} -> bool uses (zone_state) {
             zone_is_paused(zone_state)
+        }
+    }
+
+    recv PausableZoneCalldataMsg {
+        AuthorizeOrder {} -> Bytes4 uses (zone_state) {
+            check_zone_parameters_argument()
+            assert_not_paused(zone_state)
+            Bytes4 { val: AUTHORIZE_ORDER_SELECTOR }
+        }
+        ValidateOrder {} -> Bytes4 uses (zone_state) {
+            check_zone_parameters_argument()
+            assert_not_paused(zone_state)
+            Bytes4 { val: VALIDATE_ORDER_SELECTOR }
         }
     }
 }
