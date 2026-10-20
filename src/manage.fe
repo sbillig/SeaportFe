@@ -56,8 +56,8 @@ uses (
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
         // `OrderCancelled`, whose only data word is the order hash. A direct
-        // allocation stays a fixed slot whether or not the inliner, under its
-        // module growth budget, inlines the generic event encoder's.
+        // allocation needs no zeroing and stays a fixed slot whether or not
+        // the inliner inlines the generic event encoder's allocation.
         let data = ptr::alloc_bytes(32)
         unsafe {
             store_word(ptr: data, value: order_hash)
