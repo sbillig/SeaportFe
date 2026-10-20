@@ -413,6 +413,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 }
 
 /// Validate the order, resolve criteria and apply the fill fraction.
+#[inline(always)]
 fn prepare_single_order(_ env: Env, book: mut Book, resolvers: Resolvers) -> (u256, u256, u256)
 uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {

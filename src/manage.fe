@@ -189,6 +189,7 @@ uses (log: mut Log)
 /// Check the item types and clean the addresses of the ABI item array at
 /// `items`, as Solidity's encoder reads them from memory.
 #[arithmetic(unchecked)]
+#[inline(always)]
 fn clean_items(_ items: *u8, count: u256, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
     var i: u256 = 0
