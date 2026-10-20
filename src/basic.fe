@@ -88,6 +88,7 @@ fn cd_address(_ offset: u256) -> Address uses (ops: RawOps) {
     Address::from_word_truncate(ops.calldataload(offset))
 }
 
+#[arithmetic(unchecked)]
 fn byte_at(_ index: u256, _ word: u256) -> u256 {
     if index >= 32 { return 0 }
     (word >> (248 - index * 8)) & 0xff
@@ -95,6 +96,7 @@ fn byte_at(_ index: u256, _ word: u256) -> u256 {
 
 /// The ABI checks Solidity performs before running `fulfillBasicOrder` with
 /// its `BasicOrderParameters calldata` argument.
+#[arithmetic(unchecked)]
 pub fn assert_decodable_basic_order_calldata() uses (ops: RawOps) {
     let size = ops.calldatasize()
     if size < 0x24 {
@@ -108,6 +110,7 @@ pub fn assert_decodable_basic_order_calldata() uses (ops: RawOps) {
 
 /// `_assertValidBasicOrderParameters`: canonical offsets, a valid order
 /// type and clean addresses.
+#[arithmetic(unchecked)]
 fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
     let valid_offsets = cd(4) == 0x20
         && cd(ADDITIONAL_RECIPIENTS_HEAD) == 0x240
@@ -120,6 +123,7 @@ fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
 }
 
 /// `_validateAndFulfillBasicOrder`
+#[arithmetic(unchecked)]
 pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool
 uses (
     store: mut OrderStore,
@@ -238,6 +242,7 @@ uses (
 /// `_prepareBasicFulfillmentFromCalldata`: validate the parameters, derive
 /// the order hash, emit `OrderFulfilled`, check the status and signature,
 /// authorize with the zone and mark the order filled.
+#[arithmetic(unchecked)]
 fn prepare_basic_fulfillment_from_calldata(
     _ env: Env,
     order_type: u256,
@@ -405,6 +410,7 @@ uses (
 
 /// The signature `bytes`, with the length masked to 32 bits like
 /// seaport-core's decoder.
+#[arithmetic(unchecked)]
 fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
     let at = cd(SIGNATURE_HEAD) + 0x24
     let len = cd(at) & 0xffffffff
@@ -420,6 +426,7 @@ fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
 
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the
 /// order hash) for a basic order; the ZoneParameters come from calldata.
+#[arithmetic(unchecked)]
 fn call_basic_order_zone(_ order_hash: u256, selector: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -525,6 +532,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_transferIndividual721Or1155Item`: the offered token goes from the
 /// offerer to the caller, directly or through a single-item conduit call.
+#[arithmetic(unchecked)]
 fn transfer_individual_721_or_1155_item(_ env: Env, item_type: u256, conduit_key: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -556,6 +564,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// `_transferNativeTokensAndFinalize`: pay additional recipients and the
 /// offerer from `msg.value` and refund the rest.
+#[arithmetic(unchecked)]
 fn transfer_native_tokens_and_finalize()
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -617,8 +626,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var current = acc
     var i: u256 = 0
     while i < total_recipients {
-        let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
-        let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
+        let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + (i << 6))
+        let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + 0x20 + (i << 6))
+        // The only checked subtraction of seaport-core's basic order path.
         if from_offerer {
             amount = amount - additional_amount
         }

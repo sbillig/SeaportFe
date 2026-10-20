@@ -70,6 +70,7 @@ uses (store: OrderStore)
 /// `_validateOrder`: the order hash and the fraction that can be filled now,
 /// or a zero fraction for an order that is not fillable (only when
 /// `revert_on_invalid` is false). Contract orders yield `(1, 1, 1)`.
+#[arithmetic(unchecked)]
 pub fn validate_order(_ env: Env, book: Book, order: OrderState, revert_on_invalid: bool) -> (
     u256,
     u256,
@@ -127,6 +128,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 
 /// `_applyFractions`: current amounts of the partial fill; offer items go to
 /// `recipient`.
+#[arithmetic(unchecked)]
 fn apply_fractions(
     _ items: mut MemArray<Item>,
     order: OrderState,
@@ -162,6 +164,7 @@ uses (ctx: Ctx)
 }
 
 /// Returns whether the item is a native token item.
+#[arithmetic(unchecked)]
 fn apply_offer_fraction(
     _ items: mut MemArray<Item>,
     order: OrderState,
@@ -188,6 +191,7 @@ uses (ctx: Ctx)
     item.item_type == NATIVE as u256
 }
 
+#[arithmetic(unchecked)]
 fn apply_consideration_fraction(
     _ items: mut MemArray<Item>,
     order: OrderState,
@@ -224,6 +228,7 @@ pub fn item_transfer(_ item: Item) -> Transfer {
 
 /// `_transferEach`: offer items from the offerer, consideration items from
 /// the caller, then refund any native tokens left in the contract.
+#[arithmetic(unchecked)]
 fn transfer_each(
     _ env: Env,
     items: mut MemArray<Item>,
@@ -266,6 +271,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
+#[arithmetic(unchecked)]
 fn transfer_offer_item(
     _ env: Env,
     items: MemArray<Item>,
@@ -288,6 +294,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     )
 }
 
+#[arithmetic(unchecked)]
 fn transfer_consideration_item(
     _ env: Env,
     items: MemArray<Item>,

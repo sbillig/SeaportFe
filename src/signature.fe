@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Verifiers._verifySignature, bulk order proofs and
 // SignatureVerification._assertValidSignature.
+#![arithmetic(unchecked)]
 use core::ptr::MemBuffer
 use core::result::Result
 use core::option::Option

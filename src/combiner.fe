@@ -62,6 +62,7 @@ uses (ctx: Ctx)
 /// contract orders, update statuses and emit `OrderFulfilled`. Returns the
 /// book, the order hashes (zero for skipped orders) and whether any order is
 /// restricted or a contract order.
+#[arithmetic(unchecked)]
 pub fn validate_orders_and_prepare_to_fulfill(
     _ env: Env,
     book: mut Book,
@@ -123,6 +124,7 @@ uses (
 
 /// Second pass of `_validateOrdersAndPrepareToFulfill`: authorize, record and
 /// emit for up to `maximum_fulfilled` orders.
+#[arithmetic(unchecked)]
 fn prepare_available_orders(
     _ env: Env,
     book: mut Book,
@@ -163,6 +165,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 /// Validate order `index` and derive its current amounts. Returns whether it
 /// is restricted or a contract order, and whether a non-contract order
 /// offers native tokens. Unavailable orders get a zero hash and numerator.
+#[arithmetic(unchecked)]
 fn validate_and_prepare_order(
     _ env: Env,
     book: mut Book,
@@ -360,6 +363,7 @@ uses (ctx: Ctx)
 }
 
 /// `_fulfillAvailableAdvancedOrders`
+#[arithmetic(unchecked)]
 pub fn fulfill_available_advanced_orders(
     _ env: Env,
     book: mut Book,
@@ -455,6 +459,7 @@ uses (ctx: Ctx)
 }
 
 /// `_matchAdvancedOrders`
+#[arithmetic(unchecked)]
 pub fn match_advanced_orders(
     _ env: Env,
     book: mut Book,
@@ -515,6 +520,7 @@ fn apply_fulfillment_into(
 /// met, refund native tokens and call zones and contract offerers.
 ///
 /// Each phase holds only the pool access it needs.
+#[arithmetic(unchecked)]
 fn perform_final_checks_and_execute_orders(
     _ env: Env,
     book: mut Book,
@@ -628,6 +634,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     settled
 }
 
+#[arithmetic(unchecked)]
 fn transfer_unspent_offer(
     _ env: Env,
     book: Book,
@@ -655,6 +662,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     current
 }
 
+#[arithmetic(unchecked)]
 fn transfer_unspent_offer_item(
     _ env: Env,
     book: Book,
@@ -687,6 +695,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     )
 }
 
+#[arithmetic(unchecked)]
 fn restore_offer_amounts(_ items: mut MemArray<Item>, order: OrderState) {
     var j: u256 = 0
     while j < order.offer_len {
@@ -696,6 +705,7 @@ fn restore_offer_amounts(_ items: mut MemArray<Item>, order: OrderState) {
     }
 }
 
+#[arithmetic(unchecked)]
 fn check_consideration(_ items: mut MemArray<Item>, order: OrderState, order_index: u256) {
     var j: u256 = 0
     while j < order.consideration_len {
@@ -704,6 +714,7 @@ fn check_consideration(_ items: mut MemArray<Item>, order: OrderState, order_ind
     }
 }
 
+#[arithmetic(unchecked)]
 fn check_consideration_item(
     _ items: mut MemArray<Item>,
     order: OrderState,

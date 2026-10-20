@@ -2,6 +2,7 @@
 // Executor and TokenTransferrer: native, ERC20, ERC721 and ERC1155 transfers,
 // either directly or batched into one `Conduit.execute` call through the
 // accumulator.
+#![arithmetic(unchecked)]
 use core::ptr::{MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
