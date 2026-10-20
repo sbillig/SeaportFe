@@ -17,10 +17,9 @@ use super::errors::{
     PartialFillsNotEnabledForOrder,
 }
 use super::executor::{
-    Transfer,
     new_accumulator,
-    transfer,
     transfer_buffer,
+    transfer_item,
     transfer_native_tokens,
     trigger_if_armed,
 }
@@ -201,15 +200,16 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var acc = new_accumulator()
     var i: u256 = 0
     while i < order.offer_len {
-        let item = ref items[(order.offer_start + i) as usize]
-        acc = transfer(
-            Transfer {
-                item_type: item.item_type,
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient,
-            },
+        // The order's items lie in the pool.
+        let item = unsafe {
+            ref *element(items.ptr(), order.offer_start + i)
+        }
+        acc = transfer_item(
+            item_type: item.item_type,
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient,
             from: order.offerer,
             conduit_key: order.conduit_key,
             acc,
@@ -220,18 +220,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     i = 0
     while i < order.consideration_len {
-        let item = ref items[(order.consideration_start + i) as usize]
+        let item = unsafe {
+            ref *element(items.ptr(), order.consideration_start + i)
+        }
         if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
             revert_with0(error_selector<InsufficientNativeTokensSupplied>())
         }
-        acc = transfer(
-            Transfer {
-                item_type: item.item_type,
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient: item.receiver,
-            },
+        acc = transfer_item(
+            item_type: item.item_type,
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient: item.receiver,
             from: ctx.caller(),
             conduit_key: fulfiller_conduit_key,
             acc,
