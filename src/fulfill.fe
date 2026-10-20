@@ -181,8 +181,10 @@ uses (ctx: Ctx)
 
 /// `_transferEach`: offer items from the offerer to `recipient`,
 /// consideration items from the caller, then refund any native tokens left in
-/// the contract.
+/// the contract. Kept out of line so its frame does not join
+/// `finish_single_order`'s.
 #[arithmetic(unchecked)]
+#[inline(never)]
 fn transfer_each(
     _ env: Env,
     items: MemArray<Item>,
