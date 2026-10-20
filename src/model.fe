@@ -23,8 +23,8 @@
 // as Solidity's typed memory reads see them: consumers check enums where
 // Seaport reads them. The order hash reads the raw words from calldata.
 use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION}
-use core::ptr::{self, MemArray}
 use core::size_of
+use core::ptr::{self, MemArray}
 use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
@@ -43,14 +43,6 @@ pub struct Item {
 }
 
 impl Copy for Item {}
-
-/// `ptr::offset` for an index the caller keeps inside its pool, where the
-/// byte offset cannot overflow and needs no checked multiplication. With
-/// the check, the offset is an out-of-line call at every pool access.
-#[arithmetic(unchecked)]
-pub fn elem<T>(_ base: *T, _ index: u256) -> *T {
-    ptr::offset_bytes(base, index * size_of<T>())
-}
 
 pub struct OrderState {
     pub offerer: Address,
@@ -177,6 +169,14 @@ impl Groups {
     }
 }
 
+/// Element `index` of the array at `base`: `ptr::offset` without its
+/// overflow check. The caller must ensure that the array holds the element,
+/// whose offset then lies in the allocation.
+#[arithmetic(unchecked)]
+pub fn element<T>(_ base: *T, _ index: u256) -> *T {
+    ptr::offset_bytes(base, index * size_of<T>())
+}
+
 /// Solidity validates protocol enums when their words are read as enums.
 pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
     if value >= variants {
@@ -188,25 +188,26 @@ pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
 /// Copy an offer (`consideration: false`) or consideration array into the
 /// pool at `start`.
 #[arithmetic(unchecked)]
-fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, consideration: bool) {
+#[inline(always)]
+fn fill_items(_ items: mut MemArray<Item>, start: u256, input: CalldataView, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
-    var i: usize = 0
-    let len = input.len() as usize
+    var i: u256 = 0
+    let len = input.len()
     while i < len {
-        let item = input.element(index: i as u256, stride)
+        let item = input.element(index: i, stride)
         let recipient = if consideration {
             item.address(160)
         } else {
             Address::zero()
         }
         // `start + i` lies in the pool, which the caller sized for these items.
-        let slot = elem(items.ptr(), (start + i) as u256)
+        let slot = element(items.ptr(), start + i)
         unsafe {
-            (*slot).item_type = item.word(0)
+            // The raw words of the item are the leading fields of `Item`:
+            // the item type through the end amount, and a consideration
+            // item's recipient, which is then cleaned like the token.
+            item.copy_to(ptr::cast<Item, u8>(slot), len: stride)
             (*slot).token = item.address(32)
-            (*slot).identifier = item.word(64)
-            (*slot).start_amount = item.word(96)
-            (*slot).end_amount = item.word(128)
             (*slot).recipient = recipient
             (*slot).amount = item.word(96)
             (*slot).receiver = recipient
@@ -221,53 +222,35 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
 /// `AdvancedOrder`s (`advanced`) or `Order`s.
 #[arithmetic(unchecked)]
 fn build_book(_ input: CalldataView, count: usize, advanced: bool) -> Book {
-    var total: usize = 0
+    // Every order and item is assigned below before the Book is returned:
+    // the orders with their item ranges first, which size the item pool.
+    var states = unsafe {
+        MemArray<OrderState>::new_uninit(count)
+    }
+    var total: u256 = 0
     var i: usize = 0
     while i < count {
         let order = input.dynamic_element(i as u256)
         let p = order.child(0)
-        total += (p.child(64).len() + p.child(96).len()) as usize
-        i += 1
-    }
-    // Every order and item is assigned below before the Book is returned.
-    var states = unsafe {
-        MemArray<OrderState>::new_uninit(count)
-    }
-    var items = unsafe {
-        MemArray<Item>::new_uninit(total)
-    }
-    var start: usize = 0
-    i = 0
-    while i < count {
-        let order = input.dynamic_element(i as u256)
-        let p = order.child(0)
-        let offer = p.child(64)
-        let consideration = p.child(96)
-        let consideration_start = start + offer.len() as usize
-        fill_items(mut items, start, input: offer, consideration: false)
-        fill_items(
-            mut items,
-            start: consideration_start,
-            input: consideration,
-            consideration: true,
-        )
-        // Fields are stored one by one, which keeps few values live, into
-        // order `i` of the `count` the pool holds.
-        let state = elem(states.ptr(), i as u256)
+        let offer_len = p.child(64).len()
+        let consideration_len = p.child(96).len()
+        // Order `i` of the `count` the pool holds.
+        let state = element(states.ptr(), i as u256)
         unsafe {
             (*state).offerer = p.address(0)
             (*state).zone = p.address(32)
-            (*state).offer_start = start as u256
-            (*state).offer_len = offer.len()
-            (*state).consideration_start = consideration_start as u256
-            (*state).consideration_len = consideration.len()
-            (*state).order_type = p.word(128)
-            (*state).start_time = p.word(160)
-            (*state).end_time = p.word(192)
-            (*state).zone_hash = p.word(224)
-            (*state).salt = p.word(256)
-            (*state).conduit_key = p.word(288)
-            (*state).total_original = p.word(320)
+            (*state).offer_start = total
+            (*state).offer_len = offer_len
+            (*state).consideration_start = total + offer_len
+            (*state).consideration_len = consideration_len
+            // `order_type` through `total_original`, the seven fields from
+            // byte 192 of `OrderState` on, are the raw words from byte 128 of
+            // the parameters on.
+            p.offset(128)
+                .copy_to(
+                    ptr::offset_bytes(ptr::cast<OrderState, u8>(state), 192),
+                    len: 224,
+                )
             (*state).numerator = if advanced {
                 order.word(32) & 0xffffffffffffffffffffffffffffff
             } else {
@@ -286,10 +269,32 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool) -> Book {
             }
             (*state).params = p
         }
-        start = consideration_start + consideration.len() as usize
+        total += offer_len + consideration_len
         i += 1
     }
-    Book { orders: states, items, used: total as u256 }
+    var items = unsafe {
+        MemArray<Item>::new_uninit(total as usize)
+    }
+    i = 0
+    while i < count {
+        let state = unsafe {
+            ref *element(states.ptr(), i as u256)
+        }
+        fill_items(
+            mut items,
+            start: state.offer_start,
+            input: state.params.child(64),
+            consideration: false,
+        )
+        fill_items(
+            mut items,
+            start: state.consideration_start,
+            input: state.params.child(96),
+            consideration: true,
+        )
+        i += 1
+    }
+    Book { orders: states, items, used: total }
 }
 
 /// The orders of the `AdvancedOrder[]` (`advanced`) or `Order[]` at `input`.

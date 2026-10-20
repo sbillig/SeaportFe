@@ -26,7 +26,7 @@ use super::executor::{
 }
 use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
-use super::model::{Book, Groups, Item, OrderState, Resolvers, elem}
+use super::model::{Book, Groups, Item, OrderState, Resolvers, element}
 use super::status::{OrderStore, clear_reentrancy_guard, set_reentrancy_guard, update_status}
 use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER}
 use super::zone::{
@@ -183,16 +183,16 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
         revert_on_invalid,
     )
     unsafe {
-        (*elem(book.orders.ptr(), index)).numerator = numerator
+        (*element(book.orders.ptr(), index)).numerator = numerator
     }
     if numerator == 0 {
         return (false, false)
     }
     unsafe {
-        (*elem(book.orders.ptr(), index)).denominator = denominator
+        (*element(book.orders.ptr(), index)).denominator = denominator
     }
     let order = unsafe {
-        ref *elem(book.orders.ptr(), index)
+        ref *element(book.orders.ptr(), index)
     }
     order_hashes[(index) as usize] = order_hash
     let is_non_contract = order.order_type < 4
@@ -207,7 +207,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
             order.offer_start + j
         }
         let item = unsafe {
-            mut *elem(book.items.ptr(), at)
+            mut *element(book.items.ptr(), at)
         }
         if !consideration && item.item_type == NATIVE as u256 && is_non_contract {
             native_offer = true
@@ -242,7 +242,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
     if remaining == 0 {
         skip_available_order(mut book, mut order_hashes, index)
         false
-    } else if unsafe { (*elem(book.orders.ptr(), index)).order_type } != CONTRACT as u256 {
+    } else if unsafe { (*element(book.orders.ptr(), index)).order_type } != CONTRACT as u256 {
         let available = prepare_standard_available_order(
             mut book,
             mut order_hashes,
@@ -265,7 +265,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 fn skip_available_order(_ book: mut Book, order_hashes: mut MemArray<u256>, index: u256) {
     order_hashes[(index) as usize] = 0
     unsafe {
-        (*elem(book.orders.ptr(), index)).numerator = 0
+        (*element(book.orders.ptr(), index)).numerator = 0
     }
 }
 
@@ -292,7 +292,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
             order_hash,
             book,
             order: unsafe {
-                ref *elem(book.orders.ptr(), index)
+                ref *element(book.orders.ptr(), index)
             },
             recipient,
         )
@@ -313,7 +313,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
     order_hashes[(index) as usize] = order_hash
     if order_hash == 0 {
         unsafe {
-            (*elem(book.orders.ptr(), index)).numerator = 0
+            (*element(book.orders.ptr(), index)).numerator = 0
         }
         false
     } else {
@@ -322,7 +322,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
             order_hash,
             book,
             order: unsafe {
-                ref *elem(book.orders.ptr(), index)
+                ref *element(book.orders.ptr(), index)
             },
             recipient,
         )
@@ -342,7 +342,7 @@ fn authorize_and_record(
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = unsafe {
-        ref *elem(book.orders.ptr(), index)
+        ref *element(book.orders.ptr(), index)
     }
     let authorized = check_restricted_advanced_order_authorization(
         book,
@@ -361,7 +361,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
         ) {
         order_hashes[(index) as usize] = 0
         unsafe {
-            (*elem(book.orders.ptr(), index)).numerator = 0
+            (*element(book.orders.ptr(), index)).numerator = 0
         }
         return false
     }
@@ -662,7 +662,7 @@ fn settle_order(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let order = unsafe {
-        ref *elem(book.orders.ptr(), index)
+        ref *element(book.orders.ptr(), index)
     }
     if order.numerator == 0 {
         return acc
@@ -672,7 +672,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var j: u256 = 0
     while j < order.offer_len {
         let item = unsafe {
-            mut *elem(book.items.ptr(), order.offer_start + j)
+            mut *element(book.items.ptr(), order.offer_start + j)
         }
         let unspent = item.amount
         item.amount = item.original
@@ -697,7 +697,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     j = 0
     while j < order.consideration_len {
         let item = unsafe {
-            mut *elem(book.items.ptr(), order.consideration_start + j)
+            mut *element(book.items.ptr(), order.consideration_start + j)
         }
         if item.amount != 0 {
             revert_custom(
@@ -726,7 +726,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         assert_restricted_advanced_order_validity(
             book,
             order: unsafe {
-                ref *elem(book.orders.ptr(), index)
+                ref *element(book.orders.ptr(), index)
             },
             order_hashes: ref order_hashes,
             order_hash: order_hashes[(index) as usize],

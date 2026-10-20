@@ -17,15 +17,14 @@ use super::errors::{
     PartialFillsNotEnabledForOrder,
 }
 use super::executor::{
-    Transfer,
     new_accumulator,
-    transfer,
     transfer_buffer,
+    transfer_item,
     transfer_native_tokens,
     trigger_if_armed,
 }
 use super::hashing::{Env, derive_order_hash}
-use super::model::{Book, Item, OrderState, Resolvers, checked_enum, elem}
+use super::model::{Book, Item, OrderState, Resolvers, checked_enum, element}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -127,7 +126,8 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     (order_hash, fill_numerator, fill_denominator)
 }
 
-/// `_applyFractions`: current amounts of the partial fill.
+/// `_applyFractions`: current amounts of the partial fill. Consideration
+/// items keep the receiver the model builder copied from their recipient.
 #[arithmetic(unchecked)]
 fn apply_fractions(
     _ items: mut MemArray<Item>,
@@ -137,19 +137,29 @@ fn apply_fractions(
 )
 uses (ctx: Ctx)
 {
+    // A whole fill of a fixed amount is that amount (`apply_fraction`'s
+    // first case).
+    let whole = numerator == denominator
     var any_native = false
     var i: u256 = 0
     while i < order.offer_len {
-        let item = mut items[(order.offer_start + i) as usize]
-        let amount = apply_fraction(
-            start_amount: item.start_amount,
-            end_amount: item.end_amount,
-            numerator,
-            denominator,
-            start_time: order.start_time,
-            end_time: order.end_time,
-            round_up: false,
-        )
+        // The order's items lie in the pool.
+        let item = unsafe {
+            mut *element(items.ptr(), order.offer_start + i)
+        }
+        let amount = if whole && item.start_amount == item.end_amount {
+            item.end_amount
+        } else {
+            apply_fraction(
+                start_amount: item.start_amount,
+                end_amount: item.end_amount,
+                numerator,
+                denominator,
+                start_time: order.start_time,
+                end_time: order.end_time,
+                round_up: false,
+            )
+        }
         item.amount = amount
         item.original = amount
         if item.item_type == NATIVE as u256 {
@@ -162,19 +172,24 @@ uses (ctx: Ctx)
     }
     i = 0
     while i < order.consideration_len {
-        let item = mut items[(order.consideration_start + i) as usize]
-        let amount = apply_fraction(
-            start_amount: item.start_amount,
-            end_amount: item.end_amount,
-            numerator,
-            denominator,
-            start_time: order.start_time,
-            end_time: order.end_time,
-            round_up: true,
-        )
+        let item = unsafe {
+            mut *element(items.ptr(), order.consideration_start + i)
+        }
+        let amount = if whole && item.start_amount == item.end_amount {
+            item.end_amount
+        } else {
+            apply_fraction(
+                start_amount: item.start_amount,
+                end_amount: item.end_amount,
+                numerator,
+                denominator,
+                start_time: order.start_time,
+                end_time: order.end_time,
+                round_up: true,
+            )
+        }
         item.amount = amount
         item.original = amount
-        item.receiver = item.recipient
         i += 1
     }
 }
@@ -194,19 +209,28 @@ fn transfer_each(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var buf = transfer_buffer(order.offer_len + order.consideration_len)
+    // Without a conduit only direct transfers use the buffer, which one
+    // conduit transfer's room covers.
+    var buf = transfer_buffer(
+        if (order.conduit_key | fulfiller_conduit_key) != 0 {
+            order.offer_len + order.consideration_len
+        } else {
+            1
+        },
+    )
     var acc = new_accumulator()
     var i: u256 = 0
     while i < order.offer_len {
-        let item = ref items[(order.offer_start + i) as usize]
-        acc = transfer(
-            Transfer {
-                item_type: item.item_type,
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient,
-            },
+        // The order's items lie in the pool.
+        let item = unsafe {
+            ref *element(items.ptr(), order.offer_start + i)
+        }
+        acc = transfer_item(
+            item_type: item.item_type,
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient,
             from: order.offerer,
             conduit_key: order.conduit_key,
             acc,
@@ -217,18 +241,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     i = 0
     while i < order.consideration_len {
-        let item = ref items[(order.consideration_start + i) as usize]
+        let item = unsafe {
+            ref *element(items.ptr(), order.consideration_start + i)
+        }
         if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
             revert_with0(error_selector<InsufficientNativeTokensSupplied>())
         }
-        acc = transfer(
-            Transfer {
-                item_type: item.item_type,
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient: item.receiver,
-            },
+        acc = transfer_item(
+            item_type: item.item_type,
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient: item.receiver,
             from: ctx.caller(),
             conduit_key: fulfiller_conduit_key,
             acc,
@@ -244,55 +268,47 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-/// Write `count` items of `book` from `start` at `offset` as an ABI
-/// `SpentItem[]`, or with `received` as a `ReceivedItem[]`; returns its size.
-/// The words are those of the typed event fields: the item type truncated to
-/// `uint8`, the current amount and the receiver.
+/// Write the `count` items from `items` at `dst` as an ABI `SpentItem[]`,
+/// or with `received` as a `ReceivedItem[]`: the words of the typed event
+/// fields, the item type truncated to `uint8`, the current amount and the
+/// receiver. `dst` must have room for the `32 + count * stride` bytes.
 #[arithmetic(unchecked)]
-fn write_fulfilled_items(
-    _ dst: mut Buffer,
-    offset: u256,
-    book: Book,
-    start: u256,
-    count: u256,
-    received: bool,
-) -> u256 {
+#[inline(always)]
+unsafe fn write_fulfilled_items(_ dst: *u8, items: *Item, count: u256, received: bool) {
     let stride: u256 = if received { 160 } else { 128 }
-    let size = dst.check_array(offset, count, stride)
-    // Every word below lies in the checked range, so no offset overflows.
-    let base = unsafe {
-        dst.at(offset)
-    }
     unsafe {
-        store_at(base, offset: 0, value: count)
+        store_at(dst, offset: 0, value: count)
     }
     var i: u256 = 0
     while i < count {
+        // The caller's items lie in the pool.
         let item = unsafe {
-            ref *elem(book.items.ptr(), start + i)
+            ref *element(items, i)
         }
         let out = 32 + i * stride
         unsafe {
-            store_at(base, offset: out, value: item.item_type & 0xff)
-            store_at(base, offset: out + 32, value: item.token.word())
-            store_at(base, offset: out + 64, value: item.identifier)
-            store_at(base, offset: out + 96, value: item.amount)
+            store_at(dst, offset: out, value: item.item_type & 0xff)
+            store_at(dst, offset: out + 32, value: item.token.word())
+            store_at(dst, offset: out + 64, value: item.identifier)
+            store_at(dst, offset: out + 96, value: item.amount)
             if received {
-                store_at(base, offset: out + 128, value: item.receiver.word())
+                store_at(dst, offset: out + 128, value: item.receiver.word())
             }
         }
         i += 1
     }
-    size
 }
 
 /// `OrderFulfilled`, encoded directly into the log data.
+#[arithmetic(unchecked)]
 pub fn emit_order_fulfilled(_ order_hash: u256, book: Book, order: OrderState, recipient: Address)
 uses (log: mut Log)
 {
     // Head: orderHash, recipient and the offer and consideration offsets.
+    // Item counts are below 2**32, so no size overflows.
     let consideration_at = 0xa0 + order.offer_len * 128
-    // Every word of the buffer is written below.
+    // Every word of the buffer is written below: the head, then both item
+    // arrays, which exactly fill the rest.
     var data = unsafe {
         Buffer::uninit(consideration_at + 32 + order.consideration_len * 160)
     }
@@ -301,23 +317,19 @@ uses (log: mut Log)
         data.put(offset: 32, value: recipient.word())
         data.put(offset: 64, value: 0x80)
         data.put(offset: 96, value: consideration_at)
+        write_fulfilled_items(
+            data.at(0x80),
+            items: element(book.items.ptr(), order.offer_start),
+            count: order.offer_len,
+            received: false,
+        )
+        write_fulfilled_items(
+            data.at(consideration_at),
+            items: element(book.items.ptr(), order.consideration_start),
+            count: order.consideration_len,
+            received: true,
+        )
     }
-    write_fulfilled_items(
-        mut data,
-        offset: 0x80,
-        book,
-        start: order.offer_start,
-        count: order.offer_len,
-        received: false,
-    )
-    write_fulfilled_items(
-        mut data,
-        offset: consideration_at,
-        book,
-        start: order.consideration_start,
-        count: order.consideration_len,
-        received: true,
-    )
     log.log3(
         data: data.span(),
         topic0: OrderFulfilled::TOPIC0,
@@ -346,12 +358,7 @@ uses (
     log: mut Log,
 )
 {
-    let order_type = checked_enum(
-        unsafe {
-            (*elem(book.orders.ptr(), 0)).order_type
-        },
-        variants: 5,
-    )
+    let order_type = checked_enum(unsafe { (*book.orders.ptr()).order_type }, variants: 5)
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
     if order_type != CONTRACT as u256 {
         fulfill_single_order(env, mut book, resolvers, fulfiller_conduit_key, recipient)
@@ -408,13 +415,14 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 }
 
 /// Validate the order, resolve criteria and apply the fill fraction.
+#[inline(always)]
 fn prepare_single_order(_ env: Env, book: mut Book, resolvers: Resolvers) -> (u256, u256, u256)
 uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
         order: unsafe {
-            ref *elem(book.orders.ptr(), 0)
+            ref *book.orders.ptr()
         },
         revert_on_invalid: true,
     )
@@ -422,7 +430,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     apply_fractions(
         mut book.items,
         order: unsafe {
-            ref *elem(book.orders.ptr(), 0)
+            ref *book.orders.ptr()
         },
         numerator: fill_numerator,
         denominator: fill_denominator,
@@ -441,7 +449,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     // Only restricted orders consult their zone.
     let order = unsafe {
-        ref *elem(book.orders.ptr(), 0)
+        ref *book.orders.ptr()
     }
     if order.order_type > 1 {
         let order_hashes = MemArray<u256>::new_zeroed(1)
@@ -473,7 +481,7 @@ fn finish_single_order(
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let order = unsafe {
-        ref *elem(book.orders.ptr(), 0)
+        ref *book.orders.ptr()
     }
     transfer_each(
         env,

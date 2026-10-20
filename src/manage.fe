@@ -4,6 +4,7 @@ use core::abi::store_word
 use core::ptr
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_empty}
 use super::raw_abi::{error_selector, revert_with0}
+use super::buffer::Buffer
 use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
@@ -13,14 +14,15 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::{OrderState, checked_enum, orders_book, elem}
+use super::model::{OrderState, checked_enum, element, orders_book}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
     assert_non_reentrant,
-    read_status,
+    raw_status,
     set_cancelled,
     set_validated,
+    unpack_status,
     verify_order_status,
 }
 use super::types::CONTRACT
@@ -39,6 +41,10 @@ uses (
 )
 {
     assert_non_reentrant(env)
+    // `OrderCancelled` data, the order hash, rewritten for every order.
+    var event = unsafe {
+        Buffer::uninit(32)
+    }
     var any_invalid = false
     var i: u256 = 0
     let len = orders.len()
@@ -55,17 +61,11 @@ uses (
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
-        // `OrderCancelled`, whose only data word is the order hash. A direct
-        // allocation needs no zeroing and stays a fixed slot whether or not
-        // the inliner inlines the generic event encoder's allocation.
-        let data = ptr::alloc_bytes(32)
         unsafe {
-            store_word(ptr: data, value: order_hash)
+            event.put(offset: 0, value: order_hash)
         }
         log.log3(
-            data: unsafe {
-                ptr::MemSpan::from_raw_parts(ptr: data, len: 32)
-            },
+            data: event.span(),
             topic0: OrderCancelled::TOPIC0,
             topic1: offerer.word(),
             topic2: zone.word(),
@@ -96,11 +96,12 @@ uses (
     var i: usize = 0
     while i < book.orders.len() {
         let order = unsafe {
-            ref *elem(book.orders.ptr(), i as u256)
+            ref *element(book.orders.ptr(), i as u256)
         }
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(order)
-            let status = read_status(order_hash)
+            let raw = raw_status(order_hash)
+            let status = unpack_status(raw)
             verify_order_status(
                 order_hash,
                 status,
@@ -119,7 +120,9 @@ uses (
                     order_hash,
                     signature: order.signature,
                 )
-                set_validated(order_hash)
+                // Nothing since the read can change the status: signature
+                // checks only make static calls.
+                set_validated(order_hash, raw)
                 emit_order_validated(order, order_hash)
             }
         }
@@ -185,6 +188,7 @@ uses (log: mut Log)
 /// Check the item types and clean the addresses of the ABI item array at
 /// `items`, as Solidity's encoder reads them from memory.
 #[arithmetic(unchecked)]
+#[inline(always)]
 fn clean_items(_ items: *u8, count: u256, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
     var i: u256 = 0
