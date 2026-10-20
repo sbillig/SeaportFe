@@ -4,6 +4,7 @@ use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
 use std::evm::{Address, Evm, encode_abi_payload}
 use super::abi_view::CalldataView
 use super::applier::aggregate_offer_items
+use super::hashing_tests::{call_component_words, deploy_seaport}
 use super::model::{nested_components, orders_book, single_order}
 use super::types::{
     AdvancedOrder,
@@ -249,4 +250,183 @@ uses (evm: mut Evm)
             },
         )
     assert(ok)
+}
+
+// These raw inputs exercise Seaport's protocol decoder, including words
+// rejected by an ordinary Solidity ABI decoder. Expected outcomes match the
+// pinned optimized Solidity Seaport 1.6 contract.
+#[test]
+fn fulfillment_keeps_raw_hash_words_but_cleans_typed_addresses()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    let words = [
+        64,
+        0,
+        64 + (1 << 32),
+        480,
+        evm.address().word() | (1 << 200),
+        1 << 200,
+        352,
+        384,
+        0,
+        0,
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0,
+        0,
+        0,
+        0,
+        1 << 64,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0xb3a34c4c, words, len: 580)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+}
+
+#[test]
+fn fulfillment_checks_top_heads_and_order_enum_before_time()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    var words = [64, 0, 64, 480, 0, 0, 352, 384, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let missing_head = call_component_words(addr, selector: 0xb3a34c4c, words, len: 131)
+    assert(!missing_head.0 && missing_head.1 == 0)
+    let zero_padded = call_component_words(addr, selector: 0xb3a34c4c, words, len: 132)
+    assert(!zero_padded.0 && zero_padded.1 == 68)
+    words[8] = 5
+    let bad_enum = call_component_words(addr, selector: 0xb3a34c4c, words, len: 580)
+    assert(
+        !bad_enum.0 && bad_enum.1 == 36 && bad_enum.2 >> 224 == 0x4e487b71,
+    )
+}
+
+#[test]
+fn advanced_order_fractions_mask_high_bits() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    let words = [
+        128,
+        768,
+        0,
+        0,
+        160,
+        1 | (1 << 200),
+        1 | (1 << 200),
+        576,
+        608,
+        evm.address().word(),
+        0,
+        352,
+        384,
+        0,
+        0,
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0xe7acab24, words, len: 804)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+}
+
+#[test]
+fn validate_builds_and_emits_from_raw_calldata() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    var words = [
+        32,
+        1,
+        32,
+        64,
+        480,
+        evm.address().word() | (1 << 200),
+        1 << 200,
+        352,
+        384,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0x88147732, words, len: 612)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+    words[9] = 5
+    let bad_enum = call_component_words(addr, selector: 0x88147732, words, len: 612)
+    assert(
+        !bad_enum.0 && bad_enum.1 == 36 && bad_enum.2 >> 224 == 0x4e487b71,
+    )
+}
+
+#[test]
+fn criteria_proofs_preserve_raw_length_and_evm_shift_semantics()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    var words = [
+        128,
+        1120,
+        0,
+        0,
+        160,
+        1,
+        1,
+        928,
+        960,
+        evm.address().word(),
+        0,
+        352,
+        544,
+        0,
+        0,
+        1000000000000,
+        0,
+        0,
+        0,
+        1,
+        1,
+        4,
+        0,
+        0x5569044719a1ec3b04d0afa9e7a5310c7c0473331d13dc9fafe143b2c4e8148a,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        32,
+        0,
+        0,
+        0,
+        123,
+        160,
+        0,
+    ]
+    // A single-leaf root and an empty proof reach the token transfer.
+    let empty = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(!empty.0 && empty.1 == 36 && empty.2 >> 224 == 0x5f15d672)
+    words[42] = 1 << 251
+    let shifted_out = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(
+        !shifted_out.0 && shifted_out.1 == empty.1 && shifted_out.2 == empty.2,
+    )
+    words[42] = 1 << 32
+    let exhausted = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(!exhausted.0 && exhausted.1 == 0)
 }

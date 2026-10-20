@@ -2,7 +2,7 @@
 // CriteriaResolution: resolve criteria-based items to concrete identifiers
 // with Merkle proofs.
 use std::evm::{keccak_words, revert_error}
-use core::ptr::MemArray
+use core::ptr::{self, MemArray}
 use super::errors::{
     ConsiderationCriteriaResolverOutOfRange,
     CriteriaNotEnabledForItem,
@@ -111,13 +111,16 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
 pub fn verify_proof(leaf: u256, root: u256, proofs: MemArray<u256>, start: u256, len: u256) {
     var computed = keccak_words([leaf])
-    // Seaport's verifier walks `len << 5` bytes of the raw length word, so
-    // its five high bits vanish. Seaport reads past the proof's memory until
-    // it runs out of gas where the pool's bounds check panics here.
+    // Seaport's verifier walks `len << 5` bytes of memory with the raw length
+    // word: its five high bits vanish, and a length beyond the copied proof
+    // reads on until gas runs out.
     let words = (len << 5) >> 5
     var i: u256 = 0
     while i < words {
-        let element = proofs[(start + i) as usize]
+        // Reads past the pool only expand memory, like Seaport's walk.
+        let element = unsafe {
+            *ptr::offset(proofs.ptr(), start + i)
+        }
         computed = if computed > element {
             keccak_words([element, computed])
         } else {
