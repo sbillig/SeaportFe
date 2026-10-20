@@ -610,8 +610,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 /// Transfer the unspent offer items of an available order to the recipient
-/// and require its consideration to be met; restores the original amounts.
-/// Transfers and restores use separate loops over the owned item pool.
+/// and require its consideration to be met, restoring the original amounts.
+#[arithmetic(unchecked)]
 fn settle_order(
     _ env: Env,
     book: mut Book,
@@ -624,114 +624,50 @@ fn settle_order(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let order = ref book.orders[(index) as usize]
-    available[(index) as usize] = order.numerator != 0
     if order.numerator == 0 {
         return acc
     }
-    let settled = transfer_unspent_offer(env, book, order, recipient, acc, mut buf)
-    restore_offer_amounts(mut book.items, order)
-    check_consideration(mut book.items, order, order_index: index)
-    settled
-}
-
-#[arithmetic(unchecked)]
-fn transfer_unspent_offer(
-    _ env: Env,
-    book: Book,
-    order: OrderState,
-    recipient: Address,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
+    available[(index) as usize] = true
     var current = acc
     var j: u256 = 0
     while j < order.offer_len {
-        current = transfer_unspent_offer_item(
-            env,
-            book,
-            order,
-            index: j,
-            recipient,
-            acc: current,
-            mut buf,
-        )
+        let item = mut book.items[(order.offer_start + j) as usize]
+        let unspent = item.amount
+        item.amount = item.original
+        if unspent != 0 {
+            current = transfer(
+                Transfer {
+                    item_type: item.item_type,
+                    token: item.token,
+                    identifier: item.identifier,
+                    amount: unspent,
+                    recipient,
+                },
+                from: order.offerer,
+                conduit_key: order.conduit_key,
+                acc: current,
+                mut buf,
+                env,
+            )
+        }
         j += 1
     }
-    current
-}
-
-#[arithmetic(unchecked)]
-fn transfer_unspent_offer_item(
-    _ env: Env,
-    book: Book,
-    order: OrderState,
-    index: u256,
-    recipient: Address,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    let item = ref book.items[(order.offer_start + index) as usize]
-    if item.amount == 0 {
-        return acc
-    }
-    let unspent = Transfer {
-        item_type: item.item_type,
-        token: item.token,
-        identifier: item.identifier,
-        amount: item.amount,
-        recipient,
-    }
-    transfer(
-        unspent,
-        from: order.offerer,
-        conduit_key: order.conduit_key,
-        acc,
-        mut buf,
-        env,
-    )
-}
-
-#[arithmetic(unchecked)]
-fn restore_offer_amounts(_ items: mut MemArray<Item>, order: OrderState) {
-    var j: u256 = 0
-    while j < order.offer_len {
-        let item = mut items[(order.offer_start + j) as usize]
+    j = 0
+    while j < order.consideration_len {
+        let item = mut book.items[(order.consideration_start + j) as usize]
+        if item.amount != 0 {
+            revert_error(
+                ConsiderationNotMet {
+                    orderIndex: index,
+                    considerationIndex: j,
+                    shortfallAmount: item.amount,
+                },
+            )
+        }
         item.amount = item.original
         j += 1
     }
-}
-
-#[arithmetic(unchecked)]
-fn check_consideration(_ items: mut MemArray<Item>, order: OrderState, order_index: u256) {
-    var j: u256 = 0
-    while j < order.consideration_len {
-        check_consideration_item(mut items, order, order_index, index: j)
-        j += 1
-    }
-}
-
-#[arithmetic(unchecked)]
-fn check_consideration_item(
-    _ items: mut MemArray<Item>,
-    order: OrderState,
-    order_index: u256,
-    index: u256,
-) {
-    let item = mut items[(order.consideration_start + index) as usize]
-    if item.amount != 0 {
-        revert_error(
-            ConsiderationNotMet {
-                orderIndex: order_index,
-                considerationIndex: index,
-                shortfallAmount: item.amount,
-            },
-        )
-    }
-    item.amount = item.original
+    current
 }
 
 fn validate_available_order(
