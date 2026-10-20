@@ -22,29 +22,29 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     var i: u256 = 0
     while i < resolvers.len() {
         let resolver = resolvers.get(i)
-        if resolver.order_index >= total_orders {
+        if resolver.order_index() >= total_orders {
             revert_error(
                 OrderCriteriaResolverOutOfRange {
-                    side: checked_enum(resolver.side, variants: 2).downcast_truncate(),
+                    side: checked_enum(resolver.side(), variants: 2).downcast_truncate(),
                 },
             )
         }
-        let order = ref book.orders[(resolver.order_index) as usize]
+        let order = ref book.orders[(resolver.order_index()) as usize]
         if order.numerator != 0 {
-            if checked_enum(resolver.side, variants: 2) != OFFER as u256 {
-                if resolver.index >= order.consideration_len {
+            if checked_enum(resolver.side(), variants: 2) != OFFER as u256 {
+                if resolver.index() >= order.consideration_len {
                     revert_error(ConsiderationCriteriaResolverOutOfRange {})
                 }
                 update_criteria_item(
-                    mut book.items[(order.consideration_start + resolver.index) as usize],
+                    mut book.items[(order.consideration_start + resolver.index()) as usize],
                     resolver,
                 )
             } else {
-                if resolver.index >= order.offer_len {
+                if resolver.index() >= order.offer_len {
                     revert_error(OfferCriteriaResolverOutOfRange {})
                 }
                 update_criteria_item(
-                    mut book.items[(order.offer_start + resolver.index) as usize],
+                    mut book.items[(order.offer_start + resolver.index()) as usize],
                     resolver,
                 )
             }
@@ -94,15 +94,15 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
     }
     if item.identifier != 0 {
         verify_proof(
-            leaf: resolver.identifier,
+            leaf: resolver.identifier(),
             root: item.identifier,
-            proof: resolver.proof,
+            proof: resolver.proof(),
         )
-    } else if resolver.proof.word(0) != 0 {
+    } else if resolver.proof().word(0) != 0 {
         revert_error(InvalidProof {})
     }
     item.item_type = item.item_type - 2
-    item.identifier = resolver.identifier
+    item.identifier = resolver.identifier()
 }
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.

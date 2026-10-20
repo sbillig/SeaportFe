@@ -76,17 +76,33 @@ pub struct Book {
     pub used: u256,
 }
 
-/// A `CriteriaResolver`, read in calldata like the rest of `Resolvers`.
-pub struct Resolver {
-    pub order_index: u256,
-    pub side: u256,
-    pub index: u256,
-    pub identifier: u256,
-    /// The `bytes32[]` proof, whose raw length word Seaport's copy keeps.
-    pub proof: CalldataView,
-}
+/// A `CriteriaResolver` in calldata.
+pub struct Resolver { input: CalldataView }
 
 impl Copy for Resolver {}
+
+impl Resolver {
+    pub fn order_index(self) -> u256 {
+        self.input.word(0)
+    }
+
+    pub fn side(self) -> u256 {
+        self.input.word(32)
+    }
+
+    pub fn index(self) -> u256 {
+        self.input.word(64)
+    }
+
+    pub fn identifier(self) -> u256 {
+        self.input.word(96)
+    }
+
+    /// The `bytes32[]` proof, whose raw length word Seaport's copy keeps.
+    pub fn proof(self) -> CalldataView {
+        self.input.child(128)
+    }
+}
 
 /// `CriteriaResolver[]` in calldata. Seaport's memory copies of resolvers,
 /// fulfillment components and fulfillments are never written, so reading
@@ -101,14 +117,7 @@ impl Resolvers {
     }
 
     pub fn get(self, _ index: u256) -> Resolver {
-        let r = self.input.dynamic_element(index)
-        Resolver {
-            order_index: r.word(0),
-            side: r.word(32),
-            index: r.word(64),
-            identifier: r.word(96),
-            proof: r.child(128),
-        }
+        Resolver { input: self.input.dynamic_element(index) }
     }
 }
 
