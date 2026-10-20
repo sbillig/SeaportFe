@@ -483,7 +483,9 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 /// `_decodeGenerateOrderReturndata` checks: the returned
 /// `(SpentItem[], ReceivedItem[])` must be well formed and may not reduce
 /// the offer or increase the consideration. Returns a zero order hash for
-/// invalid returndata.
+/// invalid returndata. Kept out of line so its frame does not join
+/// `generate_order`'s.
+#[inline(never)]
 fn validate_generate_order_returndata(
     _ book: Book,
     order: OrderState,
