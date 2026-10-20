@@ -595,28 +595,39 @@ uses (ops: mut RawOps)
     var items = MemArray<Item>::new_zeroed(used as usize)
     var i: u256 = 0
     while i < start {
-        copy_item(mut items, source: book.items, index: i)
+        items[(i) as usize] = book.items[(i) as usize]
         i += 1
     }
+    // Offer items, then consideration items; returned tokens and recipients
+    // become the addresses in their low 160 bits.
     i = 0
-    while i < offer_length {
-        write_generated_offer_item(
-            mut items,
-            slot: start + i,
-            base: generated.offer_offset + 32 + i * 128,
-        )
+    while i < offer_length + consideration_length {
+        let consideration = i >= offer_length
+        let base = if consideration {
+            generated.consideration_offset + 32 + (i - offer_length) * 160
+        } else {
+            generated.offer_offset + 32 + i * 128
+        }
+        let amount = returndata_word(base + 96)
+        let recipient = if consideration {
+            Address::from_word_truncate(returndata_word(base + 128))
+        } else {
+            Address::zero()
+        }
+        items[(start + i) as usize] = Item {
+            item_type: returndata_word(base),
+            token: Address::from_word_truncate(returndata_word(base + 32)),
+            identifier: returndata_word(base + 64),
+            start_amount: amount,
+            end_amount: amount,
+            recipient,
+            amount,
+            receiver: recipient,
+            original: amount,
+        }
         i += 1
     }
     let consideration_start = start + offer_length
-    i = 0
-    while i < consideration_length {
-        write_generated_consideration_item(
-            mut items,
-            slot: consideration_start + i,
-            base: generated.consideration_offset + 32 + i * 160,
-        )
-        i += 1
-    }
     let order = mut book.orders[(order_index) as usize]
     order.offer_start = start
     order.offer_len = offer_length
@@ -624,45 +635,6 @@ uses (ops: mut RawOps)
     order.consideration_len = consideration_length
     book.items = items
     book.used = used
-}
-
-fn copy_item(_ items: mut MemArray<Item>, source: MemArray<Item>, index: u256) {
-    items[(index) as usize] = source[(index) as usize]
-}
-
-fn write_generated_offer_item(_ items: mut MemArray<Item>, slot: u256, base: u256)
-uses (ops: mut RawOps)
-{
-    let amount = returndata_word(base + 96)
-    items[(slot) as usize] = Item {
-        item_type: returndata_word(base),
-        token: Address::from_word_truncate(returndata_word(base + 32)),
-        identifier: returndata_word(base + 64),
-        start_amount: amount,
-        end_amount: amount,
-        recipient: Address::zero(),
-        amount,
-        receiver: Address::zero(),
-        original: amount,
-    }
-}
-
-fn write_generated_consideration_item(_ items: mut MemArray<Item>, slot: u256, base: u256)
-uses (ops: mut RawOps)
-{
-    let amount = returndata_word(base + 96)
-    let recipient = Address::from_word_truncate(returndata_word(base + 128))
-    items[(slot) as usize] = Item {
-        item_type: returndata_word(base),
-        token: Address::from_word_truncate(returndata_word(base + 32)),
-        identifier: returndata_word(base + 64),
-        start_amount: amount,
-        end_amount: amount,
-        recipient,
-        amount,
-        receiver: recipient,
-        original: amount,
-    }
 }
 
 /// `compareItems`: a wildcard criteria item matches any identifier of the
