@@ -47,10 +47,10 @@ and write order status slots directly).
 
 This branch builds with the size-optimized Fe branch
 [`sbillig/fe` `opt/seaport-size-20261019`](https://github.com/sbillig/fe/tree/opt/seaport-size-20261019)
-at `d37393273`, which is Fe master `822e80878` plus the compiler changes listed
+at `ecdd3fcd7`, which is Fe master `822e80878` plus the compiler changes listed
 under [Size and gas](#size-and-gas). Its Cargo dependencies pin Sonatina from
 [`sbillig/sonatina` `opt/seaport-size-20261019`](https://github.com/sbillig/sonatina/tree/opt/seaport-size-20261019)
-at `b85ad012`. `scripts/bootstrap.py` builds that exact compiler with
+at `e02abbfa`. `scripts/bootstrap.py` builds that exact compiler with
 `cargo build --locked --release -p fe` and the contracts at `-Os`, the level
 recorded in `reference_manifest.json`.
 
@@ -87,39 +87,40 @@ historical toolchain; neither is used to build this branch.
 <!-- size-gas:begin -->
 ## Size and gas
 
-Runtime bytes and receipt gas, with the compiler above at `-Os`. Before:
-the same contracts migrated to Fe master `822e80878` at `-O1`. solc: the
-pinned Seaport's optimized artifacts. Receipt gas comes from
-`tests/rooted-storage.cjs` in transient guard mode, on identical calls.
+Runtime bytes and receipt gas with the compiler above at `-Os` (the build
+level) and at `-O1`. Before: the same contracts migrated to Fe master
+`822e80878` at `-O1`. solc: the pinned Seaport's optimized artifacts. Receipt
+gas comes from `tests/rooted-storage.cjs` in transient guard mode, on
+identical calls.
 
-| Contract | Before | Now | solc |
-| --- | ---: | ---: | ---: |
-| Seaport | 54,156 | 24,002 | 23,963 |
-| Consideration | 54,162 | 24,008 | 23,969 |
-| Conduit | 3,970 | 2,681 | 2,850 |
-| ConduitController | 7,589 | 5,347 | 7,298 |
-| TransferHelper | 4,796 | 3,646 | 3,712 |
-| SeaportRouter | 11,151 | 5,055 | 6,759 |
-| PausableZone | 7,411 | 5,630 | 6,162 |
-| PausableZoneController | 14,099 | 11,845 | 12,730 |
-| Total | 157,334 | 82,214 | 87,443 |
+| Contract | Before | `-Os` | `-O1` | solc |
+| --- | ---: | ---: | ---: | ---: |
+| Seaport | 54,156 | 23,701 | 23,917 | 23,963 |
+| Consideration | 54,162 | 23,707 | 23,923 | 23,969 |
+| Conduit | 3,970 | 2,681 | 2,730 | 2,850 |
+| ConduitController | 7,589 | 5,347 | 5,396 | 7,298 |
+| TransferHelper | 4,796 | 3,646 | 3,680 | 3,712 |
+| SeaportRouter | 11,151 | 5,055 | 5,070 | 6,759 |
+| PausableZone | 7,411 | 5,643 | 5,707 | 6,162 |
+| PausableZoneController | 14,099 | 11,846 | 12,130 | 12,730 |
+| Total | 157,334 | 81,626 | 82,553 | 87,443 |
 
-| Call | Before | Now | solc |
-| --- | ---: | ---: | ---: |
-| Advanced ERC721/native self fulfillment | 128,191 | 116,237 | 113,085 |
-| Validate one order | 57,334 | 41,701 | 40,064 |
-| Cancel one order | 40,521 | 33,647 | 33,272 |
-| Increment counter | 29,255 | 27,967 | 27,976 |
-| getOrderStatus (cold) | 25,160 | 23,818 | 23,669 |
-| name (cold) | 22,527 | 21,642 | 21,240 |
-| getCounter (cold) | 24,076 | 24,055 | 24,109 |
-| Create conduit | 908,150 | 649,195 | 676,738 |
-| Create zone | 1,554,667 | 1,196,831 | 1,297,167 |
-| Open a channel | 120,746 | 120,258 | 120,891 |
-| Transfer conduit ownership | 49,879 | 49,818 | 50,233 |
+| Call | Before | `-Os` | `-O1` | solc |
+| --- | ---: | ---: | ---: | ---: |
+| Advanced ERC721/native self fulfillment | 128,191 | 116,058 | 116,101 | 113,085 |
+| Validate one order | 57,334 | 41,775 | 41,683 | 40,064 |
+| Cancel one order | 40,521 | 33,570 | 33,699 | 33,272 |
+| Increment counter | 29,255 | 27,967 | 28,436 | 27,976 |
+| getOrderStatus (cold) | 25,160 | 23,818 | 23,804 | 23,669 |
+| name (cold) | 22,527 | 21,712 | 21,694 | 21,240 |
+| getCounter (cold) | 24,076 | 24,055 | 24,055 | 24,109 |
+| Create conduit | 908,150 | 649,195 | 659,036 | 676,738 |
+| Create zone | 1,554,667 | 1,199,386 | 1,212,692 | 1,297,167 |
+| Open a channel | 120,746 | 120,258 | 120,284 | 120,891 |
+| Transfer conduit ownership | 49,879 | 49,818 | 49,818 | 50,233 |
 
-Every contract except Seaport/Consideration is now at or below the solc size,
-and Seaport/Consideration fit under the 24,576-byte EIP-170 limit.
+Every contract is now at or below the solc size at both levels, and
+Seaport/Consideration fit under the 24,576-byte EIP-170 limit.
 
 Compiler changes (Fe and Sonatina branches above):
 - Messages and custom errors encode into one buffer. `revert_error` stays out
@@ -272,7 +273,7 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
 - Code size: with the compiler above at `-Os`, the Seaport and Consideration
-  runtimes are 24,002 and 24,008 bytes, under the 24 KB EIP-170 limit
+  runtimes are 23,701 and 23,707 bytes, under the 24 KB EIP-170 limit
   (ISSUES.md #13); see [Size and gas](#size-and-gas). Earlier builds:
   Fe master 735827147 / committed Sonatina 6bef907f at `-O1`
   produced a 57,339-byte Seaport runtime and a 57,345-byte Consideration
