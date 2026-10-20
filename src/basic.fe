@@ -43,6 +43,7 @@ use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
     call_and_check_status_with_skip,
+    ensure_range,
     is_restricted_and_caller_not_zone,
 }
 
@@ -415,63 +416,72 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let params_size = 0x140 + 0xa0 + consideration_size + 32 + 32 + hashes_count * 32
     let size = 0x24 + params_size
     var data = Buffer::new(size)
-    data.write(offset: 0, value: selector << 224)
-    data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
-    data.write(offset: head, value: order_hash)
-    data.write(offset: head + 0x20, value: ctx.caller().word())
-    data.write(offset: head + 0x40, value: cd(OFFERER))
-    data.write(offset: head + 0x60, value: 0x140)
-    data.write(offset: head + 0x80, value: 0x1e0)
     let extra_data_offset = 0x1e0 + consideration_size
-    data.write(offset: head + 0xa0, value: extra_data_offset)
-    data.write(offset: head + 0xc0, value: extra_data_offset + 32)
-    data.write(offset: head + 0xe0, value: cd(START_TIME))
-    data.write(offset: head + 0x100, value: cd(END_TIME))
-    data.write(offset: head + 0x120, value: cd(ZONE_HASH))
-    // offer: [(offeredItemType, offerToken, offerIdentifier, offerAmount)]
     let basic_order_type = cd(BASIC_ORDER_TYPE)
     let route = basic_order_type >> 2
     let offer = head + 0x140
-    data.write(offset: offer, value: 1)
-    data.write(
-        offset: offer + 0x20,
-        value: byte_at(route, OFFERED_ITEM_BYTE_MAP),
-    )
-    data.write(offset: offer + 0x40, value: cd(OFFER_TOKEN))
-    data.write(offset: offer + 0x60, value: cd(OFFER_IDENTIFIER))
-    data.write(offset: offer + 0x80, value: cd(OFFER_AMOUNT))
-    // consideration: primary item, then all additional recipients
+    let consideration = head + 0x1e0
+    let first = consideration + 0x20
+    ensure_range(data, offset: 0, len: first + 0xa0)
+    // The checked range holds the head, the offer and the primary
+    // consideration item.
+    unsafe {
+        data.put(offset: 0, value: selector << 224)
+        data.put(offset: 4, value: 0x20)
+        data.put(offset: head, value: order_hash)
+        data.put(offset: head + 0x20, value: ctx.caller().word())
+        data.put(offset: head + 0x40, value: cd(OFFERER))
+        data.put(offset: head + 0x60, value: 0x140)
+        data.put(offset: head + 0x80, value: 0x1e0)
+        data.put(offset: head + 0xa0, value: extra_data_offset)
+        data.put(offset: head + 0xc0, value: extra_data_offset + 32)
+        data.put(offset: head + 0xe0, value: cd(START_TIME))
+        data.put(offset: head + 0x100, value: cd(END_TIME))
+        data.put(offset: head + 0x120, value: cd(ZONE_HASH))
+        // offer: [(offeredItemType, offerToken, offerIdentifier, offerAmount)]
+        data.put(offset: offer, value: 1)
+        data.put(
+            offset: offer + 0x20,
+            value: byte_at(route, OFFERED_ITEM_BYTE_MAP),
+        )
+        data.put(offset: offer + 0x40, value: cd(OFFER_TOKEN))
+        data.put(offset: offer + 0x60, value: cd(OFFER_IDENTIFIER))
+        data.put(offset: offer + 0x80, value: cd(OFFER_AMOUNT))
+        // consideration: primary item, then all additional recipients
+        data.put(offset: consideration, value: total_recipients + 1)
+        data.put(
+            offset: first,
+            value: byte_at(route, RECEIVED_ITEM_BYTE_MAP),
+        )
+        data.put(offset: first + 0x20, value: cd(CONSIDERATION_TOKEN))
+        data.put(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
+        data.put(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
+        data.put(offset: first + 0x80, value: cd(OFFERER))
+    }
     let additional_recipients_item_type: u256 = if route > 1 { 1 } else { 0 }
     let additional_recipients_token = if route > 3 {
         cd(OFFER_TOKEN)
     } else {
         cd(CONSIDERATION_TOKEN)
     }
-    let consideration = head + 0x1e0
-    data.write(offset: consideration, value: total_recipients + 1)
-    let first = consideration + 0x20
-    data.write(
-        offset: first,
-        value: byte_at(route, RECEIVED_ITEM_BYTE_MAP),
-    )
-    data.write(offset: first + 0x20, value: cd(CONSIDERATION_TOKEN))
-    data.write(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
-    data.write(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
-    data.write(offset: first + 0x80, value: cd(OFFERER))
     var i: u256 = 0
     while i < total_recipients {
-        let item = consideration + 0x20 + (i + 1) * 160
-        data.write(offset: item, value: additional_recipients_item_type)
-        data.write(offset: item + 0x20, value: additional_recipients_token)
-        data.write(
-            offset: item + 0x60,
-            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
-        )
-        data.write(
-            offset: item + 0x80,
-            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
-        )
+        let item = first + 0xa0 + i * 0xa0
+        ensure_range(data, offset: item, len: 0xa0)
+        // The checked range holds the item; its identifier stays zero.
+        unsafe {
+            data.put(offset: item, value: additional_recipients_item_type)
+            data.put(offset: item + 0x20, value: additional_recipients_token)
+            data.put(
+                offset: item + 0x60,
+                value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
+            )
+            data.put(
+                offset: item + 0x80,
+                value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
+            )
+        }
         i += 1
     }
     data.write(offset: head + extra_data_offset + 32, value: hashes_count)
