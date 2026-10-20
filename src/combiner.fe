@@ -761,7 +761,10 @@ pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
 /// `OrdersMatched(orderHashes)`, encoded directly into the log data.
 fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
     let count = order_hashes.len() as u256
-    var data = Buffer::new(64 + count * 32)
+    // The offset and length words and the copied hashes fill the buffer.
+    var data = unsafe {
+        Buffer::uninit(64 + count * 32)
+    }
     // The buffer holds the offset and length words.
     unsafe {
         data.put(offset: 0, value: 32)
@@ -774,8 +777,11 @@ fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
 #[arithmetic(unchecked)]
 pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
     let count = executions.len() as u256
-    // The tail holds seven words per execution, so no offset overflows.
-    var out = Buffer::array(count, stride: 224)
+    // The tail holds seven words per execution, all written below, so no
+    // offset overflows.
+    var out = unsafe {
+        Buffer::uninit_array(count, stride: 224)
+    }
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]

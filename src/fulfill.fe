@@ -355,7 +355,10 @@ uses (log: mut Log)
 {
     // Head: orderHash, recipient and the offer and consideration offsets.
     let consideration_at = 0xa0 + order.offer_len * 128
-    var data = Buffer::new(consideration_at + 32 + order.consideration_len * 160)
+    // Every word of the buffer is written below.
+    var data = unsafe {
+        Buffer::uninit(consideration_at + 32 + order.consideration_len * 160)
+    }
     unsafe {
         data.put(offset: 0, value: order_hash)
         data.put(offset: 32, value: recipient.word())

@@ -277,8 +277,11 @@ uses (conduits: StorageMap<Address, ConduitProperties>)
     let properties = ref conduits[conduit]
     properties.assert_exists()
     let length = properties.channels.len()
-    // The tail holds a word per channel, so no offset overflows.
-    var channels = Buffer::array(length, stride: 32)
+    // The tail holds a word per channel, all written below, so no offset
+    // overflows.
+    var channels = unsafe {
+        Buffer::uninit_array(length, stride: 32)
+    }
     var i: u256 = 0
     while i < length {
         unsafe {
