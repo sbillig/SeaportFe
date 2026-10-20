@@ -36,10 +36,10 @@ pub struct InvalidItemType {}
 pub struct InvalidController {}
 
 pub msg ConduitMsg {
-    #[selector = sol(
-        "execute((uint8,address,address,address,uint256,uint256)[])",
-    )]
-    Execute { transfers: DynArray<ConduitTransfer> } -> Bytes4,
+    /// execute((uint8,address,address,address,uint256,uint256)[]), read from
+    /// raw calldata.
+    #[selector = 0x4ce34aa2]
+    Execute {} -> Bytes4,
     /// executeBatch1155((address,address,address,uint256[],uint256[])[]),
     /// read from raw calldata like seaport-core.
     #[selector = 0x8df25d92]
@@ -106,16 +106,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-fn execute_transfers(_ transfers: DynArray<ConduitTransfer>)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    var i: usize = 0
-    while i < transfers.len() {
-        transfer_item(transfers.get(i))
-        i += 1
-    }
-}
-
 /// The `ConduitTransfer[] calldata` at `array`, with the checks Solidity
 /// applies when reading each field.
 fn execute_raw_transfers(_ array: u256)
@@ -169,7 +159,7 @@ uses (ops: RawOps)
 /// `_performERC1155BatchTransfers` over the `ConduitBatch1155Transfer[]` whose
 /// length word is at calldata offset `array`.
 fn perform_erc1155_batch_transfers(_ array: u256)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
+uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let length = ops.calldataload(array)
     let heads = array + 32
@@ -183,8 +173,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let account = Address::from_word_truncate(token)
         if ctx.extcodesize(account) == 0 {
             var failure = Buffer::new(0x24)
-            failure.write(offset: 0, value: NO_CONTRACT_SELECTOR << 224)
-            failure.write(offset: 0x04, value: token)
+            // The buffer holds both words.
+            unsafe {
+                failure.put(offset: 0, value: NO_CONTRACT_SELECTOR << 224)
+                failure.put(offset: 0x04, value: token)
+            }
             ops.revert(data: failure.span())
         }
         let ids_length = ops.calldataload(element + 0xa0)
@@ -201,30 +194,23 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         // the failure error can be laid over it from the buffer start.
         // Call data: selector, from, to, ids head, amounts head, data head,
         // ids, amounts, empty data.
+        // The zeroed buffer holds the call data, whose empty `data` length
+        // word stays zero, and the word before it.
         var mem = Buffer::new(size + 0x40)
         let data: u256 = 0x20
-        mem.write(
-            offset: data,
-            value: SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224,
+        unsafe {
+            mem.put(
+                offset: data,
+                value: SAFE_BATCH_TRANSFER_FROM_SELECTOR << 224,
+            )
+            mem.put(offset: data + 0x84, value: 0xa0 + ids_and_amounts_size)
+        }
+        mem.copy_calldata(offset: data + 4, source: element + 0x20, len: 0x80)
+        mem.copy_calldata(
+            offset: data + 0xa4,
+            source: element + 0xa0,
+            len: ids_and_amounts_size,
         )
-        var word: u256 = 0
-        while word < 4 {
-            mem.write(
-                offset: data + 4 + word * 32,
-                value: ops.calldataload(element + 0x20 + word * 32),
-            )
-            word += 1
-        }
-        mem.write(offset: data + 0x84, value: 0xa0 + ids_and_amounts_size)
-        word = 0
-        while word * 32 < ids_and_amounts_size {
-            mem.write(
-                offset: data + 0xa4 + word * 32,
-                value: ops.calldataload(element + 0xa0 + word * 32),
-            )
-            word += 1
-        }
-        mem.write(offset: data + 0xa4 + ids_and_amounts_size, value: 0)
         var ret = MemBuffer::empty()
         let outcome = call
             .raw_call(
@@ -240,13 +226,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             // laid over the call data: from and to stay in place, ids follow
             // at the same position, and the amounts head grows by the word
             // taken by the token.
-            mem.write(
-                offset: 0,
-                value: ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
-            )
-            mem.write(offset: 0x04, value: token)
-            mem.write(offset: 0x64, value: 0xc0)
-            mem.write(offset: 0x84, value: mem.word(0x84) + 0x20)
+            unsafe {
+                mem.put(
+                    offset: 0,
+                    value: ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+                )
+                mem.put(offset: 0x04, value: token)
+                mem.put(offset: 0x64, value: 0xc0)
+                mem.put(offset: 0x84, value: mem.word(0x84) + 0x20)
+            }
             ops.revert(data: mem.slice(offset: 0, len: size))
         }
         i += 1
@@ -261,18 +249,24 @@ pub contract Conduit {
     init() uses (mut controller, ctx: Ctx) { controller = ctx.caller() }
 
     recv ConduitMsg {
-        Execute { transfers } -> Bytes4 uses (channels, ctx: Ctx, call: mut Call, ops: RawOps) {
+        Execute {} -> Bytes4 uses (channels, ctx: Ctx, call: mut Call, ops: RawOps) {
+            let array = calldata_array(head: 4, element_head_size: 0xc0)
             assert_open_channel()
-            execute_transfers(transfers)
+            execute_raw_transfers(array)
             Bytes4 { val: EXECUTE_SELECTOR }
         }
-        ExecuteBatch1155 {} -> Bytes4 uses (channels, ctx: Ctx, call: mut Call, ops: RawOps) {
+        ExecuteBatch1155 {} -> Bytes4 uses (channels, ctx: Ctx, call: mut Call, ops: mut RawOps) {
             let array = calldata_array(head: 4, element_head_size: 32)
             assert_open_channel()
             perform_erc1155_batch_transfers(array)
             Bytes4 { val: EXECUTE_BATCH_1155_SELECTOR }
         }
-        ExecuteWithBatch1155 {} -> Bytes4 uses (channels, ctx: Ctx, call: mut Call, ops: RawOps) {
+        ExecuteWithBatch1155 {} -> Bytes4 uses (
+            channels,
+            ctx: Ctx,
+            call: mut Call,
+            ops: mut RawOps,
+        ) {
             let standard = calldata_array(head: 4, element_head_size: 0xc0)
             let batch = calldata_array(head: 0x24, element_head_size: 32)
             assert_open_channel()

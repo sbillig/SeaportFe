@@ -3,7 +3,7 @@
 use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
 use std::abi::DynArray
-use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_error}
+use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
 
 pub struct Buffer { data: MemBuffer }
 
@@ -58,6 +58,18 @@ impl Buffer {
     pub fn copy_from(mut self, offset: u256, source: MemSpan) {
         self.check_range(offset, len: source.len() as u256)
         self.data.copy_from(dest_offset: offset as usize, source)
+    }
+    /// Copy `len` bytes of calldata from `source` to `offset`.
+    pub fn copy_calldata(mut self, offset: u256, source: u256, len: u256)
+    uses (ops: mut RawOps)
+    {
+        self.check_range(offset, len)
+        ops.calldatacopy(
+            dest: mut self.data,
+            dest_offset: offset,
+            src_offset: source,
+            len,
+        )
     }
     /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
     /// buffer. One check can cover a run of `put`s.

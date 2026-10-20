@@ -2,11 +2,10 @@
 // TransferHelper (contracts/helpers/TransferHelper.sol): bulk transfers of
 // ERC20/721/1155 tokens through a conduit.
 use core::option::Option
-use core::ptr::{MemArray, MemBuffer, MemSpan}
+use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
-use super::conduit::{ConduitMsg, ConduitTransfer}
-use super::buffer::{read_word, return_word}
+use super::buffer::{Buffer, read_word, return_word}
 
 #[abi]
 pub struct TransferHelperItem {
@@ -208,8 +207,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         total = total + transfers.get(i).items.len()
         i += 1
     }
-    var conduit_transfers = MemArray<ConduitTransfer>::new_zeroed(total)
-    var index: usize = 0
+    // `execute(ConduitTransfer[])` calldata: the selector, the array offset
+    // and length, then six words per transfer.
+    var data = Buffer::new(0x44 + total as u256 * 0xc0)
+    unsafe {
+        data.put(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+        data.put(offset: 4, value: 0x20)
+        data.put(offset: 0x24, value: total as u256)
+    }
+    var at: u256 = 0x44
     i = 0
     while i < transfers.len() {
         let transfer = transfers.get(i)
@@ -233,28 +239,21 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             if item.itemType == 2 && call_erc721_receiver {
                 check_erc721_receiver(conduit, recipient, token_id: item.identifier)
             }
-            conduit_transfers[index] = ConduitTransfer {
-                itemType: item.itemType,
-                token: item.token,
-                from: ctx.caller(),
-                to: recipient,
-                identifier: item.identifier,
-                amount: item.amount,
+            // `total` counts this transfer, so its words lie in the buffer.
+            unsafe {
+                data.put(offset: at, value: item.itemType as u256)
+                data.put(offset: at + 0x20, value: item.token.word())
+                data.put(offset: at + 0x40, value: ctx.caller().word())
+                data.put(offset: at + 0x60, value: recipient.word())
+                data.put(offset: at + 0x80, value: item.identifier)
+                data.put(offset: at + 0xa0, value: item.amount)
             }
-            index += 1
+            at += 0xc0
             j += 1
         }
         i += 1
     }
-    let outcome = call
-        .try_call(
-            addr: conduit,
-            gas: ctx.gas(),
-            value: 0,
-            message: ConduitMsg::Execute {
-                transfers: DynArray::from_slice(conduit_transfers.as_slice()),
-            },
-        )
+    let outcome = call.try_call_raw(addr: conduit, gas: ctx.gas(), value: 0, args: data.span())
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != CONDUIT_EXECUTE_SELECTOR {
             revert_error(
