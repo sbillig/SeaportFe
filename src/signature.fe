@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Verifiers._verifySignature, bulk order proofs and
 // SignatureVerification._assertValidSignature.
-use core::ptr::MemBuffer
+use core::abi::store_word
+use core::ptr::{self, MemBuffer, MemSpan}
 use core::result::Result
 use core::option::Option
 use std::evm::{Address, Call, Ctx, RawOps, keccak_words, revert_error}
@@ -10,7 +11,7 @@ use super::abi_view::CalldataView
 use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
 use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
 use super::lowlevel::revert_with_reason_if_one_is_returned
-use super::buffer::{Buffer, return_word}
+use super::buffer::return_word
 
 const EIP1271_SELECTOR_WORD: u256 = 0x1626ba7e00000000000000000000000000000000000000000000000000000000
 const ALL_BUT_HIGHEST_BIT: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -119,16 +120,17 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     var success = signer.word() == recovered && signer.word() != 0
     if !success {
         // isValidSignature(bytes32,bytes) with the unpadded signature bytes.
-        var args = Buffer::new(original_length + 0x64)
-        args.write(offset: 0, value: EIP1271_SELECTOR_WORD)
-        args.write(offset: 4, value: original_digest)
-        args.write(offset: 0x24, value: 0x40)
-        args.write(offset: 0x44, value: original_length)
-        args.copy_calldata(
-            offset: 0x64,
-            source: signature.offset(32),
-            len: original_length,
-        )
+        let size = original_length + 0x64
+        let args = ptr::alloc_bytes(size)
+        // The selector, digest, offset, length and signature bytes fill the
+        // `size` bytes allocated above.
+        unsafe {
+            store_word(ptr: args, value: EIP1271_SELECTOR_WORD)
+            store_word(ptr: ptr::offset_bytes(args, 4), value: original_digest)
+            store_word(ptr: ptr::offset_bytes(args, 0x24), value: 0x40)
+            store_word(ptr: ptr::offset_bytes(args, 0x44), value: original_length)
+            signature.offset(32).copy_to(ptr::offset_bytes(args, 0x64), len: original_length)
+        }
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
         var ret = MemBuffer::with_capacity(32)
@@ -136,7 +138,9 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
             .raw_staticcall(
                 addr: signer,
                 gas: ctx.gas(),
-                args: args.span(),
+                args: unsafe {
+                    MemSpan::from_raw_parts(ptr: args, len: size as usize)
+                },
                 ret: mut ret,
             )
             .success()
