@@ -3,7 +3,8 @@
 //   FE_BUILD=<dir with SeaportRouter.bin> npx hardhat run --no-compile ../../tests/router-diff.cjs
 // Both routers get stub Seaports: one reverting with its calldata (exposing the
 // forwarded call) and ones returning crafted (bool[], Execution[]) data. Prints
-// every case whose return or revert data differ.
+// every case whose return or revert data differ. RELATIVE=1 instead shifts
+// every word of the valid calldata by +-32, +1 and +64.
 const hre = require("hardhat");
 const fs = require("fs");
 const { ethers } = hre;
@@ -113,6 +114,18 @@ async function main() {
     "0000000000000000000000000000000001000000000000000000000000000000",
     "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0",
   ];
+  if (process.env.RELATIVE) {
+    for (let w = 0; w < words; w++) {
+      const v = ethers.BigNumber.from("0x" + valid.slice(10 + w * 64, 10 + (w + 1) * 64));
+      const M = ethers.BigNumber.from(2).pow(256);
+      for (const d of [32, -32, 1, 64]) {
+        const nv = v.add(d).add(M).mod(M);
+        await compare(`w${w}${d > 0 ? "+" : ""}${d}`, rs, mut(w, nv.toHexString().slice(2).padStart(64, "0")));
+      }
+    }
+    console.log(`compared ${n}, mismatches ${fails}`);
+    return;
+  }
   for (let w = 0; w < words; w++) for (const m of muts) await compare(`w${w}=${m.slice(-8)}`, rs, mut(w, m));
   // truncations
   for (let cut = 4; cut < valid.length / 2 - 4; cut += 37) await compare(`trunc${cut}`, rs, valid.slice(0, 2 + cut * 2));
