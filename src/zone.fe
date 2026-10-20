@@ -373,41 +373,35 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn encode_generate_order(_ book: Book, order: OrderState) -> Buffer
 uses (ctx: Ctx)
 {
-    let size = 4
-        + 0x80
-        + 32
-        + order.offer_len * 128
-        + 32
-        + order.consideration_len * 128
-        + 32
-        + padded(order.extra_data.len())
-    var data = Buffer::new(size)
-    data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
-    let head: u256 = 4
-    data.write(offset: head, value: ctx.caller().word())
-    var tail: u256 = 0x80
-    data.write(offset: head + 0x20, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.offer_start,
-            count: order.offer_len,
-            use_original: false,
-        )
-    data.write(offset: head + 0x40, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.consideration_start,
-            count: order.consideration_len,
-            use_original: false,
-        )
-    data.write(offset: head + 0x60, value: tail)
-    write_bytes(mut data, offset: head + tail, order.extra_data)
+    let offer_tail: u256 = 0x80
+    let consideration_tail = offer_tail + 32 + order.offer_len * 128
+    let context_tail = consideration_tail + 32 + order.consideration_len * 128
+    var data = Buffer::new(4 + context_tail + 32 + padded(order.extra_data.len()))
+    // The buffer holds the selector and the head.
+    unsafe {
+        data.put(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
+        data.put(offset: 4, value: ctx.caller().word())
+        data.put(offset: 0x24, value: offer_tail)
+        data.put(offset: 0x44, value: consideration_tail)
+        data.put(offset: 0x64, value: context_tail)
+    }
+    let _ = write_spent_items(
+        mut data,
+        offset: 4 + offer_tail,
+        book,
+        start: order.offer_start,
+        count: order.offer_len,
+        use_original: false,
+    )
+    let _ = write_spent_items(
+        mut data,
+        offset: 4 + consideration_tail,
+        book,
+        start: order.consideration_start,
+        count: order.consideration_len,
+        use_original: false,
+    )
+    let _ = write_bytes(mut data, offset: 4 + context_tail, order.extra_data)
     data
 }
 

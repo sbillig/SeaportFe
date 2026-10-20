@@ -191,10 +191,17 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     order_hashes[(index) as usize] = order_hash
     let is_non_contract = order.order_type < 4
     var native_offer = false
+    // Offer items, then consideration items, which round up.
     var j: u256 = 0
-    while j < order.offer_len {
-        let item = mut book.items[(order.offer_start + j) as usize]
-        if item.item_type == NATIVE as u256 && is_non_contract {
+    while j < order.offer_len + order.consideration_len {
+        let consideration = j >= order.offer_len
+        let at = if consideration {
+            order.consideration_start + (j - order.offer_len)
+        } else {
+            order.offer_start + j
+        }
+        let item = mut book.items[(at) as usize]
+        if !consideration && item.item_type == NATIVE as u256 && is_non_contract {
             native_offer = true
         }
         prepare_item(
@@ -203,20 +210,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
             denominator,
             start_time: order.start_time,
             end_time: order.end_time,
-            round_up: false,
-        )
-        j += 1
-    }
-    j = 0
-    while j < order.consideration_len {
-        let item = mut book.items[(order.consideration_start + j) as usize]
-        prepare_item(
-            mut item,
-            numerator,
-            denominator,
-            start_time: order.start_time,
-            end_time: order.end_time,
-            round_up: true,
+            round_up: consideration,
         )
         j += 1
     }
