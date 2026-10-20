@@ -9,7 +9,6 @@ use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
-    InvalidERC721TransferAmount,
     InvalidMsgValue,
     InvalidTime,
     MissingOriginalConsiderationItems,
@@ -18,14 +17,13 @@ use super::errors::{
 }
 use super::executor::{
     call_conduit,
+    CONDUIT_ERC20,
+    CONDUIT_ERC721,
     CONDUIT_EXECUTE_SELECTOR,
     new_accumulator,
     transfer_buffer,
-    perform_erc1155_transfer,
-    perform_erc721_transfer,
-    transfer_erc1155,
-    transfer_erc20,
-    transfer_erc721,
+    perform_nft_transfer,
+    transfer_token,
     transfer_native_tokens,
     trigger_if_armed,
     Accumulator,
@@ -42,7 +40,7 @@ use super::status::{
     set_reentrancy_guard,
     verify_order_status,
 }
-use super::types::{ERC721, ReceivedItem, SpentItem}
+use super::types::{ReceivedItem, SpentItem}
 use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
@@ -174,56 +172,35 @@ uses (
         transfer_native_tokens_and_finalize()
     } else {
         var buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
-        let empty = new_accumulator()
-        let acc = if route == 2 {
-            transfer_erc721(
-                token: cd_address(OFFER_TOKEN),
-                from: cd_address(OFFERER),
-                to: ctx.caller(),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
-        } else if route == 3 {
-            transfer_erc1155(
-                token: cd_address(OFFER_TOKEN),
-                from: cd_address(OFFERER),
-                to: ctx.caller(),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
-        } else if route == 4 {
-            transfer_erc721(
-                token: cd_address(CONSIDERATION_TOKEN),
-                from: ctx.caller(),
-                to: cd_address(OFFERER),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
+        // Routes 2 and 3 offer an ERC721 or ERC1155 item for ERC20 tokens,
+        // routes 4 and 5 receive one; its token, identifier and amount are
+        // consecutive words.
+        let item = if offer_type_is_additional_recipients_type {
+            CONSIDERATION_TOKEN
         } else {
-            transfer_erc1155(
-                token: cd_address(CONSIDERATION_TOKEN),
-                from: ctx.caller(),
-                to: cd_address(OFFERER),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
+            OFFER_TOKEN
         }
+        let offerer = cd_address(OFFERER)
+        let acc = transfer_token(
+            kind: CONDUIT_ERC721 + (route & 1),
+            token: cd_address(item),
+            from: if offer_type_is_additional_recipients_type {
+                ctx.caller()
+            } else {
+                offerer
+            },
+            to: if offer_type_is_additional_recipients_type {
+                offerer
+            } else {
+                ctx.caller()
+            },
+            identifier: cd(item + 0x20),
+            amount: cd(item + 0x40),
+            conduit_key,
+            acc: new_accumulator(),
+            mut buf,
+            env,
+        )
         let finalized = transfer_erc20_and_finalize(
             env,
             from_offerer: offer_type_is_additional_recipients_type,
@@ -552,13 +529,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         data.write(offset: 0xc4, value: identifier)
         data.write(offset: 0xe4, value: amount)
         call_conduit(env, conduit_key, args: data.span())
-    } else if item_type == ERC721 as u256 {
-        if amount != 1 {
-            revert_error(InvalidERC721TransferAmount { amount })
-        }
-        perform_erc721_transfer(token, from, to: ctx.caller(), identifier)
     } else {
-        perform_erc1155_transfer(token, from, to: ctx.caller(), identifier, amount)
+        perform_nft_transfer(
+            kind: item_type,
+            token,
+            from,
+            to: ctx.caller(),
+            identifier,
+            amount,
+        )
     }
 }
 
@@ -632,10 +611,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         if from_offerer {
             amount = amount - additional_amount
         }
-        current = transfer_erc20(
+        current = transfer_token(
+            kind: CONDUIT_ERC20,
             token,
             from,
             to: recipient,
+            identifier: 0,
             amount: additional_amount,
             conduit_key,
             acc: current,
@@ -644,10 +625,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
         i += 1
     }
-    transfer_erc20(
+    transfer_token(
+        kind: CONDUIT_ERC20,
         token,
         from,
         to,
+        identifier: 0,
         amount,
         conduit_key,
         acc: current,

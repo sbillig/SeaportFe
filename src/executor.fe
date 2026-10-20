@@ -19,7 +19,7 @@ use super::errors::{
 use super::hashing::{Env, derive_conduit}
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::buffer::{Buffer, return_word}
-use super::types::{ERC20, ERC721, NATIVE}
+use super::types::{ERC20, NATIVE}
 
 /// transferFrom(address,address,uint256), shared by ERC20 and ERC721.
 const TRANSFER_FROM_SELECTOR: u256 = 0x23b872dd
@@ -29,9 +29,9 @@ const ERC1155_SAFE_TRANSFER_FROM_SELECTOR: u256 = 0xf242432a
 pub const CONDUIT_EXECUTE_SELECTOR: u256 = 0x4ce34aa2
 
 // ConduitItemType
-const CONDUIT_ERC20: u256 = 1
-const CONDUIT_ERC721: u256 = 2
-const CONDUIT_ERC1155: u256 = 3
+pub const CONDUIT_ERC20: u256 = 1
+pub const CONDUIT_ERC721: u256 = 2
+pub const CONDUIT_ERC1155: u256 = 3
 
 /// A `ReceivedItem` in transfer position.
 pub struct Transfer {
@@ -59,16 +59,6 @@ pub fn transfer_buffer(_ transfers: u256) -> Buffer {
     Buffer::new(transfers * 0xc0)
 }
 
-fn calldata_with_selector(_ selector: u256, _ words: u256) -> Buffer {
-    var data = Buffer::new(4 + words * 32)
-    data.write(offset: 0, value: selector << 224)
-    data
-}
-
-fn set_arg(_ data: mut Buffer, _ index: u256, _ value: u256) {
-    data.write(offset: 4 + index * 32, value)
-}
-
 /// `_transfer`: move one item from `from` to its recipient.
 pub fn transfer(
     _ item: Transfer,
@@ -87,35 +77,17 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         transfer_native_tokens(to: item.recipient, amount: item.amount)
         return acc
     }
-    if item.item_type == ERC20 as u256 {
-        if item.identifier != 0 {
-            revert_error(UnusedItemParameters {})
-        }
-        return transfer_erc20(
-            token: item.token,
-            from,
-            to: item.recipient,
-            amount: item.amount,
-            conduit_key,
-            acc,
-            mut buf,
-            env,
-        )
+    if item.item_type == ERC20 as u256 && item.identifier != 0 {
+        revert_error(UnusedItemParameters {})
     }
-    if item.item_type == ERC721 as u256 {
-        return transfer_erc721(
-            token: item.token,
-            from,
-            to: item.recipient,
-            identifier: item.identifier,
-            amount: item.amount,
-            conduit_key,
-            acc,
-            mut buf,
-            env,
-        )
-    }
-    transfer_erc1155(
+    // ERC20 and ERC721 keep their numbers as conduit item types; every other
+    // item type is transferred as ERC1155.
+    transfer_token(
+        kind: if item.item_type < CONDUIT_ERC1155 {
+            item.item_type
+        } else {
+            CONDUIT_ERC1155
+        },
         token: item.token,
         from,
         to: item.recipient,
@@ -168,10 +140,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 /// NativeTokenTransferGenericFailure(address,uint256)
 const NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR: u256 = 0xbc806b96
 
-pub fn transfer_erc20(
+/// `_transferERC20`, `_transferERC721` or `_transferERC1155`, selected by
+/// the conduit item type `kind`: transfer directly or add the transfer to the
+/// accumulator, executing it first if it targets another conduit.
+pub fn transfer_token(
+    kind: u256,
     token: Address,
     from: Address,
     to: Address,
+    identifier: u256,
     amount: u256,
     conduit_key: u256,
     acc: Accumulator,
@@ -180,103 +157,33 @@ pub fn transfer_erc20(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    assert_non_zero_amount(amount)
-    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
-    if conduit_key == 0 {
+    if kind != CONDUIT_ERC721 {
+        assert_non_zero_amount(amount)
+    }
+    let current = if acc.conduit_key != conduit_key {
+        trigger_if_armed(acc, mut buf, env)
+    } else {
+        acc
+    }
+    if conduit_key != 0 {
+        return insert(
+            current,
+            mut buf,
+            conduit_key,
+            item_type: kind,
+            token,
+            from,
+            to,
+            identifier,
+            amount,
+        )
+    }
+    if kind == CONDUIT_ERC20 {
         perform_erc20_transfer(token, from, to, amount)
-        return acc
+    } else {
+        perform_nft_transfer(kind, token, from, to, identifier, amount)
     }
-    insert(
-        acc,
-        mut buf,
-        conduit_key,
-        item_type: CONDUIT_ERC20,
-        token,
-        from,
-        to,
-        identifier: 0,
-        amount,
-    )
-}
-
-pub fn transfer_erc721(
-    token: Address,
-    from: Address,
-    to: Address,
-    identifier: u256,
-    amount: u256,
-    conduit_key: u256,
-    acc: Accumulator,
-    buf: mut Buffer,
-    env: Env,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
-    if conduit_key == 0 {
-        if amount != 1 {
-            revert_error(InvalidERC721TransferAmount { amount })
-        }
-        perform_erc721_transfer(token, from, to, identifier)
-        return acc
-    }
-    insert(
-        acc,
-        mut buf,
-        conduit_key,
-        item_type: CONDUIT_ERC721,
-        token,
-        from,
-        to,
-        identifier,
-        amount,
-    )
-}
-
-pub fn transfer_erc1155(
-    token: Address,
-    from: Address,
-    to: Address,
-    identifier: u256,
-    amount: u256,
-    conduit_key: u256,
-    acc: Accumulator,
-    buf: mut Buffer,
-    env: Env,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    assert_non_zero_amount(amount)
-    let acc = trigger_if_armed_and_not_accumulatable(acc, mut buf, conduit_key, env)
-    if conduit_key == 0 {
-        perform_erc1155_transfer(token, from, to, identifier, amount)
-        return acc
-    }
-    insert(
-        acc,
-        mut buf,
-        conduit_key,
-        item_type: CONDUIT_ERC1155,
-        token,
-        from,
-        to,
-        identifier,
-        amount,
-    )
-}
-
-fn trigger_if_armed_and_not_accumulatable(
-    _ acc: Accumulator,
-    _ buf: mut Buffer,
-    _ conduit_key: u256,
-    _ env: Env,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if acc.conduit_key != conduit_key {
-        return trigger_if_armed(acc, mut buf, env)
-    }
-    acc
+    current
 }
 
 /// Execute the accumulated conduit transfers, if any.
@@ -358,10 +265,11 @@ fn insert(
 pub fn perform_erc20_transfer(token: Address, from: Address, to: Address, amount: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(mut args, 0, from.word())
-    set_arg(mut args, 1, to.word())
-    set_arg(mut args, 2, amount)
+    var args = Buffer::new(0x64)
+    args.write(offset: 0, value: TRANSFER_FROM_SELECTOR << 224)
+    args.write(offset: 0x04, value: from.word())
+    args.write(offset: 0x24, value: to.word())
+    args.write(offset: 0x44, value: amount)
     var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_call(
@@ -395,34 +303,10 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     revert_error(NoContract { account: token })
 }
 
-pub fn perform_erc721_transfer(token: Address, from: Address, to: Address, identifier: u256)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if ctx.extcodesize(token) == 0 {
-        revert_error(NoContract { account: token })
-    }
-    var args = calldata_with_selector(TRANSFER_FROM_SELECTOR, 3)
-    set_arg(mut args, 0, from.word())
-    set_arg(mut args, 1, to.word())
-    set_arg(mut args, 2, identifier)
-    var ret = MemBuffer::empty()
-    let outcome = call
-        .raw_call(
-            addr: token,
-            gas: ctx.gas(),
-            value: 0,
-            args: args.span(),
-            ret: mut ret,
-        )
-    if !outcome.success() {
-        revert_with_reason_if_one_is_returned()
-        revert_error(
-            TokenTransferGenericFailure { token, from, to, identifier, amount: 1 },
-        )
-    }
-}
-
-pub fn perform_erc1155_transfer(
+/// `_performERC721Transfer`, preceded by the amount check all its callers
+/// make, or `_performERC1155Transfer`, by conduit item type.
+pub fn perform_nft_transfer(
+    kind: u256,
     token: Address,
     from: Address,
     to: Address,
@@ -431,23 +315,40 @@ pub fn perform_erc1155_transfer(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
+    let erc721 = kind == CONDUIT_ERC721
+    if erc721 && amount != 1 {
+        revert_error(InvalidERC721TransferAmount { amount })
+    }
     if ctx.extcodesize(token) == 0 {
         revert_error(NoContract { account: token })
     }
-    var args = calldata_with_selector(ERC1155_SAFE_TRANSFER_FROM_SELECTOR, 6)
-    set_arg(mut args, 0, from.word())
-    set_arg(mut args, 1, to.word())
-    set_arg(mut args, 2, identifier)
-    set_arg(mut args, 3, amount)
-    set_arg(mut args, 4, 0xa0)
-    set_arg(mut args, 5, 0)
+    // transferFrom(from, to, identifier), or
+    // safeTransferFrom(from, to, identifier, amount, "") with its empty bytes
+    // left zero.
+    var args = Buffer::new(0xc4)
+    args.write(
+        offset: 0,
+        value: (if erc721 {
+                TRANSFER_FROM_SELECTOR
+            } else {
+                ERC1155_SAFE_TRANSFER_FROM_SELECTOR
+            })
+            << 224,
+    )
+    args.write(offset: 0x04, value: from.word())
+    args.write(offset: 0x24, value: to.word())
+    args.write(offset: 0x44, value: identifier)
+    if !erc721 {
+        args.write(offset: 0x64, value: amount)
+        args.write(offset: 0x84, value: 0xa0)
+    }
     var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: args.span(),
+            args: args.slice(offset: 0, len: if erc721 { 0x64 } else { 0xc4 }),
             ret: mut ret,
         )
     if !outcome.success() {

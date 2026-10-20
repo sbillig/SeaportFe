@@ -3,9 +3,9 @@
 use core::ptr::MemBuffer
 use std::abi::{Bytes4, DynArray, sol}
 use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap, revert_error}
-use super::errors::{InvalidERC721TransferAmount, Invalid1155BatchTransferEncoding}
+use super::errors::Invalid1155BatchTransferEncoding
 use super::buffer::Buffer
-use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
+use super::executor::{perform_erc20_transfer, perform_nft_transfer}
 use super::lowlevel::bubble_revert_if_affordable
 
 #[abi]
@@ -76,6 +76,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         // Solidity rejects out of range enum values when reading the field.
         std::evm::revert(())
     }
+    if item.itemType == 0 {
+        revert_error(InvalidItemType {})
+    }
     if item.itemType == 1 {
         perform_erc20_transfer(
             token: item.token,
@@ -83,26 +86,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             to: item.to,
             amount: item.amount,
         )
-    } else if item.itemType == 2 {
-        if item.amount != 1 {
-            revert_error(InvalidERC721TransferAmount { amount: item.amount })
-        }
-        perform_erc721_transfer(
-            token: item.token,
-            from: item.from,
-            to: item.to,
-            identifier: item.identifier,
-        )
-    } else if item.itemType == 3 {
-        perform_erc1155_transfer(
+    } else {
+        perform_nft_transfer(
+            kind: item.itemType as u256,
             token: item.token,
             from: item.from,
             to: item.to,
             identifier: item.identifier,
             amount: item.amount,
         )
-    } else {
-        revert_error(InvalidItemType {})
     }
 }
 
