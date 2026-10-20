@@ -241,7 +241,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-fn insert(
+pub fn insert(
     _ previous: Accumulator,
     _ buf: mut Buffer,
     _ conduit_key: u256,

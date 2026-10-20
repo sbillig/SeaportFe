@@ -16,10 +16,9 @@ use super::errors::{
     UnusedItemParameters,
 }
 use super::executor::{
-    call_conduit,
     CONDUIT_ERC20,
     CONDUIT_ERC721,
-    CONDUIT_EXECUTE_SELECTOR,
+    insert,
     new_accumulator,
     transfer_buffer,
     perform_transfer,
@@ -466,7 +465,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let item = consideration + 0x20 + (i + 1) * 160
         data.write(offset: item, value: additional_recipients_item_type)
         data.write(offset: item + 0x20, value: additional_recipients_token)
-        data.write(offset: item + 0x40, value: 0)
         data.write(
             offset: item + 0x60,
             value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
@@ -477,7 +475,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
         i += 1
     }
-    data.write(offset: head + extra_data_offset, value: 0)
     data.write(offset: head + extra_data_offset + 32, value: hashes_count)
     if hashes_count == 1 {
         data.write(offset: head + extra_data_offset + 64, value: order_hash)
@@ -501,18 +498,21 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let from = cd_address(OFFERER)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
-    var data = Buffer::new(0x104)
+    var data = transfer_buffer(1)
     if conduit_key != 0 {
-        data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-        data.write(offset: 0x04, value: 0x20)
-        data.write(offset: 0x24, value: 1)
-        data.write(offset: 0x44, value: item_type)
-        data.write(offset: 0x64, value: token.word())
-        data.write(offset: 0x84, value: from.word())
-        data.write(offset: 0xa4, value: ctx.caller().word())
-        data.write(offset: 0xc4, value: identifier)
-        data.write(offset: 0xe4, value: amount)
-        call_conduit(env, conduit_key, args: data.span())
+        // One accumulated transfer is exactly the single item `execute` call.
+        let acc = insert(
+            new_accumulator(),
+            mut data,
+            conduit_key,
+            item_type,
+            token,
+            from,
+            to: ctx.caller(),
+            identifier,
+            amount,
+        )
+        let _ = trigger_if_armed(acc, mut data, env)
     } else {
         perform_transfer(
             kind: item_type,
