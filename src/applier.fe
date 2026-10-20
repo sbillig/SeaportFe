@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // FulfillmentApplier: aggregate fulfillment components into executions.
 #![arithmetic(unchecked)]
-use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
-use std::evm::keccak_words
+use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW}
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::errors::{
     InvalidFulfillmentComponentData,
     MismatchedFulfillmentOfferAndConsiderationComponents,
@@ -41,9 +41,9 @@ pub fn empty_execution() -> ExecutionState {
 fn raise_aggregation_errors(_ error_buffer: u256) {
     if error_buffer != 0 {
         if error_buffer == 1 {
-            revert_error(MissingItemAmount {})
+            revert_with0(error_selector<MissingItemAmount>())
         }
-        revert_error(Panic::from(PANIC_OVERFLOW))
+        revert_with1(error_selector<Panic>(), PANIC_OVERFLOW)
     }
 }
 
@@ -72,7 +72,7 @@ pub fn aggregate_items(
     while k < group.len() {
         let component = group.component(k)
         if component.order_index >= book.orders.len() as u256 {
-            revert_error(InvalidFulfillmentComponentData {})
+            revert_with0(error_selector<InvalidFulfillmentComponentData>())
         }
         let order = ref book.orders[(component.order_index) as usize]
         let (start, len) = if consideration {
@@ -122,7 +122,7 @@ pub fn aggregate_items(
                 || next.recipient != execution.recipient
                 || next.offerer != execution.offerer
                 || next.conduit_key != execution.conduit_key {
-                revert_error(InvalidFulfillmentComponentData {})
+                revert_with0(error_selector<InvalidFulfillmentComponentData>())
             }
         }
         k += 1
@@ -143,7 +143,9 @@ pub fn apply_fulfillment(
     let offer_group = groups.group(2 * fulfillment_index)
     let consideration_group = groups.group(2 * fulfillment_index + 1)
     if offer_group.len() == 0 || consideration_group.len() == 0 {
-        revert_error(OfferAndConsiderationRequiredOnFulfillment {})
+        revert_with0(
+            error_selector<OfferAndConsiderationRequiredOnFulfillment>(),
+        )
     }
     let (consideration, consideration_first) = aggregate_items(
         mut book,
@@ -168,10 +170,9 @@ pub fn apply_fulfillment(
     if execution.item_type != consideration.item_type
         || execution.token != consideration.token
         || execution.identifier != consideration.identifier {
-        revert_error(
-            MismatchedFulfillmentOfferAndConsiderationComponents {
-                fulfillmentIndex: fulfillment_index,
-            },
+        revert_with1(
+            error_selector<MismatchedFulfillmentOfferAndConsiderationComponents>(),
+            fulfillment_index,
         )
     }
     // The unmatched rest stays on the first used item of the larger side.
@@ -210,7 +211,10 @@ uses (ctx: Ctx)
 {
     let group = groups.group(index)
     if group.len() == 0 {
-        revert_error(MissingFulfillmentComponentOnAggregation { side })
+        revert_with1(
+            error_selector<MissingFulfillmentComponentOnAggregation>(),
+            side as u256,
+        )
     }
     let (execution, _) = aggregate_items(
         mut book,

@@ -3,7 +3,8 @@
 use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
 use std::abi::DynArray
-use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
+use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps}
+use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
 pub struct Buffer { data: MemBuffer }
@@ -34,7 +35,7 @@ impl Buffer {
     #[inline(never)]
     pub fn write(mut self, offset: u256, value: u256) {
         if offset > self.len() || self.len() - offset < 32 {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+            revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
         // The complete word lies in this exclusively held owner's allocation.
         unsafe {
@@ -43,14 +44,14 @@ impl Buffer {
     }
     pub fn copy_from(mut self, offset: u256, source: MemSpan) {
         if offset > self.len() || source.len() as u256 > self.len() - offset {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+            revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
         self.data.copy_from(dest_offset: offset as usize, source)
     }
 
     pub fn copy_calldata(mut self, offset: u256, source: CalldataView, len: u256) {
         if offset > self.len() || len > self.len() - offset {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+            revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
         // The checked range lies in this exclusively held owner's allocation.
         unsafe {
@@ -60,17 +61,37 @@ impl Buffer {
 
     fn check_word(self, _ offset: u256) {
         if offset > self.len() || self.len() - offset < 32 {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+            revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
     }
 
     // Exact output encodings: a buffer sized for the words written to it
     // checks its ranges once and then stores words unchecked.
 
+    /// A buffer of `len` uninitialized bytes. The caller must write every
+    /// byte before the buffer is read.
+    pub unsafe fn uninit(_ len: u256) -> Self {
+        unsafe {
+            Buffer { data: MemBuffer::alloc_uninit(len as usize) }
+        }
+    }
     /// A zeroed ABI array tail for `count` elements of `stride` bytes, with
     /// its length word written.
     pub fn array(_ count: u256, stride: u256) -> Self {
         var data = Buffer::new(32 + count * stride)
+        // The buffer holds the length word.
+        unsafe {
+            data.put(offset: 0, value: count)
+        }
+        data
+    }
+    /// An uninitialized ABI array tail for `count` elements of `stride`
+    /// bytes, with its length word written. The caller must write every
+    /// element byte before the buffer is read.
+    pub unsafe fn uninit_array(_ count: u256, stride: u256) -> Self {
+        var data = unsafe {
+            Buffer::uninit(32 + count * stride)
+        }
         // The buffer holds the length word.
         unsafe {
             data.put(offset: 0, value: count)
@@ -85,11 +106,16 @@ impl Buffer {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
         }
     }
+    /// The address of byte `offset`, for a run of `store_at`s within a
+    /// range checked with `check_range` or `check_array`.
+    pub unsafe fn at(self, _ offset: u256) -> *u8 {
+        ptr::offset_bytes(self.data.ptr(), offset)
+    }
     /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
     /// buffer. One check can cover a run of `put`s.
     pub fn check_range(self, offset: u256, len: u256) {
         if offset > self.len() || len > self.len() - offset {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+            revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
     }
     /// The size `32 + count * stride` of an array tail at `offset`, which
@@ -151,7 +177,7 @@ fn word_writes_preserve_unaligned_neighbors() {
 /// Read a complete word from a checked byte range.
 pub fn read_word(_ data: MemSpan, offset: u256) -> u256 {
     if offset > data.len() as u256 || data.len() as u256 - offset < 32 {
-        revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
     }
     unsafe {
         *ptr::cast<u8, u256>(ptr::offset_bytes(data.ptr(), offset))
@@ -204,4 +230,12 @@ fn byte_copy_cannot_use_allocation_padding() {
     var data = Buffer::new(33)
     let source = Buffer::new(1)
     data.copy_from(offset: 33, source: source.span())
+}
+
+/// Store `value` at byte `offset` from `base`; the word must lie in a range
+/// of a buffer the caller checked (see `Buffer::at`).
+pub unsafe fn store_at(_ base: *u8, offset: u256, value: u256) {
+    unsafe {
+        *ptr::cast<u8, u256>(ptr::offset_bytes(base, offset)) = value
+    }
 }

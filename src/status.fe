@@ -7,9 +7,19 @@
 // isValidated (bits 0-7), isCancelled (8-15), numerator (16-135) and
 // denominator (136-255). Seaport's tests locate and overwrite these slots.
 #![arithmetic(unchecked)]
-use std::abi::Bytes32
-use std::evm::{Address, Create, Ctx, Call, Log, StorageMap, TSlot, revert_error}
+use std::evm::{
+    Address,
+    Create,
+    Ctx,
+    Call,
+    Log,
+    Panic,
+    PANIC_OVERFLOW,
+    StorageMap,
+    TSlot,
+}
 use core::ptr::{MemArray, MemBuffer, MemSpan}
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::errors::{
     CounterIncremented,
     InvalidMsgValue,
@@ -85,22 +95,16 @@ pub fn verify_order_status(
 ) -> bool {
     if status.is_cancelled {
         if revert_on_invalid {
-            revert_error(
-                OrderIsCancelled { orderHash: Bytes32 { val: order_hash } },
-            )
+            revert_with1(error_selector<OrderIsCancelled>(), order_hash)
         }
         return false
     }
     if status.numerator != 0 {
         if only_allow_unused {
-            revert_error(
-                OrderPartiallyFilled { orderHash: Bytes32 { val: order_hash } },
-            )
+            revert_with1(error_selector<OrderPartiallyFilled>(), order_hash)
         } else if status.numerator >= status.denominator {
             if revert_on_invalid {
-                revert_error(
-                    OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } },
-                )
+                revert_with1(error_selector<OrderAlreadyFilled>(), order_hash)
             }
             return false
         }
@@ -135,7 +139,7 @@ fn gcd(_ a: u256, _ b: u256) -> u256 {
 }
 
 fn panic_arithmetic() -> ! {
-    revert_error(std::evm::Panic::from(std::evm::PANIC_OVERFLOW))
+    revert_with1(error_selector<Panic>(), PANIC_OVERFLOW)
 }
 
 /// The fill fraction `_validateOrder` derives from the requested fraction and
@@ -224,9 +228,7 @@ uses (store: mut OrderStore)
     }
     if has_carry {
         if revert_on_invalid {
-            revert_error(
-                OrderAlreadyFilled { orderHash: Bytes32 { val: order_hash } },
-            )
+            revert_with1(error_selector<OrderAlreadyFilled>(), order_hash)
         }
         return false
     }
@@ -260,7 +262,7 @@ const ENTERED_SSTORE: u256 = 2
 const ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE: u256 = 3
 
 fn revert_reentrant() -> ! {
-    revert_error(NoReentrantCalls {})
+    revert_with0(error_selector<NoReentrantCalls>())
 }
 
 pub fn set_reentrancy_guard(_ env: Env, accept_native_tokens: bool)
@@ -327,18 +329,18 @@ uses (ctx: Ctx, guard_state: u256, transient_guard: TSlot<u256>)
 {
     if env.tstore_initial_support {
         if transient_guard.read() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
-            revert_error(InvalidMsgValue { value: ctx.value() })
+            revert_with1(error_selector<InvalidMsgValue>(), ctx.value())
         }
         return
     }
     let guard = guard_state
     if guard == TSTORE_ENABLED_SSTORE {
         if transient_guard.read() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
-            revert_error(InvalidMsgValue { value: ctx.value() })
+            revert_with1(error_selector<InvalidMsgValue>(), ctx.value())
         }
     }
     if guard != 0 && guard != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE {
-        revert_error(InvalidMsgValue { value: ctx.value() })
+        revert_with1(error_selector<InvalidMsgValue>(), ctx.value())
     }
 }
 
@@ -375,10 +377,10 @@ uses (ctx: Ctx, call: Call, guard_state: mut u256)
 {
     let activatable = guard_state == NOT_ENTERED_SSTORE
     if env.tstore_initial_support || !activatable {
-        revert_error(TStoreAlreadyActivated {})
+        revert_with0(error_selector<TStoreAlreadyActivated>())
     }
     if !test_tload(env.tload_test_contract) {
-        revert_error(TStoreNotSupported {})
+        revert_with0(error_selector<TStoreNotSupported>())
     }
     guard_state = TSTORE_ENABLED_SSTORE
 }
@@ -390,7 +392,7 @@ uses (ctx: Ctx, call: Call, create: mut Create, guard_state: mut u256)
 {
     let probe = prepare_tload_test()
     if probe.word() == 0 {
-        revert_error(TloadTestContractDeploymentFailed {})
+        revert_with0(error_selector<TloadTestContractDeploymentFailed>())
     }
     let supported = test_tload(probe)
     if !supported {

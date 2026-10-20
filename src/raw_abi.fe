@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Custom error revert data for errors whose fields are all static.
+// Hand-encoded custom error revert data, shared by all error types
+// instead of one generic encoder each.
 use core::ErrorVariant
 use core::ptr::{self, MemSpan}
 use std::abi::Sol
@@ -24,6 +25,31 @@ pub fn revert_custom(_ selector: u256, words: u256, a: u256, b: u256, c: u256) -
         *ptr::cast<u8, u256>(ptr::offset_bytes(data, 4)) = a
         *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x24)) = b
         *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x44)) = c
+        revert_bytes(
+            MemSpan::from_raw_parts(ptr: data, len: (4 + words * 32) as usize),
+        )
+    }
+}
+
+/// Like `revert_custom`, for errors with four or five static words.
+pub fn revert_custom5(
+    _ selector: u256,
+    words: u256,
+    a: u256,
+    b: u256,
+    c: u256,
+    d: u256,
+    e: u256,
+) -> ! {
+    let data = ptr::alloc_bytes(0xa4)
+    // The allocation holds the selector and all five words.
+    unsafe {
+        *ptr::cast<u8, u256>(data) = selector << 224
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 4)) = a
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x24)) = b
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x44)) = c
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x64)) = d
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x84)) = e
         revert_bytes(
             MemSpan::from_raw_parts(ptr: data, len: (4 + words * 32) as usize),
         )

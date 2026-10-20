@@ -22,8 +22,9 @@
 // semantics (see `abi_view`). Addresses are cleaned and enum words kept raw,
 // as Solidity's typed memory reads see them: consumers check enums where
 // Seaport reads them. The order hash reads the raw words from calldata.
-use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION, revert_error}
+use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION}
 use core::ptr::MemArray
+use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
 pub struct Item {
@@ -76,17 +77,33 @@ pub struct Book {
     pub used: u256,
 }
 
-/// A `CriteriaResolver`, read in calldata like the rest of `Resolvers`.
-pub struct Resolver {
-    pub order_index: u256,
-    pub side: u256,
-    pub index: u256,
-    pub identifier: u256,
-    /// The `bytes32[]` proof, whose raw length word Seaport's copy keeps.
-    pub proof: CalldataView,
-}
+/// A `CriteriaResolver` in calldata.
+pub struct Resolver { input: CalldataView }
 
 impl Copy for Resolver {}
+
+impl Resolver {
+    pub fn order_index(self) -> u256 {
+        self.input.word(0)
+    }
+
+    pub fn side(self) -> u256 {
+        self.input.word(32)
+    }
+
+    pub fn index(self) -> u256 {
+        self.input.word(64)
+    }
+
+    pub fn identifier(self) -> u256 {
+        self.input.word(96)
+    }
+
+    /// The `bytes32[]` proof, whose raw length word Seaport's copy keeps.
+    pub fn proof(self) -> CalldataView {
+        self.input.child(128)
+    }
+}
 
 /// `CriteriaResolver[]` in calldata. Seaport's memory copies of resolvers,
 /// fulfillment components and fulfillments are never written, so reading
@@ -101,14 +118,7 @@ impl Resolvers {
     }
 
     pub fn get(self, _ index: u256) -> Resolver {
-        let r = self.input.dynamic_element(index)
-        Resolver {
-            order_index: r.word(0),
-            side: r.word(32),
-            index: r.word(64),
-            identifier: r.word(96),
-            proof: r.child(128),
-        }
+        Resolver { input: self.input.dynamic_element(index) }
     }
 }
 
@@ -161,7 +171,7 @@ impl Groups {
 /// Solidity validates protocol enums when their words are read as enums.
 pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
     if value >= variants {
-        revert_error(Panic::from(PANIC_ENUM_CONVERSION))
+        revert_with1(error_selector<Panic>(), PANIC_ENUM_CONVERSION)
     }
     value
 }
@@ -180,17 +190,16 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
         } else {
             Address::zero()
         }
-        items[start + i] = Item {
-            item_type: item.word(0),
-            token: item.address(32),
-            identifier: item.word(64),
-            start_amount: item.word(96),
-            end_amount: item.word(128),
-            recipient,
-            amount: item.word(96),
-            receiver: recipient,
-            original: 0,
-        }
+        let slot = mut items[start + i]
+        slot.item_type = item.word(0)
+        slot.token = item.address(32)
+        slot.identifier = item.word(64)
+        slot.start_amount = item.word(96)
+        slot.end_amount = item.word(128)
+        slot.recipient = recipient
+        slot.amount = item.word(96)
+        slot.receiver = recipient
+        slot.original = 0
         i += 1
     }
 }
@@ -239,38 +248,38 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool)
             input: consideration,
             consideration: true,
         )
-        states[i] = OrderState {
-            offerer: p.address(0),
-            zone: p.address(32),
-            offer_start: start as u256,
-            offer_len: offer.len(),
-            consideration_start: consideration_start as u256,
-            consideration_len: consideration.len(),
-            order_type: p.word(128),
-            start_time: p.word(160),
-            end_time: p.word(192),
-            zone_hash: p.word(224),
-            salt: p.word(256),
-            conduit_key: p.word(288),
-            total_original: p.word(320),
-            numerator: if advanced {
-                order.word(32) & 0xffffffffffffffffffffffffffffff
-            } else {
-                1
-            },
-            denominator: if advanced {
-                order.word(64) & 0xffffffffffffffffffffffffffffff
-            } else {
-                1
-            },
-            signature: order.child(if advanced { 96 } else { 32 }),
-            extra_data: if advanced {
-                order.child(128)
-            } else {
-                CalldataView::empty()
-            },
-            params: p,
+        // Fields are stored one by one, which keeps few values live.
+        let state = mut states[i]
+        state.offerer = p.address(0)
+        state.zone = p.address(32)
+        state.offer_start = start as u256
+        state.offer_len = offer.len()
+        state.consideration_start = consideration_start as u256
+        state.consideration_len = consideration.len()
+        state.order_type = p.word(128)
+        state.start_time = p.word(160)
+        state.end_time = p.word(192)
+        state.zone_hash = p.word(224)
+        state.salt = p.word(256)
+        state.conduit_key = p.word(288)
+        state.total_original = p.word(320)
+        state.numerator = if advanced {
+            order.word(32) & 0xffffffffffffffffffffffffffffff
+        } else {
+            1
         }
+        state.denominator = if advanced {
+            order.word(64) & 0xffffffffffffffffffffffffffffff
+        } else {
+            1
+        }
+        state.signature = order.child(if advanced { 96 } else { 32 })
+        state.extra_data = if advanced {
+            order.child(128)
+        } else {
+            CalldataView::empty()
+        }
+        state.params = p
         start = consideration_start + consideration.len() as usize
         i += 1
     }

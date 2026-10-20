@@ -7,7 +7,7 @@ use super::errors::{InvalidERC721TransferAmount, Invalid1155BatchTransferEncodin
 use super::buffer::Buffer
 use super::executor::perform_transfer
 use super::lowlevel::bubble_revert_if_affordable
-use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
+use super::raw_abi::{error_selector, revert_with0, revert_with1, revert_with2}
 
 #[abi]
 pub struct ConduitTransfer {

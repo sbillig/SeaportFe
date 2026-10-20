@@ -3,10 +3,10 @@
 // and contract offerer calldata encodings of ConsiderationEncoder and
 // ConsiderationDecoder.
 #![arithmetic(unchecked)]
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::status::OrderStore
 use core::ptr::MemBuffer
-use std::abi::Bytes32
-use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use std::evm::{Address, Call, Ctx, RawOps}
 use core::ptr::MemArray
 use super::errors::{
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -252,13 +252,9 @@ uses (ctx: Ctx)
 
 fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
     if contract_order {
-        revert_error(
-            InvalidContractOrder { orderHash: Bytes32 { val: order_hash } },
-        )
+        revert_with1(error_selector<InvalidContractOrder>(), order_hash)
     }
-    revert_error(
-        InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
-    )
+    revert_with1(error_selector<InvalidRestrictedOrder>(), order_hash)
 }
 
 /// `_callAndCheckStatusWithSkip`: a failed call returns false unless
@@ -446,7 +442,9 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = ref book.orders[(order_index) as usize]
     if order.consideration_len != order.total_original {
-        revert_error(ConsiderationLengthNotEqualToTotalOriginal {})
+        revert_with0(
+            error_selector<ConsiderationLengthNotEqualToTotalOriginal>(),
+        )
     }
     let offerer = order.offerer
     let data = encode_generate_order(book, order)
@@ -465,9 +463,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
     if !success {
         if revert_on_invalid {
             revert_with_reason_if_one_is_returned()
-            revert_error(
-                InvalidContractOrder { orderHash: Bytes32 { val: order_hash } },
-            )
+            revert_with1(error_selector<InvalidContractOrder>(), order_hash)
         }
         return GeneratedOrder {
             order_hash: 0,
@@ -479,9 +475,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
     }
     let generated = validate_generate_order_returndata(book, order, order_hash)
     if generated.order_hash == 0 {
-        revert_error(
-            InvalidContractOrder { orderHash: Bytes32 { val: order_hash } },
-        )
+        revert_with1(error_selector<InvalidContractOrder>(), order_hash)
     }
     generated
 }
