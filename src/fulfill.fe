@@ -5,7 +5,7 @@ use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
 use super::raw_abi::{error_selector, revert_with0, revert_with2}
 use super::buffer::{Buffer, store_at}
 use super::amount::apply_fraction
-use core::ptr::{self, MemArray}
+use core::ptr::MemArray
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     BadFraction,
@@ -25,7 +25,7 @@ use super::executor::{
     trigger_if_armed,
 }
 use super::hashing::{Env, derive_order_hash}
-use super::model::{Book, Item, OrderState, Resolvers, checked_enum}
+use super::model::{Book, Item, OrderState, Resolvers, checked_enum, elem}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -269,7 +269,7 @@ fn write_fulfilled_items(
     var i: u256 = 0
     while i < count {
         let item = unsafe {
-            ref *ptr::offset(book.items.ptr(), start + i)
+            ref *elem(book.items.ptr(), start + i)
         }
         let out = 32 + i * stride
         unsafe {
@@ -348,7 +348,7 @@ uses (
 {
     let order_type = checked_enum(
         unsafe {
-            (*ptr::offset(book.orders.ptr(), 0)).order_type
+            (*elem(book.orders.ptr(), 0)).order_type
         },
         variants: 5,
     )
@@ -414,7 +414,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
         order: unsafe {
-            ref *ptr::offset(book.orders.ptr(), 0)
+            ref *elem(book.orders.ptr(), 0)
         },
         revert_on_invalid: true,
     )
@@ -422,7 +422,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     apply_fractions(
         mut book.items,
         order: unsafe {
-            ref *ptr::offset(book.orders.ptr(), 0)
+            ref *elem(book.orders.ptr(), 0)
         },
         numerator: fill_numerator,
         denominator: fill_denominator,
@@ -441,7 +441,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     // Only restricted orders consult their zone.
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), 0)
+        ref *elem(book.orders.ptr(), 0)
     }
     if order.order_type > 1 {
         let order_hashes = MemArray<u256>::new_zeroed(1)
@@ -473,7 +473,7 @@ fn finish_single_order(
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), 0)
+        ref *elem(book.orders.ptr(), 0)
     }
     transfer_each(
         env,

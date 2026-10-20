@@ -2,8 +2,7 @@
 // OrderValidator._cancel and _validate.
 use core::abi::store_word
 use core::ptr
-use std::abi::Bytes32
-use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_empty}
+use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_empty}
 use super::raw_abi::{error_selector, revert_with0}
 use super::abi_view::CalldataView
 use super::errors::{
@@ -14,7 +13,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::{OrderState, checked_enum, orders_book}
+use super::model::{OrderState, checked_enum, orders_book, elem}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -56,8 +55,20 @@ uses (
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
-        log.emit(
-            OrderCancelled { orderHash: Bytes32 { val: order_hash }, offerer, zone },
+        // `OrderCancelled`, whose only data word is the order hash. A direct
+        // allocation stays a fixed slot whether or not the inliner, under its
+        // module growth budget, inlines the generic event encoder's.
+        let data = ptr::alloc_bytes(32)
+        unsafe {
+            store_word(ptr: data, value: order_hash)
+        }
+        log.log3(
+            data: unsafe {
+                ptr::MemSpan::from_raw_parts(ptr: data, len: 32)
+            },
+            topic0: OrderCancelled::TOPIC0,
+            topic1: offerer.word(),
+            topic2: zone.word(),
         )
         i += 1
     }
@@ -85,7 +96,7 @@ uses (
     var i: usize = 0
     while i < book.orders.len() {
         let order = unsafe {
-            ref *ptr::offset(book.orders.ptr(), i as u256)
+            ref *elem(book.orders.ptr(), i as u256)
         }
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(order)

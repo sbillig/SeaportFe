@@ -5,9 +5,8 @@
 #![arithmetic(unchecked)]
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::status::OrderStore
-use core::ptr::{self, MemBuffer}
+use core::ptr::{MemArray, MemBuffer}
 use std::evm::{Address, Call, Ctx, RawOps}
-use core::ptr::MemArray
 use super::errors::{
     ConsiderationLengthNotEqualToTotalOriginal,
     InvalidContractOrder,
@@ -16,7 +15,7 @@ use super::errors::{
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::abi_view::CalldataView
 use super::buffer::{Buffer, read_word, return_word}
-use super::model::{Book, Item, OrderState}
+use super::model::{Book, Item, OrderState, elem}
 use super::status::take_contract_nonce
 use super::types::CONTRACT
 
@@ -70,7 +69,7 @@ fn write_spent_items(
         var i: u256 = 0
         while i < count {
             let item = unsafe {
-                ref *ptr::offset(book.items.ptr(), start + i)
+                ref *elem(book.items.ptr(), start + i)
             }
             let out = offset + 32 + i * 128
             dst.put(offset: out, value: item.item_type)
@@ -98,7 +97,7 @@ fn write_received_items(
         var i: u256 = 0
         while i < count {
             let item = unsafe {
-                ref *ptr::offset(book.items.ptr(), start + i)
+                ref *elem(book.items.ptr(), start + i)
             }
             let out = offset + 32 + i * 160
             dst.put(offset: out, value: item.item_type)
@@ -439,7 +438,7 @@ pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) 
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), order_index)
+        ref *elem(book.orders.ptr(), order_index)
     }
     if order.consideration_len != order.total_original {
         revert_with0(
@@ -528,7 +527,7 @@ uses (ops: mut RawOps)
     while i < offer_length && i < order.offer_len {
         let base = offer_offset + 32 + i * 128
         let original = unsafe {
-            ref *ptr::offset(book.items.ptr(), order.offer_start + i)
+            ref *elem(book.items.ptr(), order.offer_start + i)
         }
         bad = bad
             || items_differ(
@@ -547,7 +546,7 @@ uses (ops: mut RawOps)
     while i < consideration_length && i < order.consideration_len {
         let base = consideration_offset + 32 + i * 160
         let original = unsafe {
-            ref *ptr::offset(book.items.ptr(), order.consideration_start + i)
+            ref *elem(book.items.ptr(), order.consideration_start + i)
         }
         let recipient = returndata_word(base + 128)
         let recipient_mismatch = original.receiver.word() != 0
@@ -629,7 +628,7 @@ uses (ops: mut RawOps)
     }
     let consideration_start = start + offer_length
     let order = unsafe {
-        mut *ptr::offset(book.orders.ptr(), order_index)
+        mut *elem(book.orders.ptr(), order_index)
     }
     order.offer_start = start
     order.offer_len = offer_length
