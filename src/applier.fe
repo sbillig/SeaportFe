@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // FulfillmentApplier: aggregate fulfillment components into executions.
 #![arithmetic(unchecked)]
+use core::ptr
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW}
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::errors::{
@@ -74,14 +75,20 @@ pub fn aggregate_items(
         if component.order_index >= book.orders.len() as u256 {
             revert_with0(error_selector<InvalidFulfillmentComponentData>())
         }
-        let order = ref book.orders[(component.order_index) as usize]
+        // The order index was checked above.
+        let order = unsafe {
+            ref *ptr::offset(book.orders.ptr(), component.order_index)
+        }
         let (start, len) = if consideration {
             (order.consideration_start, order.consideration_len)
         } else {
             (order.offer_start, order.offer_len)
         }
         if component.item_index < len && order.numerator != 0 {
-            let item = mut book.items[(start + component.item_index) as usize]
+            // The item index lies in the order's range of the pool.
+            let item = unsafe {
+                mut *ptr::offset(book.items.ptr(), start + component.item_index)
+            }
             let new_amount = amount + item.amount
             if new_amount < amount {
                 error_buffer = error_buffer | 2
@@ -182,13 +189,18 @@ pub fn apply_fulfillment(
     } else {
         offer_group.component(offer_first)
     }
-    let order = ref book.orders[(target.order_index) as usize]
+    // Aggregation checked both indexes of the first used component.
+    let order = unsafe {
+        ref *ptr::offset(book.orders.ptr(), target.order_index)
+    }
     let start = if consideration_left {
         order.consideration_start
     } else {
         order.offer_start
     }
-    let item = mut book.items[(start + target.item_index) as usize]
+    let item = unsafe {
+        mut *ptr::offset(book.items.ptr(), start + target.item_index)
+    }
     if consideration_left {
         item.amount = consideration.amount - execution.amount
     } else {
