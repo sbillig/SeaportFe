@@ -1,7 +1,7 @@
 use core::ptr::MemArray
 use std::evm::Address
 use super::applier::ExecutionState
-use super::combiner::{bool_array, execution_array}
+use super::combiner::{encode_available, execution_array}
 
 #[test]
 fn execution_output_truncates_item_types_and_keeps_words() {
@@ -51,13 +51,41 @@ fn execution_output_truncates_item_types_and_keeps_words() {
 }
 
 #[test]
-fn bool_output_encodes_each_flag_as_a_word() {
+fn available_output_encodes_flags_and_executions() {
     var values = MemArray<bool>::new_zeroed(3)
     values[0] = true
     values[2] = true
-    let output = bool_array(values)
-    assert(output.len() == 3 && output.encoded_size() == 128)
-    assert(output.get(0) && !output.get(1) && output.get(2))
-    let empty = bool_array(MemArray<bool>::new_zeroed(0))
-    assert(empty.len() == 0 && empty.encoded_size() == 32)
+    var executions = MemArray<ExecutionState>::new_zeroed(1)
+    executions[0] = ExecutionState {
+        item_type: 0x103,
+        token: Address::new(17),
+        identifier: 4,
+        amount: 5,
+        recipient: Address::new(23),
+        offerer: Address::new(29),
+        conduit_key: 7,
+    }
+    let output = encode_available(values, executions)
+    assert(output.len() == 0xc0 + 32 + 224)
+    assert(
+        output.word(0) == 0x40 && output.word(32) == 0xc0 && output.word(0x40) == 3,
+    )
+    assert(
+        output.word(0x60) == 1 && output.word(0x80) == 0 && output.word(0xa0) == 1,
+    )
+    assert(output.word(0xc0) == 1 && output.word(0xe0) == 3)
+    assert(
+        output.word(0x100) == 17 && output.word(0x120) == 4 && output.word(0x140) == 5,
+    )
+    assert(
+        output.word(0x160) == 23 && output.word(0x180) == 29 && output.word(0x1a0) == 7,
+    )
+    let empty = encode_available(
+        MemArray<bool>::new_zeroed(0),
+        executions: MemArray<ExecutionState>::new_zeroed(0),
+    )
+    assert(
+        empty.len() == 128 && empty.word(0) == 0x40 && empty.word(32) == 0x60,
+    )
+    assert(empty.word(0x40) == 0 && empty.word(0x60) == 0)
 }

@@ -378,7 +378,8 @@ uses (ctx: Ctx)
     revert_on_invalid || (order.order_type > 1 && ctx.caller() != order.zone)
 }
 
-/// `_fulfillAvailableAdvancedOrders`
+/// `_fulfillAvailableAdvancedOrders`, which returns its result to the caller
+/// of the contract itself.
 #[arithmetic(unchecked)]
 pub fn fulfill_available_advanced_orders(
     _ env: Env,
@@ -389,7 +390,7 @@ pub fn fulfill_available_advanced_orders(
     fulfiller_conduit_key: u256,
     recipient: Address,
     maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+) -> !
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -449,7 +450,9 @@ uses (
         recipient,
         contains_non_open,
     )
-    (bool_array(available), execution_array(executions))
+    // Returning here keeps the six-word pair of arrays out of the entry
+    // points' frame, which lies below every heap allocation.
+    ops.return_data(data: encode_available(available, executions).span())
 }
 
 fn aggregate_into(
@@ -722,23 +725,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-#[arithmetic(unchecked)]
-pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
-    let count = values.len() as u256
-    // The tail holds a zeroed word per value, so no offset overflows.
-    var out = Buffer::array(count, stride: 32)
-    var i: u256 = 0
-    while i < count {
-        if values[i as usize] {
-            unsafe {
-                out.put(offset: 32 + i * 32, value: 1)
-            }
-        }
-        i += 1
-    }
-    out.into_dyn_array(len: count)
-}
-
 /// `OrdersMatched(orderHashes)`, encoded directly into the log data.
 fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
     let count = order_hashes.len() as u256
@@ -763,9 +749,54 @@ pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execu
     var out = unsafe {
         Buffer::uninit_array(count, stride: 224)
     }
-    let base = unsafe {
-        out.at(32)
+    unsafe {
+        write_executions(out.at(32), executions)
     }
+    out.into_dyn_array(len: count)
+}
+
+/// `(bool[] availableOrders, Execution[] executions)`, ABI-encoded as the
+/// typed return of the fulfillAvailable entry points.
+#[arithmetic(unchecked)]
+pub fn encode_available(
+    _ available: MemArray<bool>,
+    executions: MemArray<ExecutionState>,
+) -> Buffer {
+    let orders = available.len() as u256
+    let count = executions.len() as u256
+    let executions_at = 0x60 + orders * 32
+    // The heads, both length words and every element are written below, so
+    // no offset overflows.
+    var out = unsafe {
+        Buffer::uninit(executions_at + 32 + count * 224)
+    }
+    unsafe {
+        out.put(offset: 0, value: 0x40)
+        out.put(offset: 32, value: executions_at)
+        out.put(offset: 0x40, value: orders)
+        out.put(offset: executions_at, value: count)
+    }
+    var i: u256 = 0
+    while i < orders {
+        unsafe {
+            out.put(
+                offset: 0x60 + i * 32,
+                value: if available[i as usize] { 1 } else { 0 },
+            )
+        }
+        i += 1
+    }
+    unsafe {
+        write_executions(out.at(executions_at + 32), executions)
+    }
+    out
+}
+
+/// The seven words of each execution from `base`: the item type truncated
+/// to `uint8`, then the remaining fields. The caller provides the room.
+#[arithmetic(unchecked)]
+unsafe fn write_executions(_ base: *u8, _ executions: MemArray<ExecutionState>) {
+    let count = executions.len() as u256
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]
@@ -781,5 +812,4 @@ pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execu
         }
         i += 1
     }
-    out.into_dyn_array(len: count)
 }

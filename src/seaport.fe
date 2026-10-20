@@ -259,6 +259,9 @@ uses (
     )
 }
 
+/// Inlined into the dispatcher, whose frame then holds its arguments, since
+/// `fulfill_available_advanced_orders` returns from the call itself.
+#[inline(always)]
 pub fn fulfill_available_orders(_ env: Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (
     store: mut OrderStore,
@@ -287,6 +290,9 @@ uses (
     )
 }
 
+/// Inlined into the dispatcher, whose frame then holds its arguments, since
+/// `fulfill_available_advanced_orders` returns from the call itself.
+#[inline(always)]
 pub fn fulfill_available_advanced(_ env: Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (
     store: mut OrderStore,
