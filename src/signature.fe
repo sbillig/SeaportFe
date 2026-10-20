@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Verifiers._verifySignature, bulk order proofs and
 // SignatureVerification._assertValidSignature.
+#![arithmetic(unchecked)]
 use core::abi::store_word
 use core::ptr::{self, MemBuffer, MemSpan}
 use core::result::Result
@@ -65,17 +66,13 @@ pub fn is_valid_bulk_order_size(_ length: u256) -> bool {
 /// The bulk order hash proven by the proof appended to `signature`, and the
 /// length of the ECDSA signature in front of it.
 pub fn compute_bulk_order_proof(_ signature: CalldataView, leaf: u256) -> (u256, u256) {
+    // Valid bulk order sizes hold every word read here completely.
     let full_length = signature.len()
     let signature_length = 65 - (full_length & 1)
     let height = (full_length - signature_length) >> 5
     let key = signature.word(32 + signature_length) >> 0xe8
-    let first = signature.word(35 + signature_length)
-    var node = if key & 1 == 1 {
-        keccak_words([first, leaf])
-    } else {
-        keccak_words([leaf, first])
-    }
-    var i: u256 = 1
+    var node = leaf
+    var i: u256 = 0
     while i < height {
         let element = signature.word(35 + signature_length + i * 32)
         node = if (key >> i) & 1 == 1 {

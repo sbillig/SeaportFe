@@ -3,7 +3,7 @@ use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
 use std::evm::{Address, Evm, encode_abi_payload}
 use super::abi_view::CalldataView
-use super::applier::aggregate_offer_items
+use super::applier::aggregate_items
 use super::hashing_tests::{call_component_words, deploy_seaport}
 use super::model::{nested_components, orders_book, single_order}
 use super::types::{
@@ -122,9 +122,12 @@ pub contract ModelHarness {
             let args = CalldataView::arguments(64)
             var book = single_order(args.struct_argument(offset: 0, size: 160), advanced: true)
             let groups = nested_components(args.array_argument(32))
-            let _ = aggregate_offer_items(
+            let _ = aggregate_items(
                 mut book,
                 group: groups.group(0),
+                consideration: false,
+                offerer: Address::zero(),
+                conduit_key: 0,
                 recipient: Address::new(0xdef),
             )
             true

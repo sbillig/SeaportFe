@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // An initialized, exclusively owned byte buffer for exact protocol encodings.
+use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
-use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_error}
+use std::abi::DynArray
+use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
 use super::abi_view::CalldataView
 
 pub struct Buffer { data: MemBuffer }
@@ -28,8 +30,12 @@ impl Buffer {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset))
         }
     }
+    // One shared copy of the checked store keeps each call site small.
+    #[inline(never)]
     pub fn write(mut self, offset: u256, value: u256) {
-        self.check_word(offset)
+        if offset > self.len() || self.len() - offset < 32 {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
         // The complete word lies in this exclusively held owner's allocation.
         unsafe {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
@@ -55,6 +61,77 @@ impl Buffer {
     fn check_word(self, _ offset: u256) {
         if offset > self.len() || self.len() - offset < 32 {
             revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+    }
+
+    // Exact output encodings: a buffer sized for the words written to it
+    // checks its ranges once and then stores words unchecked.
+
+    /// A zeroed ABI array tail for `count` elements of `stride` bytes, with
+    /// its length word written.
+    pub fn array(_ count: u256, stride: u256) -> Self {
+        var data = Buffer::new(32 + count * stride)
+        // The buffer holds the length word.
+        unsafe {
+            data.put(offset: 0, value: count)
+        }
+        data
+    }
+    /// An unchecked `write`: the caller must ensure `offset + 32 <= len()`,
+    /// typically because the buffer was sized for exactly these writes.
+    pub unsafe fn put(mut self, offset: u256, value: u256) {
+        // The complete word lies in this exclusively held owner's allocation.
+        unsafe {
+            *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
+        }
+    }
+    /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
+    /// buffer. One check can cover a run of `put`s.
+    pub fn check_range(self, offset: u256, len: u256) {
+        if offset > self.len() || len > self.len() - offset {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+    }
+    /// The size `32 + count * stride` of an array tail at `offset`, which
+    /// must lie in the buffer (see `check_range`). Offsets within the tail
+    /// can then be computed without overflow checks.
+    pub fn check_array(self, offset: u256, count: u256, stride: u256) -> u256 {
+        let size = 32 + count * stride
+        self.check_range(offset, len: size)
+        size
+    }
+    /// Copy `len` bytes of calldata from `source` to `offset`.
+    pub fn copy_calldata_range(mut self, offset: u256, source: u256, len: u256)
+    uses (ops: mut RawOps)
+    {
+        self.check_range(offset, len)
+        ops.calldatacopy(
+            dest: mut self.data,
+            dest_offset: offset,
+            src_offset: source,
+            len,
+        )
+    }
+    /// The buffer as the ABI tail of a `len` element array of static `T`.
+    /// Fails unless the buffer is exactly the length word `len` and `len`
+    /// element heads.
+    pub fn into_dyn_array<T>(own self, len: u256) -> DynArray<T> where T: AbiSize {
+        if T::IS_DYNAMIC {
+            core::panic()
+        }
+        // `from_abi_tail` validates a static element array completely.
+        unsafe {
+            DynArray::from_abi_tail(data: self.data.ptr(), len: len as usize, size: self.len())
+        }
+    }
+    /// The buffer as the ABI tail of a `len` element array of any `T`. The
+    /// caller must ensure the buffer is the length word `len`, the element
+    /// heads and valid tails ending at the buffer's end.
+    pub unsafe fn into_dyn_array_unvalidated<T>(own self, len: u256) -> DynArray<T>
+    where T: AbiSize
+    {
+        unsafe {
+            DynArray::from_abi_tail(data: self.data.ptr(), len: len as usize, size: self.len())
         }
     }
 }
