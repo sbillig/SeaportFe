@@ -4,8 +4,8 @@
 // accumulator.
 #![arithmetic(unchecked)]
 use core::ptr::{MemBuffer, MemSpan}
-use std::evm::{Address, Call, Ctx, RawOps, revert_error}
-use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
+use std::evm::{Address, Call, Ctx, RawOps}
+use super::error_data::{error_selector, revert_custom5, revert_with0, revert_with1, revert_with2}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -328,14 +328,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(
-            TokenTransferGenericFailure {
-                token,
-                from,
-                to,
-                identifier: if erc20 { 0 } else { identifier },
-                amount,
-            },
+        revert_custom5(
+            error_selector<TokenTransferGenericFailure>(),
+            words: 5,
+            a: token.word(),
+            b: from.word(),
+            c: to.word(),
+            d: if erc20 { 0 } else { identifier },
+            e: amount,
         )
     }
     if !erc20 { return }
@@ -347,8 +347,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         return
     }
     if size < 32 || return_word(ret.span(), initial: 0) != 1 {
-        revert_error(
-            BadReturnValueFromERC20OnTransfer { token, from, to, amount },
+        revert_custom5(
+            error_selector<BadReturnValueFromERC20OnTransfer>(),
+            words: 4,
+            a: token.word(),
+            b: from.word(),
+            c: to.word(),
+            d: amount,
+            e: 0,
         )
     }
 }
