@@ -169,6 +169,7 @@ pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
 
 /// Copy an offer (`consideration: false`) or consideration array into the
 /// pool at `start`.
+#[arithmetic(unchecked)]
 fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
     var i: usize = 0
@@ -199,6 +200,7 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
 /// single-order forms: `count` orders, element `i` of the array `input` (or
 /// `input` itself when `single`), as `AdvancedOrder`s (`advanced`) or
 /// `Order`s.
+#[arithmetic(unchecked)]
 fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool) -> Book {
     var total: usize = 0
     var i: usize = 0

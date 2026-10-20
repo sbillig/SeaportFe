@@ -16,6 +16,7 @@ use super::model::{Book, Item, OrderState, Resolver, Resolvers, checked_enum}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
+#[arithmetic(unchecked)]
 pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     let total_orders = book.orders.len() as u256
     var i: u256 = 0
@@ -105,6 +106,7 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
 }
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
+#[arithmetic(unchecked)]
 fn verify_proof(leaf: u256, root: u256, proof: CalldataView) {
     var computed = keccak_words([leaf])
     // Seaport's verifier walks `len << 5` bytes of its proof copy with the

@@ -571,10 +571,7 @@ pub contract Seaport {
             super::status::assert_non_reentrant(env)
             increment_counter()
         }
-        // Match Solidity's view ABI even though deriving the hash is pure.
-        SeaportCalldataMsg::GetOrderHash {} -> Bytes32
-        uses (ctx: Ctx)
-        {
+        SeaportCalldataMsg::GetOrderHash {} -> Bytes32 {
             get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)
@@ -783,10 +780,7 @@ pub contract Consideration {
             super::status::assert_non_reentrant(env)
             increment_counter()
         }
-        // Match Solidity's view ABI even though deriving the hash is pure.
-        SeaportCalldataMsg::GetOrderHash {} -> Bytes32
-        uses (ctx: Ctx)
-        {
+        SeaportCalldataMsg::GetOrderHash {} -> Bytes32 {
             get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)

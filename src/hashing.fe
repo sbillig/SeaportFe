@@ -79,6 +79,7 @@ pub fn derive_components_hash(_ order: CalldataView) -> u256 {
 
 /// The hash of the first `count` raw items of the offer (or consideration)
 /// array at `items`.
+#[arithmetic(unchecked)]
 fn hash_items(_ items: CalldataView, count: u256, consideration: bool) -> u256 {
     let stride: u256 = if consideration { 192 } else { 160 }
     let scratch = ptr::alloc_bytes(224)

@@ -28,6 +28,7 @@ use super::types::CONTRACT
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled. The fields read through Solidity's typed calldata
 /// accessors get their checks; the hash covers the raw words.
+#[arithmetic(unchecked)]
 pub fn cancel(_ env: Env, orders: CalldataView) -> bool
 uses (
     store: mut OrderStore,
@@ -114,6 +115,7 @@ uses (
 /// `OrderValidated(orderHash, orderParameters)` from the unchanged order, as
 /// Solidity encodes Seaport's memory copy: addresses cleaned (the model holds
 /// them so) and item types checked.
+#[arithmetic(unchecked)]
 fn emit_order_validated(_ book: Book, _ order: OrderState, order_hash: u256)
 uses (log: mut Log)
 {
@@ -184,6 +186,7 @@ uses (log: mut Log)
 
 /// The ABI array of `count` items of `book` from `start`, written to `out`,
 /// which must have room for it.
+#[arithmetic(unchecked)]
 fn write_items(_ out: *u8, _ book: Book, start: u256, count: u256, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
     unsafe {
