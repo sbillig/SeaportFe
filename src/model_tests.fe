@@ -92,7 +92,7 @@ pub contract ModelHarness {
     recv ModelHarnessMsg {
         Single {} -> bool {
             let args = CalldataView::arguments(32)
-            var book = single_order(args.struct_argument(offset: 0, size: 160), advanced: true)
+            var book = single_order(args, advanced: true)
             let descriptor = ref book.orders[0]
             book.items[descriptor.offer_start as usize].amount = 11
             assert(descriptor.offer_len == 1)
@@ -120,7 +120,7 @@ pub contract ModelHarness {
         }
         Repeated {} -> bool {
             let args = CalldataView::arguments(64)
-            var book = single_order(args.struct_argument(offset: 0, size: 160), advanced: true)
+            var book = single_order(args, advanced: true)
             let groups = nested_components(args.array_argument(32))
             let _ = aggregate_items(
                 mut book,
