@@ -2,8 +2,8 @@
 // OrderValidator._cancel and _validate.
 use core::abi::store_word
 use core::ptr
-use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_empty, revert_error}
+use std::abi::Bytes32
+use std::evm::{TSlot, Call, Ctx, Event, Log, RawOps, revert_empty, revert_error}
 use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
@@ -23,7 +23,7 @@ use super::status::{
     set_validated,
     verify_order_status,
 }
-use super::types::{CONTRACT, ConsiderationItem, OfferItem, OrderParameters}
+use super::types::CONTRACT
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
 /// cannot be cancelled. The fields read through Solidity's typed calldata
@@ -103,12 +103,7 @@ uses (
                     signature: order.signature,
                 )
                 set_validated(order_hash)
-                log.emit(
-                    OrderValidated {
-                        orderHash: Bytes32 { val: order_hash },
-                        orderParameters: validated_parameters(book, order),
-                    },
-                )
+                emit_order_validated(book, order, order_hash)
             }
         }
         i += 1
@@ -116,76 +111,101 @@ uses (
     true
 }
 
-/// The unchanged order as the typed `OrderValidated` event encodes it from
-/// Seaport's memory copy: addresses cleaned and item types checked.
-fn validated_parameters(_ book: Book, _ order: OrderState) -> OrderParameters {
-    let (offer, offer_size) = event_items(
+/// `OrderValidated(orderHash, orderParameters)` from the unchanged order, as
+/// Solidity encodes Seaport's memory copy: addresses cleaned (the model holds
+/// them so) and item types checked.
+fn emit_order_validated(_ book: Book, _ order: OrderState, order_hash: u256)
+uses (log: mut Log)
+{
+    let consideration_at = 0x1c0 + order.offer_len * 160
+    let size = consideration_at + 32 + order.consideration_len * 192
+    let data = ptr::alloc_bytes(size)
+    // Every word of the `size` bytes allocated above is written.
+    unsafe {
+        store_word(ptr: data, value: order_hash)
+        store_word(ptr: ptr::offset_bytes(data, 0x20), value: 0x40)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x40),
+            value: order.offerer.word(),
+        )
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x60),
+            value: order.zone.word(),
+        )
+        store_word(ptr: ptr::offset_bytes(data, 0x80), value: 0x160)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0xa0),
+            value: consideration_at - 0x40,
+        )
+        store_word(
+            ptr: ptr::offset_bytes(data, 0xc0),
+            value: order.order_type,
+        )
+        store_word(
+            ptr: ptr::offset_bytes(data, 0xe0),
+            value: order.start_time,
+        )
+        store_word(ptr: ptr::offset_bytes(data, 0x100), value: order.end_time)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x120),
+            value: order.zone_hash,
+        )
+        store_word(ptr: ptr::offset_bytes(data, 0x140), value: order.salt)
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x160),
+            value: order.conduit_key,
+        )
+        store_word(
+            ptr: ptr::offset_bytes(data, 0x180),
+            value: order.total_original,
+        )
+    }
+    write_items(
+        ptr::offset_bytes(data, 0x1a0),
         book,
         start: order.offer_start,
         count: order.offer_len,
         consideration: false,
     )
-    let (consideration, consideration_size) = event_items(
+    write_items(
+        ptr::offset_bytes(data, consideration_at),
         book,
         start: order.consideration_start,
         count: order.consideration_len,
         consideration: true,
     )
-    // Both tails were written by `event_items` as complete ABI tails.
-    OrderParameters {
-        offerer: order.offerer,
-        zone: order.zone,
-        offer: unsafe {
-            DynArray<OfferItem>::from_abi_tail(
-                data: offer,
-                len: order.offer_len as usize,
-                size: offer_size,
-            )
+    log.log1(
+        data: unsafe {
+            ptr::MemSpan::from_raw_parts(ptr: data, len: size as usize)
         },
-        consideration: unsafe {
-            DynArray<ConsiderationItem>::from_abi_tail(
-                data: consideration,
-                len: order.consideration_len as usize,
-                size: consideration_size,
-            )
-        },
-        orderType: order.order_type.downcast_truncate(),
-        startTime: order.start_time,
-        endTime: order.end_time,
-        zoneHash: Bytes32 { val: order.zone_hash },
-        salt: order.salt,
-        conduitKey: Bytes32 { val: order.conduit_key },
-        totalOriginalConsiderationItems: order.total_original,
-    }
+        topic0: OrderValidated::TOPIC0,
+    )
 }
 
-/// The ABI tail of `count` items of `book` from `start`, and its size.
-fn event_items(_ book: Book, start: u256, count: u256, consideration: bool) -> (*u8, u256) {
+/// The ABI array of `count` items of `book` from `start`, written to `out`,
+/// which must have room for it.
+fn write_items(_ out: *u8, _ book: Book, start: u256, count: u256, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
-    let size = 32 + count * stride
-    let data = ptr::alloc_bytes(size)
-    // Every word of the `size` bytes allocated above is written.
     unsafe {
-        store_word(ptr: data, value: count)
+        store_word(ptr: out, value: count)
     }
     var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
-        let out = ptr::offset_bytes(data, 32 + i * stride)
+        let at = ptr::offset_bytes(out, 32 + i * stride)
         unsafe {
-            store_word(ptr: out, value: checked_enum(item.item_type, variants: 6))
-            store_word(ptr: ptr::offset_bytes(out, 32), value: item.token.word())
-            store_word(ptr: ptr::offset_bytes(out, 64), value: item.identifier)
-            store_word(ptr: ptr::offset_bytes(out, 96), value: item.start_amount)
-            store_word(ptr: ptr::offset_bytes(out, 128), value: item.end_amount)
+            store_word(ptr: at, value: checked_enum(item.item_type, variants: 6))
+            store_word(ptr: ptr::offset_bytes(at, 32), value: item.token.word())
+            store_word(ptr: ptr::offset_bytes(at, 64), value: item.identifier)
+            store_word(ptr: ptr::offset_bytes(at, 96), value: item.start_amount)
+            store_word(ptr: ptr::offset_bytes(at, 128), value: item.end_amount)
             if consideration {
                 store_word(
-                    ptr: ptr::offset_bytes(out, 160),
+                    ptr: ptr::offset_bytes(at, 160),
                     value: item.recipient.word(),
                 )
             }
         }
         i += 1
     }
-    (data, size)
 }

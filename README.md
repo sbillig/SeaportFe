@@ -177,6 +177,8 @@ marks `PausableZone.supportsInterface` as `pure`, not `view`. The order
 entry points (fulfill, match, validate, cancel, `getOrderHash`) and the
 conduit batch functions use numeric selectors (their calldata is read raw),
 so they have no ABI entry. `SeaportMsg` keeps the typed forms for callers.
+`OrderValidated` is written with a raw log operation, so the Fe ABI does not
+list it.
 
 ## Limitations
 

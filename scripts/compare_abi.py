@@ -6,8 +6,8 @@
 For each Fe contract, lists functions, events and errors whose canonical
 signature (including output types for functions) differs from the Solidity
 contract it replaces. Fe skips recv arms with numeric selectors in the ABI
-(order entry points), so those are reported as missing and listed
-separately as expected.
+(order entry points) and events written with raw log operations, so those
+are reported as missing and listed separately as expected.
 """
 import json
 import sys
@@ -43,6 +43,8 @@ NUMERIC = {
     "executeBatch1155(",
     "executeWithBatch1155(",
 }
+# Events written with raw log operations (no `emit` in the Fe ABI walk).
+RAW_LOGS = {"OrderValidated("}
 
 
 def canon(param):
@@ -83,9 +85,12 @@ def main():
         extra = sorted(fe - sol)
         print(f"== {fe_name}: {len(sol & fe)} match")
         for m in missing:
-            expected = any(m.split(" ", 1)[1].startswith(n) for n in NUMERIC)
-            print(f"  missing{' (numeric selector)' if expected else ''}: {m}")
-            bad += not expected
+            sig = m.split(" ", 1)[1]
+            numeric = any(sig.startswith(n) for n in NUMERIC)
+            raw_log = m.startswith("event ") and any(sig.startswith(n) for n in RAW_LOGS)
+            note = " (numeric selector)" if numeric else " (raw log)" if raw_log else ""
+            print(f"  missing{note}: {m}")
+            bad += not (numeric or raw_log)
         for x in extra:
             print(f"  extra:   {x}")
             bad += 1
