@@ -11,7 +11,7 @@ use std::evm::crypto::ecrecover_raw
 use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
 use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
 use super::lowlevel::revert_with_reason_if_one_is_returned
-use super::buffer::{Buffer, return_word}
+use super::buffer::{Buffer, read_word, return_word}
 
 const EIP1271_SELECTOR_WORD: u256 = 0x1626ba7e00000000000000000000000000000000000000000000000000000000
 const ALL_BUT_HIGHEST_BIT: u256 = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -65,27 +65,24 @@ pub fn is_valid_bulk_order_size(_ length: u256) -> bool {
 /// The bulk order hash proven by the proof appended to `signature`, and the
 /// length of the ECDSA signature in front of it.
 pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) {
-    let full_length = signature.len()
+    // Valid bulk order sizes hold every word read here completely.
+    let proof = signature.payload_span()
+    let full_length = signature.len() as u256
     let signature_length = 65 - (full_length & 1)
     let height = (full_length - signature_length) >> 5
-    let key = signature.word_at(signature_length) >> 0xe8
-    let first = signature.word_at(signature_length + 3)
-    var node = if key & 1 == 1 {
-        keccak_words([first, leaf])
-    } else {
-        keccak_words([leaf, first])
-    }
-    var i: usize = 1
+    let key = read_word(proof, offset: signature_length) >> 0xe8
+    var node = leaf
+    var i: u256 = 0
     while i < height {
-        let element = signature.word_at(signature_length + 3 + i * 32)
-        node = if (key >> i as u256) & 1 == 1 {
+        let element = read_word(proof, offset: signature_length + 3 + i * 32)
+        node = if (key >> i) & 1 == 1 {
             keccak_words([element, node])
         } else {
             keccak_words([node, element])
         }
         i += 1
     }
-    (keccak_words([bulk_order_typehash(height as u256), node]), signature_length as u256)
+    (keccak_words([bulk_order_typehash(height), node]), signature_length)
 }
 
 /// `_assertValidSignature`: ECDSA (65 bytes, or 64-byte EIP-2098) recovery
@@ -104,8 +101,8 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     var recovered: u256 = 0
     var v: u256 = 0
     if signature_length == 64 || signature_length == 65 {
-        let r = signature.word_at(0)
-        var s = signature.word_at(32)
+        let r = read_word(signature.payload_span(), offset: 0)
+        var s = read_word(signature.payload_span(), offset: 32)
         if signature_length == 65 {
             v = signature.byte_at(64) as u256
         } else {
