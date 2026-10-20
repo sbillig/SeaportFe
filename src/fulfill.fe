@@ -271,6 +271,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 /// fields, the item type truncated to `uint8`, the current amount and the
 /// receiver. `dst` must have room for the `32 + count * stride` bytes.
 #[arithmetic(unchecked)]
+#[inline(always)]
 unsafe fn write_fulfilled_items(_ dst: *u8, items: *Item, count: u256, received: bool) {
     let stride: u256 = if received { 160 } else { 128 }
     unsafe {
