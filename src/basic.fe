@@ -44,6 +44,7 @@ use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
     call_and_check_status_with_skip,
+    ensure_range,
     is_restricted_and_caller_not_zone,
 }
 
@@ -421,7 +422,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let offer = head + 0x140
     let consideration = head + 0x1e0
     let first = consideration + 0x20
-    data.check_range(offset: 0, len: first + 0xa0)
+    ensure_range(data, offset: 0, len: first + 0xa0)
     // The checked range holds the head, the offer and the primary
     // consideration item.
     unsafe {
@@ -466,7 +467,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var i: u256 = 0
     while i < total_recipients {
         let item = first + 0xa0 + i * 0xa0
-        data.check_range(offset: item, len: 0xa0)
+        ensure_range(data, offset: item, len: 0xa0)
         // The checked range holds the item; its identifier stays zero.
         unsafe {
             data.put(offset: item, value: additional_recipients_item_type)

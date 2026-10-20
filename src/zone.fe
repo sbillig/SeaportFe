@@ -38,6 +38,13 @@ uses (ctx: Ctx)
     order_type < 4 && order_type > 1 && ctx.caller() != zone
 }
 
+/// `Buffer::check_range` for the encoders of the cold zone and basic order
+/// paths, kept out of line so the hot paths keep inlining the check.
+#[inline(never)]
+pub fn ensure_range(_ buf: Buffer, offset: u256, len: u256) {
+    buf.check_range(offset, len)
+}
+
 /// The current amount, or the amount saved before fulfillment aggregation.
 fn item_amount(_ item: Item, _ use_original: bool) -> u256 {
     if use_original {
@@ -55,7 +62,8 @@ fn write_spent_items(
     count: u256,
     use_original: bool,
 ) -> u256 {
-    let size = dst.check_array(offset, count, stride: 128)
+    let size = 32 + count * 128
+    ensure_range(dst, offset, len: size)
     // The checked range holds the length word and every item.
     unsafe {
         dst.put(offset, value: count)
@@ -80,7 +88,8 @@ fn write_received_items(
     start: u256,
     count: u256,
 ) -> u256 {
-    let size = dst.check_array(offset, count, stride: 160)
+    let size = 32 + count * 160
+    ensure_range(dst, offset, len: size)
     // The checked range holds the length word and every item.
     unsafe {
         dst.put(offset, value: count)
@@ -111,7 +120,8 @@ fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: CalldataView) -> u256 {
 }
 
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
-    let size = dst.check_array(offset, count, stride: 32)
+    let size = 32 + count * 32
+    ensure_range(dst, offset, len: size)
     // The checked range holds the length word and every hash.
     unsafe {
         dst.put(offset, value: count)
@@ -149,7 +159,7 @@ fn write_order_tails(
     order_hashes: MemArray<u256>,
     hashes_count: u256,
 ) {
-    data.check_range(offset: slots, len: 0x80)
+    ensure_range(data, offset: slots, len: 0x80)
     var at = tail
     // The checked range holds the four offset words.
     unsafe {

@@ -5,7 +5,7 @@
 #![arithmetic(unchecked)]
 use core::ptr::{MemBuffer, MemSpan}
 use std::abi::Bytes32
-use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use std::evm::{Address, Call, Ctx, Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -307,7 +307,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // transferFrom(from, to, amount or identifier), or
     // safeTransferFrom(from, to, identifier, amount, "").
     let size: u256 = if erc1155 { 0xc4 } else { 0x64 }
-    scratch.check_range(offset: 0, len: size)
+    if scratch.len() < size {
+        revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+    }
     // The checked range holds every word written.
     unsafe {
         scratch
