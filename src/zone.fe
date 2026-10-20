@@ -111,6 +111,62 @@ fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count
     32 + count * 32
 }
 
+/// Size of the order's offer as `SpentItem[]`, its consideration as
+/// `ReceivedItem[]`, its extra data and `hashes_count` order hashes.
+fn order_tails_size(_ order: OrderState, hashes_count: u256) -> u256 {
+    32
+        + order.offer_len * 128
+        + 32
+        + order.consideration_len * 160
+        + 32
+        + padded(order.extra_data.len() as u256)
+        + 32
+        + hashes_count * 32
+}
+
+/// Write the tails measured by `order_tails_size` from `tail` on, relative to
+/// `head`, and their offsets to the four words at `slots`.
+fn write_order_tails(
+    _ data: mut Buffer,
+    head: u256,
+    slots: u256,
+    tail: u256,
+    book: Book,
+    order: OrderState,
+    order_hashes: MemArray<u256>,
+    hashes_count: u256,
+) {
+    var at = tail
+    data.write(offset: slots, value: at)
+    at = at
+        + write_spent_items(
+            mut data,
+            offset: head + at,
+            book,
+            start: order.offer_start,
+            count: order.offer_len,
+            use_original: true,
+        )
+    data.write(offset: slots + 0x20, value: at)
+    at = at
+        + write_received_items(
+            mut data,
+            offset: head + at,
+            book,
+            start: order.consideration_start,
+            count: order.consideration_len,
+        )
+    data.write(offset: slots + 0x40, value: at)
+    at = at + write_bytes(mut data, offset: head + at, order.extra_data)
+    data.write(offset: slots + 0x60, value: at)
+    write_hashes(
+        mut data,
+        offset: head + at,
+        order_hashes,
+        count: hashes_count,
+    )
+}
+
 /// `authorizeOrder(ZoneParameters)` or `validateOrder(ZoneParameters)` with
 /// the first `hashes_count` order hashes. seaport-core encodes the zone
 /// parameters once, before transfers, and reuses them for `validateOrder`;
@@ -125,51 +181,22 @@ fn encode_zone_call(
 ) -> Buffer
 uses (ctx: Ctx)
 {
-    let params_size = 0x140
-        + 32
-        + order.offer_len * 128
-        + 32
-        + order.consideration_len * 160
-        + 32
-        + padded(order.extra_data.len() as u256)
-        + 32
-        + hashes_count * 32
-    let size = 0x24 + params_size
-    var data = Buffer::new(size)
+    var data = Buffer::new(0x24 + 0x140 + order_tails_size(order, hashes_count))
     data.write(offset: 0, value: selector << 224)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
     data.write(offset: head, value: order_hash)
     data.write(offset: head + 0x20, value: ctx.caller().word())
     data.write(offset: head + 0x40, value: order.offerer.word())
-    var tail: u256 = 0x140
-    data.write(offset: head + 0x60, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.offer_start,
-            count: order.offer_len,
-            use_original: true,
-        )
-    data.write(offset: head + 0x80, value: tail)
-    tail = tail
-        + write_received_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.consideration_start,
-            count: order.consideration_len,
-        )
-    data.write(offset: head + 0xa0, value: tail)
-    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
-    data.write(offset: head + 0xc0, value: tail)
-    write_hashes(
+    write_order_tails(
         mut data,
-        offset: head + tail,
+        head,
+        slots: head + 0x60,
+        tail: 0x140,
+        book,
+        order,
         order_hashes,
-        count: hashes_count,
+        hashes_count,
     )
     data.write(offset: head + 0xe0, value: order.start_time)
     data.write(offset: head + 0x100, value: order.end_time)
@@ -300,51 +327,22 @@ fn encode_ratify_order(
     order_hash: u256,
     order_hashes: MemArray<u256>,
 ) -> Buffer {
-    let size = 4
-        + 0xa0
-        + 32
-        + order.offer_len * 128
-        + 32
-        + order.consideration_len * 160
-        + 32
-        + padded(order.extra_data.len() as u256)
-        + 32
-        + order_hashes.len() as u256 * 32
-    var data = Buffer::new(size)
+    let hashes_count = order_hashes.len() as u256
+    var data = Buffer::new(4 + 0xa0 + order_tails_size(order, hashes_count))
     data.write(offset: 0, value: RATIFY_ORDER_SELECTOR << 224)
-    let head: u256 = 4
-    data.write(
-        offset: head + 0x80,
-        value: order_hash ^ (order.offerer.word() << 96),
-    )
-    var tail: u256 = 0xa0
-    data.write(offset: head, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.offer_start,
-            count: order.offer_len,
-            use_original: true,
-        )
-    data.write(offset: head + 0x20, value: tail)
-    tail = tail
-        + write_received_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.consideration_start,
-            count: order.consideration_len,
-        )
-    data.write(offset: head + 0x40, value: tail)
-    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
-    data.write(offset: head + 0x60, value: tail)
-    write_hashes(
+    write_order_tails(
         mut data,
-        offset: head + tail,
+        head: 4,
+        slots: 4,
+        tail: 0xa0,
+        book,
+        order,
         order_hashes,
-        count: order_hashes.len() as u256,
+        hashes_count,
+    )
+    data.write(
+        offset: 4 + 0x80,
+        value: order_hash ^ (order.offerer.word() << 96),
     )
     data
 }
