@@ -6,7 +6,7 @@ use super::raw_abi::{error_selector, revert_custom, revert_with0}
 use super::buffer::{Buffer, store_at}
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
-use core::ptr::{self, MemArray}
+use core::ptr::MemArray
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     ConsiderationNotMet,
@@ -26,7 +26,7 @@ use super::executor::{
 }
 use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
-use super::model::{Book, Groups, Item, OrderState, Resolvers}
+use super::model::{Book, Groups, Item, OrderState, Resolvers, elem}
 use super::status::{OrderStore, clear_reentrancy_guard, set_reentrancy_guard, update_status}
 use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER}
 use super::zone::{
@@ -183,16 +183,16 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
         revert_on_invalid,
     )
     unsafe {
-        (*ptr::offset(book.orders.ptr(), index)).numerator = numerator
+        (*elem(book.orders.ptr(), index)).numerator = numerator
     }
     if numerator == 0 {
         return (false, false)
     }
     unsafe {
-        (*ptr::offset(book.orders.ptr(), index)).denominator = denominator
+        (*elem(book.orders.ptr(), index)).denominator = denominator
     }
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), index)
+        ref *elem(book.orders.ptr(), index)
     }
     order_hashes[(index) as usize] = order_hash
     let is_non_contract = order.order_type < 4
@@ -207,7 +207,7 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
             order.offer_start + j
         }
         let item = unsafe {
-            mut *ptr::offset(book.items.ptr(), at)
+            mut *elem(book.items.ptr(), at)
         }
         if !consideration && item.item_type == NATIVE as u256 && is_non_contract {
             native_offer = true
@@ -242,7 +242,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
     if remaining == 0 {
         skip_available_order(mut book, mut order_hashes, index)
         false
-    } else if unsafe { (*ptr::offset(book.orders.ptr(), index)).order_type } != CONTRACT as u256 {
+    } else if unsafe { (*elem(book.orders.ptr(), index)).order_type } != CONTRACT as u256 {
         let available = prepare_standard_available_order(
             mut book,
             mut order_hashes,
@@ -265,7 +265,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 fn skip_available_order(_ book: mut Book, order_hashes: mut MemArray<u256>, index: u256) {
     order_hashes[(index) as usize] = 0
     unsafe {
-        (*ptr::offset(book.orders.ptr(), index)).numerator = 0
+        (*elem(book.orders.ptr(), index)).numerator = 0
     }
 }
 
@@ -292,7 +292,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
             order_hash,
             book,
             order: unsafe {
-                ref *ptr::offset(book.orders.ptr(), index)
+                ref *elem(book.orders.ptr(), index)
             },
             recipient,
         )
@@ -309,20 +309,20 @@ fn prepare_contract_available_order(
 ) -> bool
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let generated = generate_order(book, order_index: index, revert_on_invalid)
-    order_hashes[(index) as usize] = generated.order_hash
-    if generated.order_hash == 0 {
+    let order_hash = generate_order(book, order_index: index, revert_on_invalid)
+    order_hashes[(index) as usize] = order_hash
+    if order_hash == 0 {
         unsafe {
-            (*ptr::offset(book.orders.ptr(), index)).numerator = 0
+            (*elem(book.orders.ptr(), index)).numerator = 0
         }
         false
     } else {
-        install_generated_order(mut book, order_index: index, generated)
+        install_generated_order(mut book, order_index: index)
         emit_order_fulfilled(
-            order_hash: generated.order_hash,
+            order_hash,
             book,
             order: unsafe {
-                ref *ptr::offset(book.orders.ptr(), index)
+                ref *elem(book.orders.ptr(), index)
             },
             recipient,
         )
@@ -342,7 +342,7 @@ fn authorize_and_record(
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), index)
+        ref *elem(book.orders.ptr(), index)
     }
     let authorized = check_restricted_advanced_order_authorization(
         book,
@@ -361,7 +361,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
         ) {
         order_hashes[(index) as usize] = 0
         unsafe {
-            (*ptr::offset(book.orders.ptr(), index)).numerator = 0
+            (*elem(book.orders.ptr(), index)).numerator = 0
         }
         return false
     }
@@ -376,7 +376,8 @@ uses (ctx: Ctx)
     revert_on_invalid || (order.order_type > 1 && ctx.caller() != order.zone)
 }
 
-/// `_fulfillAvailableAdvancedOrders`
+/// `_fulfillAvailableAdvancedOrders`, which returns its result to the caller
+/// of the contract itself.
 #[arithmetic(unchecked)]
 pub fn fulfill_available_advanced_orders(
     _ env: Env,
@@ -387,7 +388,7 @@ pub fn fulfill_available_advanced_orders(
     fulfiller_conduit_key: u256,
     recipient: Address,
     maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+) -> !
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -447,7 +448,9 @@ uses (
         recipient,
         contains_non_open,
     )
-    (bool_array(available), execution_array(executions))
+    // Returning here keeps the six-word pair of arrays out of the entry
+    // points' frame, which lies below every heap allocation.
+    ops.return_data(data: encode_available(available, executions).span())
 }
 
 fn aggregate_into(
@@ -462,8 +465,9 @@ fn aggregate_into(
 )
 uses (ctx: Ctx)
 {
-    executions[(slot) as usize] = aggregate_available(
+    aggregate_available(
         mut book,
+        execution: mut executions[(slot) as usize],
         side,
         groups,
         index,
@@ -520,13 +524,22 @@ uses (
     execution_array(executions)
 }
 
+/// Kept out of line so that the values it keeps across calls take a frame
+/// of its own instead of its caller's, which lies below every heap
+/// allocation.
+#[inline(never)]
 fn apply_fulfillment_into(
     _ book: mut Book,
     executions: mut MemArray<ExecutionState>,
     groups: Groups,
     index: u256,
 ) {
-    executions[(index) as usize] = apply_fulfillment(mut book, groups, fulfillment_index: index)
+    apply_fulfillment(
+        mut book,
+        execution: mut executions[(index) as usize],
+        groups,
+        fulfillment_index: index,
+    )
 }
 
 /// `_performFinalChecksAndExecuteOrders`: run the executions, transfer
@@ -555,13 +568,8 @@ uses (
     var available = MemArray<bool>::new_zeroed(book.orders.len())
     // Executions plus unspent offer items bound the number of transfers.
     var buf = transfer_buffer(executions.len() as u256 + book.used)
-    var acc = new_accumulator()
+    var acc = run_executions(env, executions, mut buf)
     var i: u256 = 0
-    while i < executions.len() as u256 {
-        acc = run_execution(env, executions, index: i, acc, mut buf)
-        i += 1
-    }
-    i = 0
     while i < total_orders {
         acc = settle_order(
             env,
@@ -588,6 +596,22 @@ uses (
     }
     clear_reentrancy_guard(env)
     available
+}
+
+/// Run every execution, out of line so that the values its loop keeps live
+/// take a frame of its own.
+#[arithmetic(unchecked)]
+#[inline(never)]
+fn run_executions(_ env: Env, executions: MemArray<ExecutionState>, buf: mut Buffer) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    var acc = new_accumulator()
+    var i: u256 = 0
+    while i < executions.len() as u256 {
+        acc = run_execution(env, executions, index: i, acc, mut buf)
+        i += 1
+    }
+    acc
 }
 
 fn run_execution(
@@ -638,7 +662,7 @@ fn settle_order(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), index)
+        ref *elem(book.orders.ptr(), index)
     }
     if order.numerator == 0 {
         return acc
@@ -648,7 +672,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var j: u256 = 0
     while j < order.offer_len {
         let item = unsafe {
-            mut *ptr::offset(book.items.ptr(), order.offer_start + j)
+            mut *elem(book.items.ptr(), order.offer_start + j)
         }
         let unspent = item.amount
         item.amount = item.original
@@ -673,7 +697,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     j = 0
     while j < order.consideration_len {
         let item = unsafe {
-            mut *ptr::offset(book.items.ptr(), order.consideration_start + j)
+            mut *elem(book.items.ptr(), order.consideration_start + j)
         }
         if item.amount != 0 {
             revert_custom(
@@ -702,29 +726,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         assert_restricted_advanced_order_validity(
             book,
             order: unsafe {
-                ref *ptr::offset(book.orders.ptr(), index)
+                ref *elem(book.orders.ptr(), index)
             },
             order_hashes: ref order_hashes,
             order_hash: order_hashes[(index) as usize],
         )
     }
-}
-
-#[arithmetic(unchecked)]
-pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
-    let count = values.len() as u256
-    // The tail holds a zeroed word per value, so no offset overflows.
-    var out = Buffer::array(count, stride: 32)
-    var i: u256 = 0
-    while i < count {
-        if values[i as usize] {
-            unsafe {
-                out.put(offset: 32 + i * 32, value: 1)
-            }
-        }
-        i += 1
-    }
-    out.into_dyn_array(len: count)
 }
 
 /// `OrdersMatched(orderHashes)`, encoded directly into the log data.
@@ -751,9 +758,54 @@ pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execu
     var out = unsafe {
         Buffer::uninit_array(count, stride: 224)
     }
-    let base = unsafe {
-        out.at(32)
+    unsafe {
+        write_executions(out.at(32), executions)
     }
+    out.into_dyn_array(len: count)
+}
+
+/// `(bool[] availableOrders, Execution[] executions)`, ABI-encoded as the
+/// typed return of the fulfillAvailable entry points.
+#[arithmetic(unchecked)]
+pub fn encode_available(
+    _ available: MemArray<bool>,
+    executions: MemArray<ExecutionState>,
+) -> Buffer {
+    let orders = available.len() as u256
+    let count = executions.len() as u256
+    let executions_at = 0x60 + orders * 32
+    // The heads, both length words and every element are written below, so
+    // no offset overflows.
+    var out = unsafe {
+        Buffer::uninit(executions_at + 32 + count * 224)
+    }
+    unsafe {
+        out.put(offset: 0, value: 0x40)
+        out.put(offset: 32, value: executions_at)
+        out.put(offset: 0x40, value: orders)
+        out.put(offset: executions_at, value: count)
+    }
+    var i: u256 = 0
+    while i < orders {
+        unsafe {
+            out.put(
+                offset: 0x60 + i * 32,
+                value: if available[i as usize] { 1 } else { 0 },
+            )
+        }
+        i += 1
+    }
+    unsafe {
+        write_executions(out.at(executions_at + 32), executions)
+    }
+    out
+}
+
+/// The seven words of each execution from `base`: the item type truncated
+/// to `uint8`, then the remaining fields. The caller provides the room.
+#[arithmetic(unchecked)]
+unsafe fn write_executions(_ base: *u8, _ executions: MemArray<ExecutionState>) {
+    let count = executions.len() as u256
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]
@@ -769,5 +821,4 @@ pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execu
         }
         i += 1
     }
-    out.into_dyn_array(len: count)
 }

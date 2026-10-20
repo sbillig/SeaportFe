@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // FulfillmentApplier: aggregate fulfillment components into executions.
 #![arithmetic(unchecked)]
-use core::ptr
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW}
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::errors::{
@@ -11,7 +10,7 @@ use super::errors::{
     MissingItemAmount,
     OfferAndConsiderationRequiredOnFulfillment,
 }
-use super::model::{Book, Group, Groups}
+use super::model::{Book, Group, Groups, elem}
 use super::types::OFFER
 
 /// An `Execution`: a `ReceivedItem` plus the source and conduit key.
@@ -50,23 +49,29 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
 
 /// `_aggregateValidFulfillmentOfferItems` or, for `consideration`,
 /// `_aggregateValidFulfillmentConsiderationItems`: sum the referenced items of
-/// available orders, zeroing them. All of them must share type, token and
-/// identifier, offer items also offerer and conduit key, and consideration
-/// items also the recipient; the other execution fields are given. Comparing
-/// these fields is equivalent to comparing seaport-core's hashes of them. Also
-/// returns the index of the first used component, which seaport-core moves to
-/// the front of the array.
+/// available orders into `execution`, zeroing them. All of them must share
+/// type, token and identifier, offer items also offerer and conduit key, and
+/// consideration items also the recipient; the other execution fields are
+/// given. Comparing these fields is equivalent to comparing seaport-core's
+/// hashes of them. Returns the index of the first used component, which
+/// seaport-core moves to the front of the array.
+///
+/// Each item is compared with the first used one in the pool, whose compared
+/// fields aggregation leaves unchanged, and the execution is written once at
+/// the end, so the loop keeps few values live.
 pub fn aggregate_items(
     _ book: mut Book,
+    execution: mut ExecutionState,
     group: Group,
     consideration: bool,
     offerer: Address,
     conduit_key: u256,
     recipient: Address,
-) -> (ExecutionState, u256) {
-    var execution = empty_execution()
+) -> u256 {
     var found = false
     var first_used: u256 = 0
+    var first_order: u256 = 0
+    var first_at: u256 = 0
     var amount: u256 = 0
     var error_buffer: u256 = 0
     var k: u256 = 0
@@ -77,7 +82,7 @@ pub fn aggregate_items(
         }
         // The order index was checked above.
         let order = unsafe {
-            ref *ptr::offset(book.orders.ptr(), component.order_index)
+            ref *elem(book.orders.ptr(), component.order_index)
         }
         let (start, len) = if consideration {
             (order.consideration_start, order.consideration_len)
@@ -86,8 +91,9 @@ pub fn aggregate_items(
         }
         if component.item_index < len && order.numerator != 0 {
             // The item index lies in the order's range of the pool.
+            let at = start + component.item_index
             let item = unsafe {
-                mut *ptr::offset(book.items.ptr(), start + component.item_index)
+                mut *elem(book.items.ptr(), at)
             }
             let new_amount = amount + item.amount
             if new_amount < amount {
@@ -98,45 +104,69 @@ pub fn aggregate_items(
             }
             amount = new_amount
             item.amount = 0
-            let next = ExecutionState {
-                item_type: item.item_type,
-                token: item.token,
-                identifier: item.identifier,
-                amount: 0,
-                recipient: if consideration {
-                    item.receiver
-                } else {
-                    recipient
-                },
-                offerer: if consideration {
-                    offerer
-                } else {
-                    order.offerer
-                },
-                conduit_key: if consideration {
-                    conduit_key
-                } else {
-                    order.conduit_key
-                },
-            }
             if !found {
-                execution = next
                 found = true
                 first_used = k
-            } else if next.item_type != execution.item_type
-                || next.token != execution.token
-                || next.identifier != execution.identifier
-                || next.recipient != execution.recipient
-                || next.offerer != execution.offerer
-                || next.conduit_key != execution.conduit_key {
-                revert_with0(error_selector<InvalidFulfillmentComponentData>())
+                first_order = component.order_index
+                first_at = at
+            } else {
+                // Both indexes were checked when the first item was used.
+                let first = unsafe {
+                    ref *elem(book.items.ptr(), first_at)
+                }
+                let first_source = unsafe {
+                    ref *elem(book.orders.ptr(), first_order)
+                }
+                let differs = if consideration {
+                    item.receiver != first.receiver
+                } else {
+                    order.offerer != first_source.offerer
+                        || order.conduit_key != first_source.conduit_key
+                }
+                if differs
+                    || item.item_type != first.item_type
+                    || item.token != first.token
+                    || item.identifier != first.identifier {
+                    revert_with0(error_selector<InvalidFulfillmentComponentData>())
+                }
             }
         }
         k += 1
     }
-    execution.amount = amount
+    execution = if found {
+        // Both indexes were checked when the first item was used.
+        let first = unsafe {
+            ref *elem(book.items.ptr(), first_at)
+        }
+        let first_source = unsafe {
+            ref *elem(book.orders.ptr(), first_order)
+        }
+        ExecutionState {
+            item_type: first.item_type,
+            token: first.token,
+            identifier: first.identifier,
+            amount,
+            recipient: if consideration {
+                first.receiver
+            } else {
+                recipient
+            },
+            offerer: if consideration {
+                offerer
+            } else {
+                first_source.offerer
+            },
+            conduit_key: if consideration {
+                conduit_key
+            } else {
+                first_source.conduit_key
+            },
+        }
+    } else {
+        empty_execution()
+    }
     raise_aggregation_errors(error_buffer)
-    (execution, first_used)
+    first_used
 }
 
 /// `_applyFulfillment`: match aggregated offer items against aggregated
@@ -144,9 +174,10 @@ pub fn aggregate_items(
 /// component.
 pub fn apply_fulfillment(
     _ book: mut Book,
+    execution: mut ExecutionState,
     groups: Groups,
     fulfillment_index: u256,
-) -> ExecutionState {
+) {
     let offer_group = groups.group(2 * fulfillment_index)
     let consideration_group = groups.group(2 * fulfillment_index + 1)
     if offer_group.len() == 0 || consideration_group.len() == 0 {
@@ -154,36 +185,44 @@ pub fn apply_fulfillment(
             error_selector<OfferAndConsiderationRequiredOnFulfillment>(),
         )
     }
-    let (consideration, consideration_first) = aggregate_items(
+    let consideration_first = aggregate_items(
         mut book,
+        execution: mut execution,
         group: consideration_group,
         consideration: true,
         offerer: Address::zero(),
         conduit_key: 0,
         recipient: Address::zero(),
     )
-    if consideration.amount == 0 {
-        return consideration
+    let consideration_amount = execution.amount
+    if consideration_amount == 0 {
+        return
     }
-    let (offered, offer_first) = aggregate_items(
+    // The offer aggregation replaces the consideration execution; keep the
+    // fields compared below.
+    let consideration_type = execution.item_type
+    let consideration_token = execution.token
+    let consideration_identifier = execution.identifier
+    let consideration_recipient = execution.recipient
+    let offer_first = aggregate_items(
         mut book,
+        execution: mut execution,
         group: offer_group,
         consideration: false,
         offerer: Address::zero(),
         conduit_key: 0,
-        recipient: consideration.recipient,
+        recipient: consideration_recipient,
     )
-    var execution = offered
-    if execution.item_type != consideration.item_type
-        || execution.token != consideration.token
-        || execution.identifier != consideration.identifier {
+    if execution.item_type != consideration_type
+        || execution.token != consideration_token
+        || execution.identifier != consideration_identifier {
         revert_with1(
             error_selector<MismatchedFulfillmentOfferAndConsiderationComponents>(),
             fulfillment_index,
         )
     }
     // The unmatched rest stays on the first used item of the larger side.
-    let consideration_left = consideration.amount > execution.amount
+    let consideration_left = consideration_amount > execution.amount
     let target = if consideration_left {
         consideration_group.component(consideration_first)
     } else {
@@ -191,7 +230,7 @@ pub fn apply_fulfillment(
     }
     // Aggregation checked both indexes of the first used component.
     let order = unsafe {
-        ref *ptr::offset(book.orders.ptr(), target.order_index)
+        ref *elem(book.orders.ptr(), target.order_index)
     }
     let start = if consideration_left {
         order.consideration_start
@@ -199,26 +238,26 @@ pub fn apply_fulfillment(
         order.offer_start
     }
     let item = unsafe {
-        mut *ptr::offset(book.items.ptr(), start + target.item_index)
+        mut *elem(book.items.ptr(), start + target.item_index)
     }
     if consideration_left {
-        item.amount = consideration.amount - execution.amount
+        item.amount = consideration_amount - execution.amount
     } else {
-        item.amount = execution.amount - consideration.amount
-        execution.amount = consideration.amount
+        item.amount = execution.amount - consideration_amount
+        execution.amount = consideration_amount
     }
-    execution
 }
 
 /// `_aggregateAvailable`
 pub fn aggregate_available(
     _ book: mut Book,
+    execution: mut ExecutionState,
     side: u8,
     groups: Groups,
     index: u256,
     fulfiller_conduit_key: u256,
     recipient: Address,
-) -> ExecutionState
+)
 uses (ctx: Ctx)
 {
     let group = groups.group(index)
@@ -228,13 +267,13 @@ uses (ctx: Ctx)
             side as u256,
         )
     }
-    let (execution, _) = aggregate_items(
+    let _ = aggregate_items(
         mut book,
+        execution: mut execution,
         group,
         consideration: side != OFFER,
         offerer: ctx.caller(),
         conduit_key: fulfiller_conduit_key,
         recipient,
     )
-    execution
 }

@@ -3,7 +3,8 @@
 // either directly or batched into one `Conduit.execute` call through the
 // accumulator.
 #![arithmetic(unchecked)]
-use core::ptr::{MemBuffer, MemSpan}
+use core::abi::store_word
+use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
 use super::raw_abi::{error_selector, revert_custom5, revert_with0, revert_with1, revert_with2}
@@ -19,7 +20,7 @@ use super::errors::{
 }
 use super::hashing::{Env, derive_conduit}
 use super::lowlevel::revert_with_reason_if_one_is_returned
-use super::buffer::{Buffer, return_word}
+use super::buffer::Buffer
 use super::types::{ERC20, NATIVE}
 
 /// transferFrom(address,address,uint256), shared by ERC20 and ERC721.
@@ -225,13 +226,26 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     disarmed
 }
 
+/// `derive_conduit`, kept out of line: a function without calls keeps its
+/// CREATE2 preimage in the shared scratch area, while inlined the preimage
+/// took three words of the caller's frame.
+#[inline(never)]
+fn conduit_address(_ env: Env, conduit_key: u256) -> Address {
+    derive_conduit(env, conduit_key)
+}
+
 /// `_callConduitUsingOffsets`: call the conduit and require the `execute`
 /// magic value.
 pub fn call_conduit(_ env: Env, conduit_key: u256, args: MemSpan)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let conduit = derive_conduit(env, conduit_key)
+    let conduit = conduit_address(env, conduit_key)
     var ret = MemBuffer::with_capacity(32)
+    // Short returndata overwrites only a prefix of this zero word, as
+    // `return_word` with a zero initial word reads it.
+    unsafe {
+        store_word(ptr: ret.ptr(), value: 0)
+    }
     let outcome = call.raw_call(
             addr: conduit,
             gas: ctx.gas(),
@@ -243,7 +257,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_with_reason_if_one_is_returned()
         revert_with1(error_selector<InvalidCallToConduit>(), conduit.word())
     }
-    if return_word(ret.span(), initial: 0) >> 224 != CONDUIT_EXECUTE_SELECTOR {
+    // The call wrote at most the 32 bytes of `ret`'s capacity.
+    if unsafe { *ptr::cast<u8, u256>(ret.ptr()) } >> 224 != CONDUIT_EXECUTE_SELECTOR {
         revert_with2(
             error_selector<InvalidConduit>(),
             conduit_key,
@@ -366,7 +381,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         }
         return
     }
-    if size < 32 || return_word(ret.span(), initial: 0) != 1 {
+    // At least 32 returned bytes fill `ret`'s capacity.
+    if size < 32 || unsafe { *ptr::cast<u8, u256>(ret.ptr()) } != 1 {
         revert_custom5(
             error_selector<BadReturnValueFromERC20OnTransfer>(),
             words: 4,
