@@ -76,11 +76,12 @@ pub fn compute_bulk_order_proof(_ signature: CalldataView, leaf: u256) -> (u256,
     var i: u256 = 0
     while i < height {
         let element = signature.word(35 + signature_length + i * 32)
-        node = if (key >> i) & 1 == 1 {
-            keccak_words([element, node])
+        let (left, right) = if (key >> i) & 1 == 1 {
+            (element, node)
         } else {
-            keccak_words([node, element])
+            (node, element)
         }
+        node = keccak_words([left, right])
         i += 1
     }
     (keccak_words([bulk_order_typehash(height), node]), signature_length)
