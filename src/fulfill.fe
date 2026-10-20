@@ -207,7 +207,15 @@ fn transfer_each(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var buf = transfer_buffer(order.offer_len + order.consideration_len)
+    // Without a conduit only direct transfers use the buffer, which one
+    // conduit transfer's room covers.
+    var buf = transfer_buffer(
+        if (order.conduit_key | fulfiller_conduit_key) != 0 {
+            order.offer_len + order.consideration_len
+        } else {
+            1
+        },
+    )
     var acc = new_accumulator()
     var i: u256 = 0
     while i < order.offer_len {
