@@ -2,6 +2,7 @@
 // An initialized, exclusively owned byte buffer for exact protocol encodings.
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
 use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_error}
+use super::abi_view::CalldataView
 
 pub struct Buffer { data: MemBuffer }
 
@@ -39,6 +40,16 @@ impl Buffer {
             revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
         }
         self.data.copy_from(dest_offset: offset as usize, source)
+    }
+
+    pub fn copy_calldata(mut self, offset: u256, source: CalldataView, len: u256) {
+        if offset > self.len() || len > self.len() - offset {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+        // The checked range lies in this exclusively held owner's allocation.
+        unsafe {
+            source.copy_to(ptr::offset_bytes(self.data.ptr(), offset), len)
+        }
     }
 
     fn check_word(self, _ offset: u256) {

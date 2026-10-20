@@ -14,7 +14,7 @@
 //
 // All items of all orders live in one owned pool (`Book.items`); orders
 // describe their offer and consideration as index ranges. Signatures and
-// extra data are copied from calldata into ABI Bytes as Seaport copies them.
+// extra data stay in calldata.
 // Resolver proofs and fulfillment components also have non-Copy owners.
 // Separate order and item fields allow scoped views of descriptors during item
 // mutation; replacing an item pool requires exclusive access to its Book.
@@ -23,7 +23,6 @@
 // semantics (see `abi_view`). Addresses are cleaned and enum words kept raw,
 // as Solidity's typed memory reads see them: consumers check enums where
 // Seaport reads them. The order hash reads the raw words from calldata.
-use std::abi::Bytes
 use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION, revert_error}
 use core::ptr::MemArray
 use super::abi_view::CalldataView
@@ -60,8 +59,9 @@ pub struct OrderState {
     pub total_original: u256,
     pub numerator: u256,
     pub denominator: u256,
-    pub signature: Bytes,
-    pub extra_data: Bytes,
+    /// Calldata `bytes`.
+    pub signature: CalldataView,
+    pub extra_data: CalldataView,
     /// Calldata position of the order's `OrderParameters`, whose raw words
     /// the order hash covers.
     pub params: CalldataView,
@@ -206,11 +206,11 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool, single: bool)
             } else {
                 1
             },
-            signature: order.child(if advanced { 96 } else { 32 }).bytes(),
+            signature: order.child(if advanced { 96 } else { 32 }),
             extra_data: if advanced {
-                order.child(128).bytes()
+                order.child(128)
             } else {
-                Bytes::empty()
+                CalldataView::empty()
             },
             params: p,
         }

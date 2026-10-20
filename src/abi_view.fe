@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Seaport's calldata decoding: the Solidity dispatcher's argument checks and
 // seaport-core's ConsiderationDecoder.
-use core::abi::{ByteInput, checked_frame_end, store_word}
-use core::ptr
-use std::abi::{Bytes, Sol}
+use core::abi::{ByteInput, checked_frame_end}
+use std::abi::Sol
 use std::evm::{Address, CallData, revert_empty}
 
 const SIGN_BIT: u256 = 0x8000000000000000000000000000000000000000000000000000000000000000
@@ -11,11 +10,24 @@ const SIGN_BIT: u256 = 0x8000000000000000000000000000000000000000000000000000000
 /// A position in the current calldata. Solidity validates only the argument
 /// heads; Seaport resolves nested offsets and lengths through their low 32
 /// bits, and calldata past the end reads as zeros.
+///
+/// A `bytes` value is read in place at its length word. Seaport copies it to
+/// memory first (`_decodeBytes`), which leaves the masked length and the
+/// padded payload, so the reads agree.
 pub struct CalldataView { pos: u256 }
 
 impl Copy for CalldataView {}
 
 impl CalldataView {
+    pub fn at(_ pos: u256) -> Self {
+        Self { pos }
+    }
+
+    /// Empty `bytes`: a position past any calldata, where every word is zero.
+    pub fn empty() -> Self {
+        Self { pos: 0x10000000000000000 }
+    }
+
     /// The arguments, once the calldata holds their `size`-byte head.
     pub fn arguments(_ size: u256) -> Self {
         checked_frame_end<Sol>(4, size, CallData::new().len())
@@ -77,6 +89,11 @@ impl CalldataView {
         Self { pos: heads + relative }
     }
 
+    #[arithmetic(unchecked)]
+    pub fn offset(self, _ bytes: u256) -> Self {
+        Self { pos: self.pos + bytes }
+    }
+
     /// Copy `len` bytes from `self` to `dest`, which must have room for them.
     pub unsafe fn copy_to(self, _ dest: *u8, len: u256) {
         CallData::new().copy_to_memory_unchecked(dest, src_offset: self.pos, len)
@@ -114,21 +131,5 @@ impl CalldataView {
     #[arithmetic(unchecked)]
     pub fn dynamic_element(self, _ index: u256) -> Self {
         self.element(index: 0, stride: 32).child(index * 32)
-    }
-
-    /// `_decodeBytes`: a copy of the padded extent of the raw length word,
-    /// including any nonzero padding, holding the masked length.
-    #[arithmetic(unchecked)]
-    pub fn bytes(self) -> Bytes {
-        let size = 32 + ((self.word(0) + 31) & 0xffffffe0)
-        let len = self.len()
-        let data = ptr::alloc_bytes(size)
-        // `size` bytes were allocated above; calldata past the end reads as
-        // zeros.
-        unsafe {
-            CallData::new().copy_to_memory_unchecked(dest: data, src_offset: self.pos, len: size)
-            store_word(ptr: data, value: len)
-            Bytes::from_abi_tail(data, len: len as usize, size)
-        }
     }
 }

@@ -96,8 +96,8 @@ pub contract ModelHarness {
             let descriptor = ref book.orders[0]
             book.items[descriptor.offer_start as usize].amount = 11
             assert(descriptor.offer_len == 1)
-            assert(descriptor.signature.byte_at(0) == 4)
-            assert(descriptor.extra_data.byte_at(0) == 7)
+            assert(descriptor.signature.word(32) >> 248 == 4)
+            assert(descriptor.extra_data.word(32) >> 248 == 7)
             assert(book.items[0].amount == 11)
             assert(book.items[0].start_amount == 7)
             true
@@ -112,8 +112,8 @@ pub contract ModelHarness {
             assert(book.orders[1].offer_start == 1)
             let second = ref book.orders[1]
             book.items[second.offer_start as usize].identifier = 99
-            assert(second.signature.byte_at(0) == 5)
-            assert(second.extra_data.byte_at(0) == 13)
+            assert(second.signature.word(32) >> 248 == 5)
+            assert(second.extra_data.word(32) >> 248 == 13)
             assert(book.items[0].identifier == 4)
             assert(book.items[1].identifier == 99)
             true
@@ -150,8 +150,8 @@ pub contract ModelHarness {
             assert(book.used == 2)
             assert(book.orders[0].offer_start == 0)
             assert(book.orders[1].offer_start == 1)
-            assert(book.orders[0].signature.byte_at(0) == 4)
-            assert(book.orders[1].signature.byte_at(0) == 5)
+            assert(book.orders[0].signature.word(32) >> 248 == 4)
+            assert(book.orders[1].signature.word(32) >> 248 == 5)
             assert(book.orders[0].extra_data.len() == 0)
             assert(book.orders[1].extra_data.len() == 0)
             assert(book.orders[0].numerator == 1)
