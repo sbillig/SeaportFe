@@ -45,16 +45,14 @@ and write order status slots directly).
 
 ## Compiler
 
-This branch targets Fe master
-[`735827147e606a2d164846759de853faf1053421`](https://github.com/argotorg/fe/commit/735827147e606a2d164846759de853faf1053421),
-which includes mutable value semantics (MVS) and
-[argotorg/fe#1831](https://github.com/argotorg/fe/pull/1831). Before that fix,
-master panicked in runtime lowering on recv arms that return a constant
-`Bytes4` or `Bytes32`, so it built none of the contracts. Its committed Cargo
-dependencies pin Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`.
-`scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
---release -p fe`, without dependency substitutions or compiler patches.
-The compiler and reference revisions are recorded in `reference_manifest.json`.
+This branch builds with the size-optimized Fe branch
+[`sbillig/fe` `opt/seaport-size-20261019`](https://github.com/sbillig/fe/tree/opt/seaport-size-20261019)
+at `d37393273`, which is Fe master `822e80878` plus the compiler changes listed
+under [Size and gas](#size-and-gas). Its Cargo dependencies pin Sonatina from
+[`sbillig/sonatina` `opt/seaport-size-20261019`](https://github.com/sbillig/sonatina/tree/opt/seaport-size-20261019)
+at `b85ad012`. `scripts/bootstrap.py` builds that exact compiler with
+`cargo build --locked --release -p fe` and the contracts at `-Os`, the level
+recorded in `reference_manifest.json`.
 
 The source baseline is SeaportFe `6ffc19564ecc3121bfbf0cc7752b9c7a81cb7eea`,
 which passes `fe check` and builds all eight contracts on Fe master
@@ -85,6 +83,68 @@ probe uses an initialized word array. No application raw storage operations or
 copyable raw owner handles remain.
 `COMPILER_FIXES.md` and `compiler/seaport-integration.patch` describe the
 historical toolchain; neither is used to build this branch.
+
+<!-- size-gas:begin -->
+## Size and gas
+
+Runtime bytes and receipt gas, with the compiler above at `-Os`. Before:
+the same contracts migrated to Fe master `822e80878` at `-O1`. solc: the
+pinned Seaport's optimized artifacts. Receipt gas comes from
+`tests/rooted-storage.cjs` in transient guard mode, on identical calls.
+
+| Contract | Before | Now | solc |
+| --- | ---: | ---: | ---: |
+| Seaport | 54,156 | 24,002 | 23,963 |
+| Consideration | 54,162 | 24,008 | 23,969 |
+| Conduit | 3,970 | 2,681 | 2,850 |
+| ConduitController | 7,589 | 5,347 | 7,298 |
+| TransferHelper | 4,796 | 3,646 | 3,712 |
+| SeaportRouter | 11,151 | 5,055 | 6,759 |
+| PausableZone | 7,411 | 5,630 | 6,162 |
+| PausableZoneController | 14,099 | 11,845 | 12,730 |
+| Total | 157,334 | 82,214 | 87,443 |
+
+| Call | Before | Now | solc |
+| --- | ---: | ---: | ---: |
+| Advanced ERC721/native self fulfillment | 128,191 | 116,237 | 113,085 |
+| Validate one order | 57,334 | 41,701 | 40,064 |
+| Cancel one order | 40,521 | 33,647 | 33,272 |
+| Increment counter | 29,255 | 27,967 | 27,976 |
+| getOrderStatus (cold) | 25,160 | 23,818 | 23,669 |
+| name (cold) | 22,527 | 21,642 | 21,240 |
+| getCounter (cold) | 24,076 | 24,055 | 24,109 |
+| Create conduit | 908,150 | 649,195 | 676,738 |
+| Create zone | 1,554,667 | 1,196,831 | 1,297,167 |
+| Open a channel | 120,746 | 120,258 | 120,891 |
+| Transfer conduit ownership | 49,879 | 49,818 | 50,233 |
+
+Every contract except Seaport/Consideration is now at or below the solc size,
+and Seaport/Consideration fit under the 24,576-byte EIP-170 limit.
+
+Compiler changes (Fe and Sonatina branches above):
+- Messages and custom errors encode into one buffer. `revert_error` stays out
+  of line and writes static errors to scratch memory. Static return values of
+  up to 0x80 bytes go to scratch memory too, the way Solidity returns small
+  values.
+- The free pointer is set once at the section entry, so heap allocations need
+  no per-site clamp. Word mapping keys and `keccak_words` preimages hash from
+  frame scratch without allocating. Small local buffers that are used once per
+  call and never escape live in the frame instead of the heap. The size
+  pipeline also inlines more.
+
+Contract changes:
+- The fulfillment, match, validate, cancel and getOrderHash arms read their
+  arguments straight from calldata through `CalldataView` (`src/abi_view.fe`),
+  with seaport-core's checks. Order hashes come from raw calldata words.
+- Outputs, events and errors are encoded directly into their final buffers
+  (`src/raw_abi.fe`).
+- SeaportRouter reads its parameters from calldata with solc's checks;
+  `tests/router-diff.cjs` compares it with the solc router.
+- Settlement, aggregation and transfers are merged into shared paths, and
+  arithmetic is unchecked wherever seaport-core's is.
+
+The behavior differences for malformed input are listed under Limitations.
+<!-- size-gas:end -->
 
 ## Tests
 
@@ -194,6 +254,15 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   seaport-core copies the raw words. And Seaport copies those in-place values
   before use, so absurd 32-bit lengths that exhaust its gas while copying
   only fail here if the value is read.
+- SeaportRouter validates `fulfillAvailableAdvancedOrders` parameters from
+  calldata with solc's checks, in solc's order, and decodes Seaport's
+  `(bool[], Execution[])` returndata strictly. One difference remains: for a
+  bytes or array length below 2^64 that exceeds what solc's free-memory
+  pointer can still address, solc reverts with `Panic(0x41)` and Fe reverts
+  without data. `tests/router-diff.cjs` finds no other difference.
+- PausableZone's `authorizeOrder` and `validateOrder` check only the
+  `ZoneParameters` offset and 320-byte head, as Solidity does for a calldata
+  struct it never reads, instead of decoding the whole struct.
 - A Fe `Address` holds no bits above the low 160. Raw words become addresses
   either after the check Solidity performs (basic orders, conduit transfers)
   or by truncation, like Solidity's masked storage reads. The conduit batch
@@ -202,9 +271,12 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   high bits in an extra offer item's token or in a recipient the original
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
-- Code size: Fe master 735827147 / committed Sonatina 6bef907f at `-O1`
-  produces a 57,339-byte Seaport runtime and a 57,345-byte Consideration
-  runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
+- Code size: with the compiler above at `-Os`, the Seaport and Consideration
+  runtimes are 24,002 and 24,008 bytes, under the 24 KB EIP-170 limit
+  (ISSUES.md #13); see [Size and gas](#size-and-gas). Earlier builds:
+  Fe master 735827147 / committed Sonatina 6bef907f at `-O1`
+  produced a 57,339-byte Seaport runtime and a 57,345-byte Consideration
+  runtime, above the limit. Both upstream
   harnesses lift the size limit. Periphery runtimes range from 4,200 to
   14,554 bytes. Fe master 33ee9be28 / Sonatina cdb34cbb produced
   58,266/58,272-byte Seaport/Consideration runtimes, and periphery runtimes of
