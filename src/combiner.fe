@@ -311,17 +311,17 @@ fn prepare_contract_available_order(
 ) -> bool
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let generated = generate_order(book, order_index: index, revert_on_invalid)
-    order_hashes[(index) as usize] = generated.order_hash
-    if generated.order_hash == 0 {
+    let order_hash = generate_order(book, order_index: index, revert_on_invalid)
+    order_hashes[(index) as usize] = order_hash
+    if order_hash == 0 {
         unsafe {
             (*elem(book.orders.ptr(), index)).numerator = 0
         }
         false
     } else {
-        install_generated_order(mut book, order_index: index, generated)
+        install_generated_order(mut book, order_index: index)
         emit_order_fulfilled(
-            order_hash: generated.order_hash,
+            order_hash,
             book,
             order: unsafe {
                 ref *elem(book.orders.ptr(), index)

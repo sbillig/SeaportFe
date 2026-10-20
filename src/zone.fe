@@ -421,18 +421,6 @@ fn returndata_word(_ offset: u256) -> u256 uses (ops: mut RawOps) {
     }
 }
 
-/// The layout of valid `generateOrder` returndata.
-pub struct GeneratedOrder {
-    /// The contract order hash, or zero if the order was skipped.
-    pub order_hash: u256,
-    pub offer_offset: u256,
-    pub offer_length: u256,
-    pub consideration_offset: u256,
-    pub consideration_length: u256,
-}
-
-impl Copy for GeneratedOrder {}
-
 /// `_getGeneratedOrder`, first half: ask the contract offerer for the order
 /// and validate the returned items against the requested ones. The items
 /// are installed by `install_generated_order`, which must follow before any
@@ -440,7 +428,10 @@ impl Copy for GeneratedOrder {}
 ///
 /// Validation reads the current pool; installation then replaces the owned
 /// item allocation and updates this order's ranges under exclusive Book access.
-pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) -> GeneratedOrder
+/// Returns the contract order hash, or zero if the order was skipped. The
+/// validated layout stays in the returndata instead of a returned record,
+/// which would take five words of every caller's frame.
+pub fn generate_order(_ book: Book, order_index: u256, revert_on_invalid: bool) -> u256
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     let order = unsafe {
@@ -470,51 +461,32 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
             revert_with_reason_if_one_is_returned()
             revert_with1(error_selector<InvalidContractOrder>(), order_hash)
         }
-        return GeneratedOrder {
-            order_hash: 0,
-            offer_offset: 0,
-            offer_length: 0,
-            consideration_offset: 0,
-            consideration_length: 0,
-        }
+        return 0
     }
-    let generated = validate_generate_order_returndata(book, order, order_hash)
-    if generated.order_hash == 0 {
+    if !valid_generate_order_returndata(book, order) {
         revert_with1(error_selector<InvalidContractOrder>(), order_hash)
     }
-    generated
+    order_hash
 }
 
 /// `_decodeGenerateOrderReturndata` checks: the returned
 /// `(SpentItem[], ReceivedItem[])` must be well formed and may not reduce
-/// the offer or increase the consideration. Returns a zero order hash for
-/// invalid returndata. Kept out of line so its frame does not join
-/// `generate_order`'s.
+/// the offer or increase the consideration. Kept out of line so its frame
+/// does not join `generate_order`'s.
 #[inline(never)]
-fn validate_generate_order_returndata(
-    _ book: Book,
-    order: OrderState,
-    order_hash: u256,
-) -> GeneratedOrder
+fn valid_generate_order_returndata(_ book: Book, order: OrderState) -> bool
 uses (ops: mut RawOps)
 {
-    let invalid = GeneratedOrder {
-        order_hash: 0,
-        offer_offset: 0,
-        offer_length: 0,
-        consideration_offset: 0,
-        consideration_length: 0,
-    }
     let size = ops.returndatasize()
     if size < 0x60 {
-        return invalid
+        return false
     }
     // seaport-core adds these without overflow checks; out of range offsets
     // then fault in RETURNDATACOPY exactly as there.
     let offer_offset = returndata_word(0)
     let consideration_offset = returndata_word(32)
     if offer_offset.wrapping_add(32) > size || consideration_offset.wrapping_add(32) > size {
-        return invalid
+        return false
     }
     let offer_length = returndata_word(offer_offset)
     let consideration_length = returndata_word(consideration_offset)
@@ -525,7 +497,7 @@ uses (ops: mut RawOps)
     if (offer_length | consideration_length) > MAX_RETURNED_ARRAY_LENGTH
         || size < offer_end
         || size < consideration_end {
-        return invalid
+        return false
     }
 
     var bad = order.offer_len > offer_length
@@ -568,34 +540,33 @@ uses (ops: mut RawOps)
             || recipient_mismatch
         i += 1
     }
-    if bad { return invalid }
-    let kept = if consideration_length < order.consideration_len {
-        consideration_length
-    } else {
-        order.consideration_len
-    }
-    GeneratedOrder {
-        order_hash,
-        offer_offset,
-        offer_length,
-        consideration_offset,
-        consideration_length: kept,
-    }
+    !bad
 }
 
-/// `_getGeneratedOrder`, second half: copy the validated items from the
-/// returndata into a new pool and point the order at them.
+/// `_getGeneratedOrder`, second half: copy the items of the returndata that
+/// `generate_order` validated into a new pool and point the order at them.
+/// Consideration items beyond the original ones are dropped.
 ///
 /// Returned tokens and recipients become the addresses in their low 160 bits.
 /// Validation compares the full words of items with an original counterpart,
 /// so this differs from seaport-core, which keeps the words unchanged, only for
 /// extra offer items and for recipients the original order leaves open.
-pub fn install_generated_order(_ book: mut Book, order_index: u256, generated: GeneratedOrder)
+pub fn install_generated_order(_ book: mut Book, order_index: u256)
 uses (ops: mut RawOps)
 {
     let start = book.used
-    let offer_length = generated.offer_length
-    let consideration_length = generated.consideration_length
+    let offer_offset = returndata_word(0)
+    let consideration_offset = returndata_word(32)
+    let offer_length = returndata_word(offer_offset)
+    let returned_consideration = returndata_word(consideration_offset)
+    let original_consideration = unsafe {
+        (*elem(book.orders.ptr(), order_index)).consideration_len
+    }
+    let consideration_length = if returned_consideration < original_consideration {
+        returned_consideration
+    } else {
+        original_consideration
+    }
     let used = start + offer_length + consideration_length
     var items = MemArray<Item>::new_zeroed(used as usize)
     var i: u256 = 0
@@ -609,9 +580,9 @@ uses (ops: mut RawOps)
     while i < offer_length + consideration_length {
         let consideration = i >= offer_length
         let base = if consideration {
-            generated.consideration_offset + 32 + (i - offer_length) * 160
+            consideration_offset + 32 + (i - offer_length) * 160
         } else {
-            generated.offer_offset + 32 + i * 128
+            offer_offset + 32 + i * 128
         }
         let amount = returndata_word(base + 96)
         let recipient = if consideration {

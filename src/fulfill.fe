@@ -396,12 +396,12 @@ fn fulfill_single_contract_order(
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
     let _ = prepare_single_order(env, mut book, resolvers)
-    let generated = generate_order(book, order_index: 0, revert_on_invalid: true)
-    install_generated_order(mut book, order_index: 0, generated)
+    let order_hash = generate_order(book, order_index: 0, revert_on_invalid: true)
+    install_generated_order(mut book, order_index: 0)
     finish_single_order(
         env,
         mut book,
-        order_hash: generated.order_hash,
+        order_hash,
         fulfiller_conduit_key,
         recipient,
     )
