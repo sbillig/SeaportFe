@@ -4,7 +4,6 @@
 use core::ptr::MemBuffer
 use core::result::Result
 use core::option::Option
-use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, keccak_words, revert_error}
 use std::evm::crypto::ecrecover_raw
 use super::abi_view::CalldataView

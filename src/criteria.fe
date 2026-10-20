@@ -12,7 +12,7 @@ use super::errors::{
     UnresolvedConsiderationCriteria,
     UnresolvedOfferCriteria,
 }
-use super::model::{Book, Item, OrderState, Resolver, Resolvers, checked_enum}
+use super::model::{Book, Item, Resolver, Resolvers, checked_enum}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`

@@ -2,7 +2,6 @@
 // FulfillmentApplier: aggregate fulfillment components into executions.
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
 use std::evm::keccak_words
-use core::ptr::MemArray
 use super::errors::{
     InvalidFulfillmentComponentData,
     MismatchedFulfillmentOfferAndConsiderationComponents,
@@ -10,7 +9,7 @@ use super::errors::{
     MissingItemAmount,
     OfferAndConsiderationRequiredOnFulfillment,
 }
-use super::model::{Book, Group, Groups, Item, OrderState}
+use super::model::{Book, Group, Groups}
 use super::types::OFFER
 
 /// An `Execution`: a `ReceivedItem` plus the source and conduit key.
