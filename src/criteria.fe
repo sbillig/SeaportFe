@@ -102,6 +102,7 @@ fn ensure_resolved(
     }
 }
 
+#[arithmetic(unchecked)]
 fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
     if checked_enum(item.item_type, variants: 6) <= 3 {
         revert_with0(error_selector<CriteriaNotEnabledForItem>())
