@@ -27,8 +27,12 @@ impl Buffer {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset))
         }
     }
+    // One shared copy of the checked store keeps each call site small.
+    #[inline(never)]
     pub fn write(mut self, offset: u256, value: u256) {
-        self.check_word(offset)
+        if offset > self.len() || self.len() - offset < 32 {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
         // The complete word lies in this exclusively held owner's allocation.
         unsafe {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
