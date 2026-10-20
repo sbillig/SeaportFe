@@ -20,9 +20,10 @@ use super::signature::verify_signature
 use super::status::{
     OrderStore,
     assert_non_reentrant,
-    read_status,
+    raw_status,
     set_cancelled,
     set_validated,
+    unpack_status,
     verify_order_status,
 }
 use super::types::CONTRACT
@@ -100,7 +101,8 @@ uses (
         }
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(order)
-            let status = read_status(order_hash)
+            let raw = raw_status(order_hash)
+            let status = unpack_status(raw)
             verify_order_status(
                 order_hash,
                 status,
@@ -119,7 +121,9 @@ uses (
                     order_hash,
                     signature: order.signature,
                 )
-                set_validated(order_hash)
+                // Nothing since the read can change the status: signature
+                // checks only make static calls.
+                set_validated(order_hash, raw)
                 emit_order_validated(order, order_hash)
             }
         }

@@ -112,8 +112,9 @@ pub fn verify_order_status(
     true
 }
 
-pub fn set_validated(_ order_hash: u256) uses (store: mut OrderStore) {
-    store.statuses[order_hash] |= 1
+/// Mark the order whose status word is still `raw` as validated.
+pub fn set_validated(_ order_hash: u256, raw: u256) uses (store: mut OrderStore) {
+    store.statuses[order_hash] = raw | 1
 }
 
 /// isValidated = false, isCancelled = true; the fill fraction is kept.
