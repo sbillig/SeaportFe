@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // CriteriaResolution: resolve criteria-based items to concrete identifiers
 // with Merkle proofs.
-use std::evm::{keccak_words, revert_error}
+use std::evm::keccak_words
 use super::abi_view::CalldataView
+use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
 use super::errors::{
     ConsiderationCriteriaResolverOutOfRange,
     CriteriaNotEnabledForItem,
@@ -23,17 +24,16 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     while i < resolvers.len() {
         let resolver = resolvers.get(i)
         if resolver.order_index() >= total_orders {
-            revert_error(
-                OrderCriteriaResolverOutOfRange {
-                    side: checked_enum(resolver.side(), variants: 2).downcast_truncate(),
-                },
+            revert_with1(
+                error_selector<OrderCriteriaResolverOutOfRange>(),
+                checked_enum(resolver.side(), variants: 2),
             )
         }
         let order = ref book.orders[(resolver.order_index()) as usize]
         if order.numerator != 0 {
             if checked_enum(resolver.side(), variants: 2) != OFFER as u256 {
                 if resolver.index() >= order.consideration_len {
-                    revert_error(ConsiderationCriteriaResolverOutOfRange {})
+                    revert_with0(error_selector<ConsiderationCriteriaResolverOutOfRange>())
                 }
                 update_criteria_item(
                     mut book.items[(order.consideration_start + resolver.index()) as usize],
@@ -41,7 +41,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                 )
             } else {
                 if resolver.index() >= order.offer_len {
-                    revert_error(OfferCriteriaResolverOutOfRange {})
+                    revert_with0(error_selector<OfferCriteriaResolverOutOfRange>())
                 }
                 update_criteria_item(
                     mut book.items[(order.offer_start + resolver.index()) as usize],
@@ -61,9 +61,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                     ref book.items[(order.consideration_start + j) as usize],
                     order.order_type,
                 ) {
-                    revert_error(
-                        UnresolvedConsiderationCriteria { orderIndex: i, considerationIndex: j },
-                    )
+                    revert_with2(error_selector<UnresolvedConsiderationCriteria>(), i, j)
                 }
                 j += 1
             }
@@ -73,7 +71,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                     ref book.items[(order.offer_start + j) as usize],
                     order.order_type,
                 ) {
-                    revert_error(UnresolvedOfferCriteria { orderIndex: i, offerIndex: j })
+                    revert_with2(error_selector<UnresolvedOfferCriteria>(), i, j)
                 }
                 j += 1
             }
@@ -90,7 +88,7 @@ fn requires_resolution(_ item: Item, _ order_type: u256) -> bool {
 
 fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
     if checked_enum(item.item_type, variants: 6) <= 3 {
-        revert_error(CriteriaNotEnabledForItem {})
+        revert_with0(error_selector<CriteriaNotEnabledForItem>())
     }
     if item.identifier != 0 {
         verify_proof(
@@ -99,7 +97,7 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
             proof: resolver.proof(),
         )
     } else if resolver.proof().word(0) != 0 {
-        revert_error(InvalidProof {})
+        revert_with0(error_selector<InvalidProof>())
     }
     item.item_type = item.item_type - 2
     item.identifier = resolver.identifier()
@@ -125,6 +123,6 @@ fn verify_proof(leaf: u256, root: u256, proof: CalldataView) {
         i += 1
     }
     if computed != root {
-        revert_error(InvalidProof {})
+        revert_with0(error_selector<InvalidProof>())
     }
 }

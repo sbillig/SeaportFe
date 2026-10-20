@@ -6,8 +6,9 @@ use core::abi::store_word
 use core::ptr::{self, MemBuffer, MemSpan}
 use core::result::Result
 use core::option::Option
-use std::evm::{Address, Call, Ctx, RawOps, keccak_words, revert_error}
+use std::evm::{Address, Call, Ctx, RawOps, keccak_words}
 use std::evm::crypto::ecrecover_raw
+use super::error_data::{error_selector, revert_with0, revert_with1}
 use super::abi_view::CalldataView
 use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
 use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
@@ -143,19 +144,19 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
             .success()
         if success && return_word(ret.span(), initial: recovered) != EIP1271_SELECTOR_WORD {
             if ctx.extcodesize(signer) != 0 {
-                revert_error(BadContractSignature {})
+                revert_with0(error_selector<BadContractSignature>())
             }
             if (65 as u256).wrapping_sub(signature_length) > 1 {
-                revert_error(InvalidSignature {})
+                revert_with0(error_selector<InvalidSignature>())
             }
             if signature_length == 65 && v != 27 && v != 28 {
-                revert_error(BadSignatureV { v: v.downcast_truncate() })
+                revert_with1(error_selector<BadSignatureV>(), v)
             }
-            revert_error(InvalidSigner {})
+            revert_with0(error_selector<InvalidSigner>())
         }
     }
     if !success {
         revert_with_reason_if_one_is_returned()
-        revert_error(BadContractSignature {})
+        revert_with0(error_selector<BadContractSignature>())
     }
 }

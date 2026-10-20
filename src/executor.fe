@@ -4,8 +4,8 @@
 // accumulator.
 #![arithmetic(unchecked)]
 use core::ptr::{MemBuffer, MemSpan}
-use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -79,13 +79,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if item.item_type == NATIVE as u256 {
         if (item.token.word() | item.identifier) != 0 {
-            revert_error(UnusedItemParameters {})
+            revert_with0(error_selector<UnusedItemParameters>())
         }
         transfer_native_tokens(to: item.recipient, amount: item.amount)
         return acc
     }
     if item.item_type == ERC20 as u256 && item.identifier != 0 {
-        revert_error(UnusedItemParameters {})
+        revert_with0(error_selector<UnusedItemParameters>())
     }
     // ERC20 and ERC721 keep their numbers as conduit item types; every other
     // item type is transferred as ERC1155.
@@ -109,7 +109,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 pub fn assert_non_zero_amount(_ amount: u256) {
     if amount == 0 {
-        revert_error(MissingItemAmount {})
+        revert_with0(error_selector<MissingItemAmount>())
     }
 }
 
@@ -232,11 +232,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_error(InvalidCallToConduit { conduit })
+        revert_with1(error_selector<InvalidCallToConduit>(), conduit.word())
     }
     if return_word(ret.span(), initial: 0) >> 224 != CONDUIT_EXECUTE_SELECTOR {
-        revert_error(
-            InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
+        revert_with2(
+            error_selector<InvalidConduit>(),
+            conduit_key,
+            conduit.word(),
         )
     }
 }
@@ -287,10 +289,10 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let erc20 = kind == CONDUIT_ERC20
     let erc1155 = kind == CONDUIT_ERC1155
     if kind == CONDUIT_ERC721 && amount != 1 {
-        revert_error(InvalidERC721TransferAmount { amount })
+        revert_with1(error_selector<InvalidERC721TransferAmount>(), amount)
     }
     if !erc20 && ctx.extcodesize(token) == 0 {
-        revert_error(NoContract { account: token })
+        revert_with1(error_selector<NoContract>(), token.word())
     }
     // transferFrom(from, to, amount or identifier), or
     // safeTransferFrom(from, to, identifier, amount, "").
@@ -340,7 +342,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let size = outcome.returndata_len()
     if size == 0 {
         if ctx.extcodesize(token) == 0 {
-            revert_error(NoContract { account: token })
+            revert_with1(error_selector<NoContract>(), token.word())
         }
         return
     }

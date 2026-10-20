@@ -22,8 +22,9 @@
 // semantics (see `abi_view`). Addresses are cleaned and enum words kept raw,
 // as Solidity's typed memory reads see them: consumers check enums where
 // Seaport reads them. The order hash reads the raw words from calldata.
-use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION, revert_error}
+use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION}
 use core::ptr::MemArray
+use super::error_data::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
 pub struct Item {
@@ -170,7 +171,7 @@ impl Groups {
 /// Solidity validates protocol enums when their words are read as enums.
 pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
     if value >= variants {
-        revert_error(Panic::from(PANIC_ENUM_CONVERSION))
+        revert_with1(error_selector<Panic>(), PANIC_ENUM_CONVERSION)
     }
     value
 }
