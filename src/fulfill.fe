@@ -247,55 +247,46 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-/// Write `count` items of `book` from `start` at `offset` as an ABI
-/// `SpentItem[]`, or with `received` as a `ReceivedItem[]`; returns its size.
-/// The words are those of the typed event fields: the item type truncated to
-/// `uint8`, the current amount and the receiver.
+/// Write the `count` items from `items` at `dst` as an ABI `SpentItem[]`,
+/// or with `received` as a `ReceivedItem[]`: the words of the typed event
+/// fields, the item type truncated to `uint8`, the current amount and the
+/// receiver. `dst` must have room for the `32 + count * stride` bytes.
 #[arithmetic(unchecked)]
-fn write_fulfilled_items(
-    _ dst: mut Buffer,
-    offset: u256,
-    book: Book,
-    start: u256,
-    count: u256,
-    received: bool,
-) -> u256 {
+unsafe fn write_fulfilled_items(_ dst: *u8, items: *Item, count: u256, received: bool) {
     let stride: u256 = if received { 160 } else { 128 }
-    let size = dst.check_array(offset, count, stride)
-    // Every word below lies in the checked range, so no offset overflows.
-    let base = unsafe {
-        dst.at(offset)
-    }
     unsafe {
-        store_at(base, offset: 0, value: count)
+        store_at(dst, offset: 0, value: count)
     }
     var i: u256 = 0
     while i < count {
+        // The caller's items lie in the pool.
         let item = unsafe {
-            ref *element(book.items.ptr(), start + i)
+            ref *element(items, i)
         }
         let out = 32 + i * stride
         unsafe {
-            store_at(base, offset: out, value: item.item_type & 0xff)
-            store_at(base, offset: out + 32, value: item.token.word())
-            store_at(base, offset: out + 64, value: item.identifier)
-            store_at(base, offset: out + 96, value: item.amount)
+            store_at(dst, offset: out, value: item.item_type & 0xff)
+            store_at(dst, offset: out + 32, value: item.token.word())
+            store_at(dst, offset: out + 64, value: item.identifier)
+            store_at(dst, offset: out + 96, value: item.amount)
             if received {
-                store_at(base, offset: out + 128, value: item.receiver.word())
+                store_at(dst, offset: out + 128, value: item.receiver.word())
             }
         }
         i += 1
     }
-    size
 }
 
 /// `OrderFulfilled`, encoded directly into the log data.
+#[arithmetic(unchecked)]
 pub fn emit_order_fulfilled(_ order_hash: u256, book: Book, order: OrderState, recipient: Address)
 uses (log: mut Log)
 {
     // Head: orderHash, recipient and the offer and consideration offsets.
+    // Item counts are below 2**32, so no size overflows.
     let consideration_at = 0xa0 + order.offer_len * 128
-    // Every word of the buffer is written below.
+    // Every word of the buffer is written below: the head, then both item
+    // arrays, which exactly fill the rest.
     var data = unsafe {
         Buffer::uninit(consideration_at + 32 + order.consideration_len * 160)
     }
@@ -304,23 +295,19 @@ uses (log: mut Log)
         data.put(offset: 32, value: recipient.word())
         data.put(offset: 64, value: 0x80)
         data.put(offset: 96, value: consideration_at)
+        write_fulfilled_items(
+            data.at(0x80),
+            items: element(book.items.ptr(), order.offer_start),
+            count: order.offer_len,
+            received: false,
+        )
+        write_fulfilled_items(
+            data.at(consideration_at),
+            items: element(book.items.ptr(), order.consideration_start),
+            count: order.consideration_len,
+            received: true,
+        )
     }
-    write_fulfilled_items(
-        mut data,
-        offset: 0x80,
-        book,
-        start: order.offer_start,
-        count: order.offer_len,
-        received: false,
-    )
-    write_fulfilled_items(
-        mut data,
-        offset: consideration_at,
-        book,
-        start: order.consideration_start,
-        count: order.consideration_len,
-        received: true,
-    )
     log.log3(
         data: data.span(),
         topic0: OrderFulfilled::TOPIC0,

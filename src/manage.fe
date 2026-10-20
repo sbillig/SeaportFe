@@ -5,6 +5,7 @@ use core::ptr
 use std::abi::Bytes32
 use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_empty}
 use super::raw_abi::{error_selector, revert_with0}
+use super::buffer::Buffer
 use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
@@ -40,6 +41,10 @@ uses (
 )
 {
     assert_non_reentrant(env)
+    // `OrderCancelled` data, the order hash, rewritten for every order.
+    var event = unsafe {
+        Buffer::uninit(32)
+    }
     var any_invalid = false
     var i: u256 = 0
     let len = orders.len()
@@ -56,8 +61,14 @@ uses (
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
-        log.emit(
-            OrderCancelled { orderHash: Bytes32 { val: order_hash }, offerer, zone },
+        unsafe {
+            event.put(offset: 0, value: order_hash)
+        }
+        log.log3(
+            data: event.span(),
+            topic0: OrderCancelled::TOPIC0,
+            topic1: offerer.word(),
+            topic2: zone.word(),
         )
         i += 1
     }
