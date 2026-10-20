@@ -201,9 +201,10 @@ fn write_order_tails(
 }
 
 /// `authorizeOrder(ZoneParameters)` or `validateOrder(ZoneParameters)` with
-/// the first `hashes_count` order hashes. seaport-core encodes the zone
-/// parameters once, before transfers, and reuses them for `validateOrder`;
-/// the amounts then still equal the saved `original` amounts used here.
+/// the first `hashes_count` order hashes, or `_encodeRatifyOrder` for
+/// `RATIFY_ORDER_SELECTOR`. seaport-core encodes the zone parameters once,
+/// before transfers, and reuses them for `validateOrder`; the amounts then
+/// still equal the saved `original` amounts used here.
 fn encode_zone_call(
     _ book: Book,
     order: OrderState,
@@ -214,24 +215,33 @@ fn encode_zone_call(
 ) -> Buffer
 uses (ctx: Ctx)
 {
-    var data = Buffer::new(0x24 + 0x140 + order_tails_size(order, hashes_count))
-    let head: u256 = 0x24
-    // The buffer holds the selector, the parameters offset and the head.
+    let ratify = selector == RATIFY_ORDER_SELECTOR
+    let head: u256 = if ratify { 4 } else { 0x24 }
+    let tail: u256 = if ratify { 0xa0 } else { 0x140 }
+    var data = Buffer::new(head + tail + order_tails_size(order, hashes_count))
+    // The buffer holds the selector and the head.
     unsafe {
         data.put(offset: 0, value: selector << 224)
-        data.put(offset: 4, value: 0x20)
-        data.put(offset: head, value: order_hash)
-        data.put(offset: head + 0x20, value: ctx.caller().word())
-        data.put(offset: head + 0x40, value: order.offerer.word())
-        data.put(offset: head + 0xe0, value: order.start_time)
-        data.put(offset: head + 0x100, value: order.end_time)
-        data.put(offset: head + 0x120, value: order.zone_hash)
+        if ratify {
+            data.put(
+                offset: 4 + 0x80,
+                value: order_hash ^ (order.offerer.word() << 96),
+            )
+        } else {
+            data.put(offset: 4, value: 0x20)
+            data.put(offset: head, value: order_hash)
+            data.put(offset: head + 0x20, value: ctx.caller().word())
+            data.put(offset: head + 0x40, value: order.offerer.word())
+            data.put(offset: head + 0xe0, value: order.start_time)
+            data.put(offset: head + 0x100, value: order.end_time)
+            data.put(offset: head + 0x120, value: order.zone_hash)
+        }
     }
     write_order_tails(
         mut data,
         head,
-        slots: head + 0x60,
-        tail: 0x140,
+        slots: if ratify { head } else { head + 0x60 },
+        tail,
         book,
         order,
         order_hashes,
@@ -345,7 +355,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             revert_on_invalid: true,
         )
     } else if order.order_type == CONTRACT as u256 {
-        let data = encode_ratify_order(book, order, order_hash, order_hashes)
+        let data = encode_zone_call(
+            book,
+            order,
+            order_hash,
+            order_hashes,
+            hashes_count: order_hashes.len() as u256,
+            selector: RATIFY_ORDER_SELECTOR,
+        )
         let _ = call_and_check_status_with_skip(
             order.offerer,
             order_hash,
@@ -354,33 +371,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             revert_on_invalid: true,
         )
     }
-}
-
-/// `_encodeRatifyOrder`
-fn encode_ratify_order(
-    _ book: Book,
-    order: OrderState,
-    order_hash: u256,
-    order_hashes: MemArray<u256>,
-) -> Buffer {
-    let hashes_count = order_hashes.len() as u256
-    var data = Buffer::new(4 + 0xa0 + order_tails_size(order, hashes_count))
-    data.write(offset: 0, value: RATIFY_ORDER_SELECTOR << 224)
-    write_order_tails(
-        mut data,
-        head: 4,
-        slots: 4,
-        tail: 0xa0,
-        book,
-        order,
-        order_hashes,
-        hashes_count,
-    )
-    data.write(
-        offset: 4 + 0x80,
-        value: order_hash ^ (order.offerer.word() << 96),
-    )
-    data
 }
 
 /// `_encodeGenerateOrder`: offer and consideration both as `SpentItem[]`.
