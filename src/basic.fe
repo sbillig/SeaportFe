@@ -272,22 +272,25 @@ uses (
     // Consideration item hashes of the primary item and the original
     // additional recipients, and the ReceivedItems of all of them.
     let offerer = cd_address(OFFERER)
+    // One hash per original consideration item: every write below fits.
     var consideration_hashes = Buffer::new((total_original + 1) * 32)
-    consideration_hashes
-        .write(
-            offset: 0,
-            value: keccak_words(
-                [
-                    CONSIDERATION_ITEM_TYPEHASH,
-                    received_item_type,
-                    cd(CONSIDERATION_TOKEN),
-                    cd(CONSIDERATION_IDENTIFIER),
-                    cd(CONSIDERATION_AMOUNT),
-                    cd(CONSIDERATION_AMOUNT),
-                    offerer.word(),
-                ],
-            ),
-        )
+    unsafe {
+        consideration_hashes
+            .put(
+                offset: 0,
+                value: keccak_words(
+                    [
+                        CONSIDERATION_ITEM_TYPEHASH,
+                        received_item_type,
+                        cd(CONSIDERATION_TOKEN),
+                        cd(CONSIDERATION_IDENTIFIER),
+                        cd(CONSIDERATION_AMOUNT),
+                        cd(CONSIDERATION_AMOUNT),
+                        offerer.word(),
+                    ],
+                ),
+            )
+    }
     // OrderFulfilled data: orderHash, recipient, the offer and consideration
     // offsets, the offer (one SpentItem) and the consideration (the primary
     // item and one ReceivedItem per additional recipient). Item types come
@@ -311,21 +314,23 @@ uses (
         let amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
         if i < total_original {
-            consideration_hashes
-                .write(
-                    offset: (i + 1) * 32,
-                    value: keccak_words(
-                        [
-                            CONSIDERATION_ITEM_TYPEHASH,
-                            additional_recipients_item_type,
-                            additional_recipients_token.word(),
-                            0,
-                            amount,
-                            amount,
-                            recipient,
-                        ],
-                    ),
-                )
+            unsafe {
+                consideration_hashes
+                    .put(
+                        offset: (i + 1) * 32,
+                        value: keccak_words(
+                            [
+                                CONSIDERATION_ITEM_TYPEHASH,
+                                additional_recipients_item_type,
+                                additional_recipients_token.word(),
+                                0,
+                                amount,
+                                amount,
+                                recipient,
+                            ],
+                        ),
+                    )
+            }
         }
         combined_recipients = combined_recipients | recipient
         // The identifier stays zero. Only clean recipient words pass the
@@ -445,33 +450,43 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // head, offer (one SpentItem), consideration, empty extraData, hashes
     let params_size = 0x140 + 0xa0 + consideration_size + 32 + 32 + hashes_count * 32
     let size = 0x24 + params_size
+    // The buffer is zeroed and sized for every word written below; the zero
+    // identifiers and the empty extraData length are left as they are.
     var data = Buffer::new(size)
-    data.write(offset: 0, value: selector << 224)
-    data.write(offset: 4, value: 0x20)
+    unsafe {
+        data.put(offset: 0, value: selector << 224)
+        data.put(offset: 4, value: 0x20)
+    }
     let head: u256 = 0x24
-    data.write(offset: head, value: order_hash)
-    data.write(offset: head + 0x20, value: ctx.caller().word())
-    data.write(offset: head + 0x40, value: cd(OFFERER))
-    data.write(offset: head + 0x60, value: 0x140)
-    data.write(offset: head + 0x80, value: 0x1e0)
+    unsafe {
+        data.put(offset: head, value: order_hash)
+        data.put(offset: head + 0x20, value: ctx.caller().word())
+        data.put(offset: head + 0x40, value: cd(OFFERER))
+        data.put(offset: head + 0x60, value: 0x140)
+        data.put(offset: head + 0x80, value: 0x1e0)
+    }
     let extra_data_offset = 0x1e0 + consideration_size
-    data.write(offset: head + 0xa0, value: extra_data_offset)
-    data.write(offset: head + 0xc0, value: extra_data_offset + 32)
-    data.write(offset: head + 0xe0, value: cd(START_TIME))
-    data.write(offset: head + 0x100, value: cd(END_TIME))
-    data.write(offset: head + 0x120, value: cd(ZONE_HASH))
+    unsafe {
+        data.put(offset: head + 0xa0, value: extra_data_offset)
+        data.put(offset: head + 0xc0, value: extra_data_offset + 32)
+        data.put(offset: head + 0xe0, value: cd(START_TIME))
+        data.put(offset: head + 0x100, value: cd(END_TIME))
+        data.put(offset: head + 0x120, value: cd(ZONE_HASH))
+    }
     // offer: [(offeredItemType, offerToken, offerIdentifier, offerAmount)]
     let basic_order_type = cd(BASIC_ORDER_TYPE)
     let route = basic_order_type >> 2
     let offer = head + 0x140
-    data.write(offset: offer, value: 1)
-    data.write(
-        offset: offer + 0x20,
-        value: byte_at(route, OFFERED_ITEM_BYTE_MAP),
-    )
-    data.write(offset: offer + 0x40, value: cd(OFFER_TOKEN))
-    data.write(offset: offer + 0x60, value: cd(OFFER_IDENTIFIER))
-    data.write(offset: offer + 0x80, value: cd(OFFER_AMOUNT))
+    unsafe {
+        data.put(offset: offer, value: 1)
+        data.put(
+            offset: offer + 0x20,
+            value: byte_at(route, OFFERED_ITEM_BYTE_MAP),
+        )
+        data.put(offset: offer + 0x40, value: cd(OFFER_TOKEN))
+        data.put(offset: offer + 0x60, value: cd(OFFER_IDENTIFIER))
+        data.put(offset: offer + 0x80, value: cd(OFFER_AMOUNT))
+    }
     // consideration: primary item, then all additional recipients
     let additional_recipients_item_type: u256 = if route > 1 { 1 } else { 0 }
     let additional_recipients_token = if route > 3 {
@@ -480,36 +495,44 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         cd(CONSIDERATION_TOKEN)
     }
     let consideration = head + 0x1e0
-    data.write(offset: consideration, value: total_recipients + 1)
+    unsafe {
+        data.put(offset: consideration, value: total_recipients + 1)
+    }
     let first = consideration + 0x20
-    data.write(
-        offset: first,
-        value: byte_at(route, RECEIVED_ITEM_BYTE_MAP),
-    )
-    data.write(offset: first + 0x20, value: cd(CONSIDERATION_TOKEN))
-    data.write(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
-    data.write(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
-    data.write(offset: first + 0x80, value: cd(OFFERER))
+    unsafe {
+        data.put(
+            offset: first,
+            value: byte_at(route, RECEIVED_ITEM_BYTE_MAP),
+        )
+        data.put(offset: first + 0x20, value: cd(CONSIDERATION_TOKEN))
+        data.put(offset: first + 0x40, value: cd(CONSIDERATION_IDENTIFIER))
+        data.put(offset: first + 0x60, value: cd(CONSIDERATION_AMOUNT))
+        data.put(offset: first + 0x80, value: cd(OFFERER))
+    }
     var i: u256 = 0
     while i < total_recipients {
         let item = consideration + 0x20 + (i + 1) * 160
-        data.write(offset: item, value: additional_recipients_item_type)
-        data.write(offset: item + 0x20, value: additional_recipients_token)
-        data.write(offset: item + 0x40, value: 0)
-        data.write(
-            offset: item + 0x60,
-            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
-        )
-        data.write(
-            offset: item + 0x80,
-            value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
-        )
+        unsafe {
+            data.put(offset: item, value: additional_recipients_item_type)
+            data.put(offset: item + 0x20, value: additional_recipients_token)
+            data.put(
+                offset: item + 0x60,
+                value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
+            )
+            data.put(
+                offset: item + 0x80,
+                value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20),
+            )
+        }
         i += 1
     }
-    data.write(offset: head + extra_data_offset, value: 0)
-    data.write(offset: head + extra_data_offset + 32, value: hashes_count)
+    unsafe {
+        data.put(offset: head + extra_data_offset + 32, value: hashes_count)
+    }
     if hashes_count == 1 {
-        data.write(offset: head + extra_data_offset + 64, value: order_hash)
+        unsafe {
+            data.put(offset: head + extra_data_offset + 64, value: order_hash)
+        }
     }
     let magic = selector << 224
     var ret = MemBuffer::with_capacity(32)
@@ -545,16 +568,19 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
     if conduit_key != 0 {
+        // The buffer holds every word written below.
         var data = Buffer::new(0x104)
-        data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-        data.write(offset: 0x04, value: 0x20)
-        data.write(offset: 0x24, value: 1)
-        data.write(offset: 0x44, value: item_type)
-        data.write(offset: 0x64, value: token.word())
-        data.write(offset: 0x84, value: from.word())
-        data.write(offset: 0xa4, value: ctx.caller().word())
-        data.write(offset: 0xc4, value: identifier)
-        data.write(offset: 0xe4, value: amount)
+        unsafe {
+            data.put(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+            data.put(offset: 0x04, value: 0x20)
+            data.put(offset: 0x24, value: 1)
+            data.put(offset: 0x44, value: item_type)
+            data.put(offset: 0x64, value: token.word())
+            data.put(offset: 0x84, value: from.word())
+            data.put(offset: 0xa4, value: ctx.caller().word())
+            data.put(offset: 0xc4, value: identifier)
+            data.put(offset: 0xe4, value: amount)
+        }
         call_conduit(env, conduit_key, args: data.span())
     } else if item_type == ERC721 as u256 {
         if amount != 1 {

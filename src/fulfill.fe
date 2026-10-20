@@ -326,9 +326,7 @@ fn write_fulfilled_items(
 ) -> u256 {
     let stride: u256 = if received { 160 } else { 128 }
     let size = 32 + count * stride
-    if offset + size > dst.len() {
-        core::panic()
-    }
+    dst.check_range(offset, len: size)
     // Every word below lies in the checked range.
     unsafe {
         dst.put(offset, value: count)

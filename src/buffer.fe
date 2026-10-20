@@ -56,16 +56,19 @@ impl Buffer {
         }
     }
     pub fn copy_from(mut self, offset: u256, source: MemSpan) {
-        if offset > self.len() || source.len() as u256 > self.len() - offset {
+        self.check_range(offset, len: source.len() as u256)
+        self.data.copy_from(dest_offset: offset as usize, source)
+    }
+    /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
+    /// buffer. One check can cover a run of `put`s.
+    pub fn check_range(self, offset: u256, len: u256) {
+        if offset > self.len() || len > self.len() - offset {
             revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
         }
-        self.data.copy_from(dest_offset: offset as usize, source)
     }
 
     fn check_word(self, _ offset: u256) {
-        if offset > self.len() || self.len() - offset < 32 {
-            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
-        }
+        self.check_range(offset, len: 32)
     }
 }
 
