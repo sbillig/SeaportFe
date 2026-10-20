@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // CriteriaResolution: resolve criteria-based items to concrete identifiers
 // with Merkle proofs.
-use core::ptr
 use std::evm::keccak_words
 use super::abi_view::CalldataView
 use super::raw_abi::{error_selector, revert_with0, revert_with1, revert_with2}
@@ -14,7 +13,7 @@ use super::errors::{
     UnresolvedConsiderationCriteria,
     UnresolvedOfferCriteria,
 }
-use super::model::{Book, Item, Resolver, Resolvers, checked_enum}
+use super::model::{Book, Item, Resolver, Resolvers, checked_enum, element}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
@@ -32,7 +31,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
         }
         // The order index was checked above.
         let order = unsafe {
-            *ptr::offset(book.orders.ptr(), resolver.order_index())
+            *element(book.orders.ptr(), resolver.order_index())
         }
         if order.numerator != 0 {
             let offer = checked_enum(resolver.side(), variants: 2) == OFFER as u256
@@ -53,7 +52,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                 revert_with0(selector)
             }
             update_criteria_item(
-                ptr::offset(book.items.ptr(), start + resolver.index()),
+                element(book.items.ptr(), start + resolver.index()),
                 resolver,
             )
         }
@@ -62,7 +61,7 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     i = 0
     while i < total_orders {
         let order = unsafe {
-            *ptr::offset(book.orders.ptr(), i)
+            *element(book.orders.ptr(), i)
         }
         if order.numerator != 0 {
             ensure_resolved(
@@ -101,7 +100,7 @@ fn ensure_resolved(
     while j < count {
         // `start + j` lies in the pool: the order's range is part of it.
         let item = unsafe {
-            *ptr::offset(book.items.ptr(), start + j)
+            *element(book.items.ptr(), start + j)
         }
         if checked_enum(item.item_type, variants: 6) > 3
             && (order_type != CONTRACT as u256 || item.identifier != 0) {

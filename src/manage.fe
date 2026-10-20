@@ -14,7 +14,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::{OrderState, checked_enum, orders_book}
+use super::model::{OrderState, checked_enum, element, orders_book}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -85,7 +85,7 @@ uses (
     var i: usize = 0
     while i < book.orders.len() {
         let order = unsafe {
-            ref *ptr::offset(book.orders.ptr(), i as u256)
+            ref *element(book.orders.ptr(), i as u256)
         }
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(order)
