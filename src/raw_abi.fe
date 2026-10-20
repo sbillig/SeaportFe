@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Custom error revert data for errors whose fields are all static.
+// Hand-encoded custom error revert data and event logs, shared by all
+// error and event types instead of one generic encoder each.
 use core::ErrorVariant
 use core::ptr::{self, MemSpan}
 use std::abi::Sol
-use std::evm::revert_bytes
+use std::evm::{Log, revert_bytes}
 use super::buffer::Buffer
 
 /// The selector of the custom error `E`.
@@ -71,4 +72,22 @@ pub fn revert_with_reason(
     }
     data.copy_from(offset: 4 + tail + 32, source: reason)
     revert_bytes(data.span())
+}
+
+/// Emit a log with `topic0` whose data is the first `words` of `a` and `b`:
+/// exactly the log of an event with no indexed fields and those static
+/// data words.
+pub fn emit_words(_ topic0: u256, words: u256, a: u256, b: u256)
+uses (log: mut Log)
+{
+    let data = ptr::alloc_bytes(0x40)
+    // The allocation holds both words.
+    unsafe {
+        *ptr::cast<u8, u256>(data) = a
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x20)) = b
+        log.log1(
+            data: MemSpan::from_raw_parts(ptr: data, len: (words * 32) as usize),
+            topic0,
+        )
+    }
 }

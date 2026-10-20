@@ -5,13 +5,7 @@ use core::option::Option
 use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
-use super::error_data::{
-    error_selector,
-    revert_with0,
-    revert_with1,
-    revert_with2,
-    revert_with_reason,
-}
+use super::raw_abi::{error_selector, revert_with0, revert_with1, revert_with2, revert_with_reason}
 use super::buffer::{Buffer, read_word, return_word}
 
 #[abi]

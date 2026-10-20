@@ -6,7 +6,7 @@ use core::ptr::{self, MemArray, MemSpan}
 use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
 use std::abi::sol::decode_output
 use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error}
-use super::error_data::{error_selector, revert_with0, revert_with1}
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::hashing::Env
 use super::buffer::return_word
 use super::seaport::SeaportMsg
