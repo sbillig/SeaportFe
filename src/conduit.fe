@@ -2,11 +2,12 @@
 // Conduit and ConduitController (seaport-core/src/conduit).
 use core::ptr::MemBuffer
 use std::abi::{Bytes4, DynArray, sol}
-use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap, revert_error}
+use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap}
 use super::errors::{InvalidERC721TransferAmount, Invalid1155BatchTransferEncoding}
 use super::buffer::Buffer
 use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
 use super::lowlevel::bubble_revert_if_affordable
+use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
 
 #[abi]
 pub struct ConduitTransfer {
@@ -65,7 +66,7 @@ const ERC1155_BATCH_TRANSFER_GENERIC_FAILURE_SELECTOR: u256 = 0xafc445e2
 /// `onlyOpenChannel`; the declared map owns Solidity's slot 0.
 fn assert_open_channel() uses (ctx: Ctx, channels: StorageMap<Address, u256>) {
     if channels[ctx.caller()] == 0 {
-        revert_error(ChannelClosed { channel: ctx.caller() })
+        revert_with1(error_selector<ChannelClosed>(), ctx.caller().word())
     }
 }
 
@@ -85,7 +86,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     } else if item.itemType == 2 {
         if item.amount != 1 {
-            revert_error(InvalidERC721TransferAmount { amount: item.amount })
+            revert_with1(error_selector<InvalidERC721TransferAmount>(), item.amount)
         }
         perform_erc721_transfer(
             token: item.token,
@@ -102,7 +103,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             amount: item.amount,
         )
     } else {
-        revert_error(InvalidItemType {})
+        revert_with0(error_selector<InvalidItemType>())
     }
 }
 
@@ -186,7 +187,7 @@ uses (ctx: Ctx, call: mut Call, ops: mut RawOps)
             && ops.calldataload(element + 0x60) == 0xa0
             && ops.calldataload(element + 0x80) == expected_amounts_offset
         if !valid {
-            revert_error(Invalid1155BatchTransferEncoding {})
+            revert_with0(error_selector<Invalid1155BatchTransferEncoding>())
         }
         let ids_and_amounts_size = 0x40 + (ids_length << 6)
         let size = 0xc4 + ids_and_amounts_size
@@ -276,12 +277,16 @@ pub contract Conduit {
         }
         UpdateChannel { channel, isOpen } uses (controller, ctx: Ctx, mut channels, log: mut Log) {
             if ctx.caller() != controller {
-                revert_error(InvalidController {})
+                revert_with0(error_selector<InvalidController>())
             }
             let state = mut channels[channel]
             let current = state != 0
             if current == isOpen {
-                revert_error(ChannelStatusAlreadySet { channel, isOpen })
+                revert_with2(
+                    error_selector<ChannelStatusAlreadySet>(),
+                    channel.word(),
+                    if isOpen { 1 } else { 0 },
+                )
             }
             state = if isOpen { 1 } else { 0 }
             log.emit(ChannelUpdated { channel, open: isOpen })

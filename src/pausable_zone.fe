@@ -6,18 +6,8 @@
 // and `_pauser` in slots 0 to 2.
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, dyn_array_from, sol}
-use std::evm::{
-    Address,
-    Call,
-    Contract,
-    Create,
-    Ctx,
-    Log,
-    RawOps,
-    create2_address,
-    keccak256,
-    revert_error,
-}
+use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, create2_address, keccak256}
+use super::error_data::{error_selector, revert_with0, revert_with1}
 use super::buffer::Buffer
 use super::seaport::SeaportMsg
 use super::types::{
@@ -132,13 +122,13 @@ fn zone_is_paused(_ zone_state: u256) -> bool {
 
 fn assert_operator(_ controller: Address, zone_state: u256) uses (ctx: Ctx) {
     if ctx.caller() != zone_operator(zone_state) && ctx.caller() != controller {
-        revert_error(InvalidOperator {})
+        revert_with0(error_selector<InvalidOperator>())
     }
 }
 
 fn assert_not_paused(_ zone_state: u256) {
     if zone_is_paused(zone_state) {
-        revert_error(ZoneIsPaused {})
+        revert_with0(error_selector<ZoneIsPaused>())
     }
 }
 
@@ -174,7 +164,7 @@ fn metadata_schemas_match_the_typed_encoding() {
 
 fn assert_controller(_ controller: Address) uses (ctx: Ctx) {
     if ctx.caller() != controller {
-        revert_error(InvalidController {})
+        revert_with0(error_selector<InvalidController>())
     }
 }
 
@@ -213,7 +203,7 @@ pub contract PausableZone {
         ) {
             assert_controller(controller)
             if operatorToAssign.word() == 0 {
-                revert_error(PauserCanNotBeSetAsZero {})
+                revert_with0(error_selector<PauserCanNotBeSetAsZero>())
             }
             zone_state = (zone_state & !OPERATOR_MASK) | operatorToAssign.word()
             log.emit(OperatorUpdated { newOperator: operatorToAssign })
@@ -334,7 +324,7 @@ pub msg PausableZoneControllerMsg {
 
 fn assert_owner(_ owner: u256) uses (ctx: Ctx) {
     if ctx.caller().word() != owner {
-        revert_error(CallerIsNotOwner {})
+        revert_with0(error_selector<CallerIsNotOwner>())
     }
 }
 
@@ -381,7 +371,7 @@ pub contract PausableZoneController {
                 init_code_hash: zone_creation_code,
             )
             if ctx.extcodesize(derived) != 0 {
-                revert_error(ZoneAlreadyExists { zone: derived })
+                revert_with1(error_selector<ZoneAlreadyExists>(), derived.word())
             }
             create.create2<PausableZone>(value: 0, args: (), salt: salt.val)
             log.emit(ZoneCreated { zone: derived, salt })
@@ -389,7 +379,7 @@ pub contract PausableZoneController {
         }
         Pause { zone } -> bool uses (owner, pauser, ctx: Ctx, call: mut Call) {
             if ctx.caller().word() != pauser && ctx.caller().word() != owner {
-                revert_error(InvalidPauser {})
+                revert_with0(error_selector<InvalidPauser>())
             }
             zone.call(PausableZoneMsg::Pause {})
             true
@@ -455,7 +445,7 @@ pub contract PausableZoneController {
         ) {
             assert_owner(owner)
             if newPotentialOwner.word() == 0 {
-                revert_error(OwnerCanNotBeSetAsZero {})
+                revert_with0(error_selector<OwnerCanNotBeSetAsZero>())
             }
             log.emit(PotentialOwnerUpdated { newPotentialOwner })
             potential_owner = newPotentialOwner.word()
@@ -469,7 +459,7 @@ pub contract PausableZoneController {
         }
         AcceptOwnership {} uses (mut owner, mut potential_owner, ctx: Ctx, log: mut Log) {
             if ctx.caller().word() != potential_owner {
-                revert_error(CallerIsNotPotentialOwner {})
+                revert_with0(error_selector<CallerIsNotPotentialOwner>())
             }
             log.emit(
                 PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
@@ -486,7 +476,7 @@ pub contract PausableZoneController {
         AssignPauser { pauserToAssign } uses (owner, mut pauser, ctx: Ctx, log: mut Log) {
             assert_owner(owner)
             if pauserToAssign.word() == 0 {
-                revert_error(PauserCanNotBeSetAsZero {})
+                revert_with0(error_selector<PauserCanNotBeSetAsZero>())
             }
             pauser = pauserToAssign.word()
             log.emit(PauserUpdated { newPauser: pauserToAssign })

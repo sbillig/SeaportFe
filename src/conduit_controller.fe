@@ -19,8 +19,8 @@ use std::evm::{
     SolEnumerableSet,
     create2_address,
     keccak256,
-    revert_error,
 }
+use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
 use super::buffer::Buffer
 use super::conduit::{Conduit, ConduitMsg}
 
@@ -111,14 +111,14 @@ pub struct ConduitProperties {
 impl ConduitProperties {
     fn assert_exists(self) {
         if self.key == 0 {
-            revert_error(NoConduit {})
+            revert_with0(error_selector<NoConduit>())
         }
     }
 
     fn assert_owner(self, _ conduit: Address) uses (ctx: Ctx) {
         self.assert_exists()
         if ctx.caller().word() != self.owner {
-            revert_error(CallerIsNotOwner { conduit })
+            revert_with1(error_selector<CallerIsNotOwner>(), conduit.word())
         }
     }
 }
@@ -164,14 +164,14 @@ uses (
 )
 {
     if initial_owner.word() == 0 {
-        revert_error(InvalidInitialOwner {})
+        revert_with0(error_selector<InvalidInitialOwner>())
     }
     if conduit_key >> 96 != ctx.caller().word() {
-        revert_error(InvalidCreator {})
+        revert_with0(error_selector<InvalidCreator>())
     }
     let conduit = derive_conduit(hashes, conduit_key)
     if ctx.extcodehash(conduit) == hashes.runtime {
-        revert_error(ConduitAlreadyExists { conduit })
+        revert_with1(error_selector<ConduitAlreadyExists>(), conduit.word())
     }
     create.create2<Conduit>(value: 0, args: (), salt: conduit_key)
     let properties = mut conduits[conduit]
@@ -210,11 +210,16 @@ uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut L
     let properties = mut conduits[conduit]
     properties.assert_owner(conduit)
     if new_potential_owner.word() == 0 {
-        revert_error(NewPotentialOwnerIsZeroAddress { conduit })
+        revert_with1(
+            error_selector<NewPotentialOwnerIsZeroAddress>(),
+            conduit.word(),
+        )
     }
     if new_potential_owner.word() == properties.potential_owner {
-        revert_error(
-            NewPotentialOwnerAlreadySet { conduit, newPotentialOwner: new_potential_owner },
+        revert_with2(
+            error_selector<NewPotentialOwnerAlreadySet>(),
+            conduit.word(),
+            new_potential_owner.word(),
         )
     }
     log.emit(
@@ -229,7 +234,10 @@ uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut L
     let properties = mut conduits[conduit]
     properties.assert_owner(conduit)
     if properties.potential_owner == 0 {
-        revert_error(NoPotentialOwnerCurrentlySet { conduit })
+        revert_with1(
+            error_selector<NoPotentialOwnerCurrentlySet>(),
+            conduit.word(),
+        )
     }
     log.emit(
         PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
@@ -243,7 +251,10 @@ uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut L
     let properties = mut conduits[conduit]
     properties.assert_exists()
     if ctx.caller().word() != properties.potential_owner {
-        revert_error(CallerIsNotNewPotentialOwner { conduit })
+        revert_with1(
+            error_selector<CallerIsNotNewPotentialOwner>(),
+            conduit.word(),
+        )
     }
     log.emit(
         PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
@@ -327,7 +338,7 @@ pub contract ConduitController {
         GetKey { conduit } -> Bytes32 uses (conduits) {
             let key = conduits[conduit].key
             if key == 0 {
-                revert_error(NoConduit {})
+                revert_with0(error_selector<NoConduit>())
             }
             Bytes32 { val: key }
         }
@@ -360,7 +371,7 @@ pub contract ConduitController {
             let properties = ref conduits[conduit]
             properties.assert_exists()
             if channelIndex >= properties.channels.len() {
-                revert_error(ChannelOutOfRange { conduit })
+                revert_with1(error_selector<ChannelOutOfRange>(), conduit.word())
             }
             Address::from_word_truncate(properties.channels.get(channelIndex))
         }

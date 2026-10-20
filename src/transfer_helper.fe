@@ -5,6 +5,13 @@ use core::option::Option
 use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
+use super::error_data::{
+    error_selector,
+    revert_with0,
+    revert_with1,
+    revert_with2,
+    revert_with_reason,
+}
 use super::buffer::{Buffer, read_word, return_word}
 
 #[abi]
@@ -108,9 +115,9 @@ pub fn setup(_ controller: Address) -> TransferHelperEnv uses (call: Call) {
 }
 
 /// The message of a Solidity `Error(string)` revert, decoded like the
-/// `catch Error(string memory)` clause does; `None` when the returndata is
-/// something else.
-pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
+/// `catch Error(string memory)` clause does, as its offset and length in
+/// `data`; `None` when the returndata is something else.
+pub fn try_decode_error_string(_ data: MemSpan) -> Option<(u256, u256)> {
     let size = data.len() as u256
     if size < 0x44 || return_word(data, initial: 0) >> 224 != ERROR_STRING_SELECTOR {
         return Option::None
@@ -123,14 +130,7 @@ pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
     if length > 0xffffffffffffffff || offset + 0x20 + length > size - 4 {
         return Option::None
     }
-    Option::Some(
-        DynString::from_payload(
-            source: data.slice(
-                offset: (4 + offset + 0x20) as usize,
-                len: length as usize,
-            ),
-        ),
-    )
+    Option::Some((4 + offset + 0x20, length))
 }
 
 /// A Solidity `returns (bytes4)` value: at least one word whose low 28 bytes
@@ -159,28 +159,32 @@ uses (ctx: Ctx, call: mut Call)
     let outcome = call.try_call(addr: recipient, gas: ctx.gas(), value: 0, message)
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != ON_ERC721_RECEIVED_SELECTOR {
-            revert_error(InvalidERC721Recipient { recipient })
+            revert_with1(error_selector<InvalidERC721Recipient>(), recipient.word())
         }
         return
     }
-    match try_decode_error_string(outcome.returndata()) {
-        Option::Some(reason) => revert_error(
-            ERC721ReceiverErrorRevertString {
-                reason,
-                receiver: recipient,
-                sender: ctx.caller(),
-                identifier: token_id,
-            },
-        ),
-        Option::None => revert_error(
-            ERC721ReceiverErrorRevertBytes {
-                reason: Bytes::from_payload(source: outcome.returndata()),
-                receiver: recipient,
-                sender: ctx.caller(),
-                identifier: token_id,
-            },
-        ),
+    // ERC721ReceiverErrorRevertString with an `Error(string)` message,
+    // ERC721ReceiverErrorRevertBytes with the whole returndata otherwise.
+    let returned = outcome.returndata()
+    var selector = error_selector<ERC721ReceiverErrorRevertBytes>()
+    var start: u256 = 0
+    var length = returned.len() as u256
+    match try_decode_error_string(returned) {
+        Option::Some((at, len)) => {
+            selector = error_selector<ERC721ReceiverErrorRevertString>()
+            start = at
+            length = len
+        },
+        Option::None => {},
     }
+    revert_with_reason(
+        selector,
+        reason: returned.slice(offset: start as usize, len: length as usize),
+        words: 3,
+        a: recipient.word(),
+        b: ctx.caller().word(),
+        c: token_id,
+    )
 }
 
 /// `bulkTransfer`
@@ -192,9 +196,7 @@ pub fn bulk_transfer(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if conduit_key == 0 {
-        revert_error(
-            InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit: Address::zero() },
-        )
+        revert_with2(error_selector<InvalidConduit>(), conduit_key, 0)
     }
     let conduit = create2_address(
         deployer: env.conduit_controller,
@@ -221,7 +223,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let transfer = transfers.get(i)
         let recipient = transfer.recipient
         if recipient.word() == 0 {
-            revert_error(RecipientCannotBeZeroAddress {})
+            revert_with0(error_selector<RecipientCannotBeZeroAddress>())
         }
         let call_erc721_receiver = transfer.validateERC721Receiver
             && ctx.extcodesize(recipient) != 0
@@ -234,7 +236,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
                 std::evm::revert(())
             }
             if item.itemType == 1 && item.identifier != 0 {
-                revert_error(InvalidERC20Identifier {})
+                revert_with0(error_selector<InvalidERC20Identifier>())
             }
             if item.itemType == 2 && call_erc721_receiver {
                 check_erc721_receiver(conduit, recipient, token_id: item.identifier)
@@ -256,16 +258,23 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let outcome = call.try_call_raw(addr: conduit, gas: ctx.gas(), value: 0, args: data.span())
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != CONDUIT_EXECUTE_SELECTOR {
-            revert_error(
-                InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
+            revert_with2(
+                error_selector<InvalidConduit>(),
+                conduit_key,
+                conduit.word(),
             )
         }
         return Bytes4 { val: BULK_TRANSFER_SELECTOR }
     }
     let data = outcome.returndata()
     match try_decode_error_string(data) {
-        Option::Some(reason) => revert_error(
-            ConduitErrorRevertString { reason, conduitKey: Bytes32 { val: conduit_key }, conduit },
+        Option::Some((at, len)) => revert_with_reason(
+            error_selector<ConduitErrorRevertString>(),
+            reason: data.slice(offset: at as usize, len: len as usize),
+            words: 2,
+            a: conduit_key,
+            b: conduit.word(),
+            c: 0,
         ),
         Option::None => {},
     }
@@ -278,12 +287,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         || (data.len() == 36 && selector == INVALID_ERC721_TRANSFER_AMOUNT_SELECTOR) {
         ops.revert(data)
     }
-    revert_error(
-        ConduitErrorRevertBytes {
-            reason: Bytes::from_payload(source: data),
-            conduitKey: Bytes32 { val: conduit_key },
-            conduit,
-        },
+    revert_with_reason(
+        error_selector<ConduitErrorRevertBytes>(),
+        reason: data,
+        words: 2,
+        a: conduit_key,
+        b: conduit.word(),
+        c: 0,
     )
 }
 

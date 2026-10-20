@@ -22,3 +22,4 @@ pub use conduit_controller
 pub use transfer_helper
 pub use pausable_zone
 pub use router
+pub use error_data
