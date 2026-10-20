@@ -84,7 +84,9 @@ uses (
     assert_non_reentrant(env)
     var i: usize = 0
     while i < book.orders.len() {
-        let order = ref book.orders[i]
+        let order = unsafe {
+            ref *ptr::offset(book.orders.ptr(), i as u256)
+        }
         if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
             let order_hash = consideration_length_checked_order_hash(order)
             let status = read_status(order_hash)
