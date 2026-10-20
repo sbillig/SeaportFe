@@ -126,7 +126,8 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     (order_hash, fill_numerator, fill_denominator)
 }
 
-/// `_applyFractions`: current amounts of the partial fill.
+/// `_applyFractions`: current amounts of the partial fill. Consideration
+/// items keep the receiver the model builder copied from their recipient.
 #[arithmetic(unchecked)]
 fn apply_fractions(
     _ items: mut MemArray<Item>,
@@ -136,6 +137,9 @@ fn apply_fractions(
 )
 uses (ctx: Ctx)
 {
+    // A whole fill of a fixed amount is that amount (`apply_fraction`'s
+    // first case).
+    let whole = numerator == denominator
     var any_native = false
     var i: u256 = 0
     while i < order.offer_len {
@@ -143,15 +147,19 @@ uses (ctx: Ctx)
         let item = unsafe {
             mut *element(items.ptr(), order.offer_start + i)
         }
-        let amount = apply_fraction(
-            start_amount: item.start_amount,
-            end_amount: item.end_amount,
-            numerator,
-            denominator,
-            start_time: order.start_time,
-            end_time: order.end_time,
-            round_up: false,
-        )
+        let amount = if whole && item.start_amount == item.end_amount {
+            item.end_amount
+        } else {
+            apply_fraction(
+                start_amount: item.start_amount,
+                end_amount: item.end_amount,
+                numerator,
+                denominator,
+                start_time: order.start_time,
+                end_time: order.end_time,
+                round_up: false,
+            )
+        }
         item.amount = amount
         item.original = amount
         if item.item_type == NATIVE as u256 {
@@ -167,18 +175,21 @@ uses (ctx: Ctx)
         let item = unsafe {
             mut *element(items.ptr(), order.consideration_start + i)
         }
-        let amount = apply_fraction(
-            start_amount: item.start_amount,
-            end_amount: item.end_amount,
-            numerator,
-            denominator,
-            start_time: order.start_time,
-            end_time: order.end_time,
-            round_up: true,
-        )
+        let amount = if whole && item.start_amount == item.end_amount {
+            item.end_amount
+        } else {
+            apply_fraction(
+                start_amount: item.start_amount,
+                end_amount: item.end_amount,
+                numerator,
+                denominator,
+                start_time: order.start_time,
+                end_time: order.end_time,
+                round_up: true,
+            )
+        }
         item.amount = amount
         item.original = amount
-        item.receiver = item.recipient
         i += 1
     }
 }
