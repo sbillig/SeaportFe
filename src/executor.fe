@@ -54,9 +54,16 @@ pub fn new_accumulator() -> Accumulator {
     Accumulator { armed: false, conduit_key: 0, count: 0 }
 }
 
-/// A transfer buffer for up to `transfers` conduit transfers.
+/// The `execute` selector, array offset and length in front of the
+/// accumulated transfers.
+const ACCUMULATOR_HEAD: u256 = 0x44
+
+/// A transfer buffer for up to `transfers` conduit transfers, laid out as
+/// the `execute` call data like seaport-core's accumulator. While the
+/// accumulator is disarmed its contents are dead, and direct token transfers
+/// write their call data to it.
 pub fn transfer_buffer(_ transfers: u256) -> Buffer {
-    Buffer::new(transfers * 0xc0)
+    Buffer::new(ACCUMULATOR_HEAD + transfers * 0xc0)
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
@@ -178,11 +185,16 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             amount,
         )
     }
-    if kind == CONDUIT_ERC20 {
-        perform_erc20_transfer(token, from, to, amount)
-    } else {
-        perform_nft_transfer(kind, token, from, to, identifier, amount)
-    }
+    // `current` is disarmed here, so the buffer is free.
+    perform_transfer(
+        kind,
+        token,
+        from,
+        to,
+        identifier,
+        amount,
+        scratch: mut buf,
+    )
     current
 }
 
@@ -191,17 +203,14 @@ pub fn trigger_if_armed(_ acc: Accumulator, _ buf: mut Buffer, _ env: Env) -> Ac
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if !acc.armed { return acc }
-    let count = acc.count
-    let size = 0x44 + count * 0xc0
-    var data = Buffer::new(size)
-    data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-    data.write(offset: 4, value: 0x20)
-    data.write(offset: 0x24, value: count)
-    data.copy_from(
-        offset: 0x44,
-        source: buf.slice(offset: 0, len: count * 0xc0),
+    buf.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+    buf.write(offset: 4, value: 0x20)
+    buf.write(offset: 0x24, value: acc.count)
+    call_conduit(
+        env,
+        conduit_key: acc.conduit_key,
+        args: buf.slice(offset: 0, len: ACCUMULATOR_HEAD + acc.count * 0xc0),
     )
-    call_conduit(env, conduit_key: acc.conduit_key, args: data.span())
     var disarmed = acc
     disarmed.armed = false
     disarmed
@@ -249,7 +258,7 @@ fn insert(
         acc.conduit_key = conduit_key
         acc.count = 0
     }
-    let at = acc.count * 0xc0
+    let at = ACCUMULATOR_HEAD + acc.count * 0xc0
     buf.write(offset: at, value: item_type)
     buf.write(offset: at + 0x20, value: token.word())
     buf.write(offset: at + 0x40, value: from.word())
@@ -260,101 +269,84 @@ fn insert(
     acc
 }
 
-/// `_performERC20Transfer`: succeed on `true` or on empty returndata from a
-/// contract.
-pub fn perform_erc20_transfer(token: Address, from: Address, to: Address, amount: u256)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    var args = Buffer::new(0x64)
-    args.write(offset: 0, value: TRANSFER_FROM_SELECTOR << 224)
-    args.write(offset: 0x04, value: from.word())
-    args.write(offset: 0x24, value: to.word())
-    args.write(offset: 0x44, value: amount)
-    var ret = MemBuffer::with_capacity(32)
-    let outcome = call
-        .raw_call(
-            addr: token,
-            gas: ctx.gas(),
-            value: 0,
-            args: args.span(),
-            ret: mut ret,
-        )
-    let call_status = outcome.success()
-    let size = outcome.returndata_len()
-    let success = call_status
-        && ((return_word(ret.span(), initial: 0) == 1 && size > 31) || size == 0)
-    if success && size != 0 {
-        return
-    }
-    if ctx.extcodesize(token) != 0 && success {
-        return
-    }
-    if !success {
-        if !call_status {
-            revert_with_reason_if_one_is_returned()
-            revert_error(
-                TokenTransferGenericFailure { token, from, to, identifier: 0, amount },
-            )
-        }
-        revert_error(
-            BadReturnValueFromERC20OnTransfer { token, from, to, amount },
-        )
-    }
-    revert_error(NoContract { account: token })
-}
-
-/// `_performERC721Transfer`, preceded by the amount check all its callers
-/// make, or `_performERC1155Transfer`, by conduit item type.
-pub fn perform_nft_transfer(
+/// `_performERC20Transfer`, `_performERC721Transfer` (preceded by the amount
+/// check all its callers make) or `_performERC1155Transfer`, by conduit item
+/// type, with the call data written to the start of `scratch`. ERC20
+/// transfers succeed on `true` or on empty returndata from a contract.
+pub fn perform_transfer(
     kind: u256,
     token: Address,
     from: Address,
     to: Address,
     identifier: u256,
     amount: u256,
+    scratch: mut Buffer,
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    let erc721 = kind == CONDUIT_ERC721
-    if erc721 && amount != 1 {
+    let erc20 = kind == CONDUIT_ERC20
+    let erc1155 = kind == CONDUIT_ERC1155
+    if kind == CONDUIT_ERC721 && amount != 1 {
         revert_error(InvalidERC721TransferAmount { amount })
     }
-    if ctx.extcodesize(token) == 0 {
+    if !erc20 && ctx.extcodesize(token) == 0 {
         revert_error(NoContract { account: token })
     }
-    // transferFrom(from, to, identifier), or
-    // safeTransferFrom(from, to, identifier, amount, "") with its empty bytes
-    // left zero.
-    var args = Buffer::new(0xc4)
-    args.write(
-        offset: 0,
-        value: (if erc721 {
-                TRANSFER_FROM_SELECTOR
-            } else {
-                ERC1155_SAFE_TRANSFER_FROM_SELECTOR
-            })
-            << 224,
-    )
-    args.write(offset: 0x04, value: from.word())
-    args.write(offset: 0x24, value: to.word())
-    args.write(offset: 0x44, value: identifier)
-    if !erc721 {
-        args.write(offset: 0x64, value: amount)
-        args.write(offset: 0x84, value: 0xa0)
+    // transferFrom(from, to, amount or identifier), or
+    // safeTransferFrom(from, to, identifier, amount, "").
+    scratch
+        .write(
+            offset: 0,
+            value: (if erc1155 {
+                    ERC1155_SAFE_TRANSFER_FROM_SELECTOR
+                } else {
+                    TRANSFER_FROM_SELECTOR
+                })
+                << 224,
+        )
+    scratch.write(offset: 0x04, value: from.word())
+    scratch.write(offset: 0x24, value: to.word())
+    scratch.write(
+            offset: 0x44,
+            value: if erc20 { amount } else { identifier },
+        )
+    if erc1155 {
+        scratch.write(offset: 0x64, value: amount)
+        scratch.write(offset: 0x84, value: 0xa0)
+        scratch.write(offset: 0xa4, value: 0)
     }
-    var ret = MemBuffer::empty()
+    var ret = MemBuffer::with_capacity(32)
     let outcome = call
         .raw_call(
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: args.slice(offset: 0, len: if erc721 { 0x64 } else { 0xc4 }),
+            args: scratch.slice(offset: 0, len: if erc1155 { 0xc4 } else { 0x64 }),
             ret: mut ret,
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
         revert_error(
-            TokenTransferGenericFailure { token, from, to, identifier, amount },
+            TokenTransferGenericFailure {
+                token,
+                from,
+                to,
+                identifier: if erc20 { 0 } else { identifier },
+                amount,
+            },
+        )
+    }
+    if !erc20 { return }
+    let size = outcome.returndata_len()
+    if size == 0 {
+        if ctx.extcodesize(token) == 0 {
+            revert_error(NoContract { account: token })
+        }
+        return
+    }
+    if size < 32 || return_word(ret.span(), initial: 0) != 1 {
+        revert_error(
+            BadReturnValueFromERC20OnTransfer { token, from, to, amount },
         )
     }
 }

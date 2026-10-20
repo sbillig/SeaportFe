@@ -22,7 +22,7 @@ use super::executor::{
     CONDUIT_EXECUTE_SELECTOR,
     new_accumulator,
     transfer_buffer,
-    perform_nft_transfer,
+    perform_transfer,
     transfer_token,
     transfer_native_tokens,
     trigger_if_armed,
@@ -501,8 +501,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let from = cd_address(OFFERER)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
+    var data = Buffer::new(0x104)
     if conduit_key != 0 {
-        var data = Buffer::new(0x104)
         data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
         data.write(offset: 0x04, value: 0x20)
         data.write(offset: 0x24, value: 1)
@@ -514,13 +514,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         data.write(offset: 0xe4, value: amount)
         call_conduit(env, conduit_key, args: data.span())
     } else {
-        perform_nft_transfer(
+        perform_transfer(
             kind: item_type,
             token,
             from,
             to: ctx.caller(),
             identifier,
             amount,
+            scratch: mut data,
         )
     }
 }
