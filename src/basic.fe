@@ -2,14 +2,14 @@
 // BasicOrderFulfiller: `fulfillBasicOrder` reads its parameters directly
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
-use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes32}
+use core::ptr::{MemArray, MemBuffer}
+use std::abi::{Bytes, Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, keccak_words, keccak256, revert_error}
+use super::abi_view::CalldataView
 use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
-    InvalidERC721TransferAmount,
     InvalidMsgValue,
     InvalidTime,
     MissingOriginalConsiderationItems,
@@ -17,21 +17,18 @@ use super::errors::{
     UnusedItemParameters,
 }
 use super::executor::{
-    call_conduit,
-    CONDUIT_EXECUTE_SELECTOR,
+    CONDUIT_ERC20,
+    CONDUIT_ERC721,
+    insert,
     new_accumulator,
     transfer_buffer,
-    perform_erc1155_transfer,
-    perform_erc721_transfer,
-    transfer_erc1155,
-    transfer_erc20,
-    transfer_erc721,
+    perform_transfer,
+    transfer_token,
     transfer_native_tokens,
     trigger_if_armed,
     Accumulator,
 }
 use super::hashing::{CONSIDERATION_ITEM_TYPEHASH, Env, OFFER_ITEM_TYPEHASH, ORDER_TYPEHASH}
-use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -42,13 +39,13 @@ use super::status::{
     set_reentrancy_guard,
     verify_order_status,
 }
-use super::types::ERC721
+use super::types::{ERC721, ReceivedItem, SpentItem}
 use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
+    call_and_check_status_with_skip,
     is_restricted_and_caller_not_zone,
 }
-use super::errors::InvalidRestrictedOrder
 
 // Calldata offsets of BasicOrderParameters (behind the selector and the
 // struct offset word).
@@ -88,6 +85,7 @@ fn cd_address(_ offset: u256) -> Address uses (ops: RawOps) {
     Address::from_word_truncate(ops.calldataload(offset))
 }
 
+#[arithmetic(unchecked)]
 fn byte_at(_ index: u256, _ word: u256) -> u256 {
     if index >= 32 { return 0 }
     (word >> (248 - index * 8)) & 0xff
@@ -95,6 +93,7 @@ fn byte_at(_ index: u256, _ word: u256) -> u256 {
 
 /// The ABI checks Solidity performs before running `fulfillBasicOrder` with
 /// its `BasicOrderParameters calldata` argument.
+#[arithmetic(unchecked)]
 pub fn assert_decodable_basic_order_calldata() uses (ops: RawOps) {
     let size = ops.calldatasize()
     if size < 0x24 {
@@ -108,6 +107,7 @@ pub fn assert_decodable_basic_order_calldata() uses (ops: RawOps) {
 
 /// `_assertValidBasicOrderParameters`: canonical offsets, a valid order
 /// type and clean addresses.
+#[arithmetic(unchecked)]
 fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
     let valid_offsets = cd(4) == 0x20
         && cd(ADDITIONAL_RECIPIENTS_HEAD) == 0x240
@@ -120,6 +120,7 @@ fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
 }
 
 /// `_validateAndFulfillBasicOrder`
+#[arithmetic(unchecked)]
 pub fn validate_and_fulfill_basic_order(_ env: Env) -> bool
 uses (
     store: mut OrderStore,
@@ -170,56 +171,35 @@ uses (
         transfer_native_tokens_and_finalize()
     } else {
         var buf = transfer_buffer(2 + cd(ADDITIONAL_RECIPIENTS_LENGTH))
-        let empty = new_accumulator()
-        let acc = if route == 2 {
-            transfer_erc721(
-                token: cd_address(OFFER_TOKEN),
-                from: cd_address(OFFERER),
-                to: ctx.caller(),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
-        } else if route == 3 {
-            transfer_erc1155(
-                token: cd_address(OFFER_TOKEN),
-                from: cd_address(OFFERER),
-                to: ctx.caller(),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
-        } else if route == 4 {
-            transfer_erc721(
-                token: cd_address(CONSIDERATION_TOKEN),
-                from: ctx.caller(),
-                to: cd_address(OFFERER),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
+        // Routes 2 and 3 offer an ERC721 or ERC1155 item for ERC20 tokens,
+        // routes 4 and 5 receive one; its token, identifier and amount are
+        // consecutive words.
+        let item = if offer_type_is_additional_recipients_type {
+            CONSIDERATION_TOKEN
         } else {
-            transfer_erc1155(
-                token: cd_address(CONSIDERATION_TOKEN),
-                from: ctx.caller(),
-                to: cd_address(OFFERER),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                conduit_key,
-                acc: empty,
-                mut buf,
-                env,
-            )
+            OFFER_TOKEN
         }
+        let offerer = cd_address(OFFERER)
+        let acc = transfer_token(
+            kind: CONDUIT_ERC721 + (route & 1),
+            token: cd_address(item),
+            from: if offer_type_is_additional_recipients_type {
+                ctx.caller()
+            } else {
+                offerer
+            },
+            to: if offer_type_is_additional_recipients_type {
+                offerer
+            } else {
+                ctx.caller()
+            },
+            identifier: cd(item + 0x20),
+            amount: cd(item + 0x40),
+            conduit_key,
+            acc: new_accumulator(),
+            mut buf,
+            env,
+        )
         let finalized = transfer_erc20_and_finalize(
             env,
             from_offerer: offer_type_is_additional_recipients_type,
@@ -238,6 +218,7 @@ uses (
 /// `_prepareBasicFulfillmentFromCalldata`: validate the parameters, derive
 /// the order hash, emit `OrderFulfilled`, check the status and signature,
 /// authorize with the zone and mark the order filled.
+#[arithmetic(unchecked)]
 fn prepare_basic_fulfillment_from_calldata(
     _ env: Env,
     order_type: u256,
@@ -405,7 +386,8 @@ uses (
             env,
             offerer,
             order_hash,
-            signature: basic_order_signature(),
+            // Read in place with the length masked like seaport-core's decoder.
+            signature: CalldataView::at(cd(SIGNATURE_HEAD) + 0x24),
         )
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
@@ -415,23 +397,9 @@ uses (
     order_hash
 }
 
-/// The signature `bytes`, with the length masked to 32 bits like
-/// seaport-core's decoder.
-fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
-    let at = cd(SIGNATURE_HEAD) + 0x24
-    let len = cd(at) & 0xffffffff
-    var payload = MemBuffer::with_capacity(len as usize)
-    ops.calldatacopy(
-        dest: mut payload,
-        dest_offset: 0,
-        src_offset: at + 32,
-        len,
-    )
-    Bytes::from_payload(source: payload.span())
-}
-
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the
 /// order hash) for a basic order; the ZoneParameters come from calldata.
+#[arithmetic(unchecked)]
 fn call_basic_order_zone(_ order_hash: u256, selector: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -495,7 +463,6 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let item = consideration + 0x20 + (i + 1) * 160
         data.write(offset: item, value: additional_recipients_item_type)
         data.write(offset: item + 0x20, value: additional_recipients_token)
-        data.write(offset: item + 0x40, value: 0)
         data.write(
             offset: item + 0x60,
             value: cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40),
@@ -506,37 +473,22 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
         i += 1
     }
-    data.write(offset: head + extra_data_offset, value: 0)
     data.write(offset: head + extra_data_offset + 32, value: hashes_count)
     if hashes_count == 1 {
         data.write(offset: head + extra_data_offset + 64, value: order_hash)
     }
-    let magic = selector << 224
-    var ret = MemBuffer::with_capacity(32)
-    let zone = cd_address(ZONE)
-    let outcome = call
-        .raw_call(
-            addr: zone,
-            gas: ctx.gas(),
-            value: 0,
-            args: data.span(),
-            ret: mut ret,
-        )
-    if !outcome.success() {
-        revert_with_reason_if_one_is_returned()
-        revert_error(
-            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
-        )
-    }
-    if return_word(ret.span(), initial: 0) != magic {
-        revert_error(
-            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
-        )
-    }
+    let _ = call_and_check_status_with_skip(
+        cd_address(ZONE),
+        order_hash,
+        data,
+        contract_order: false,
+        revert_on_invalid: true,
+    )
 }
 
 /// `_transferIndividual721Or1155Item`: the offered token goes from the
 /// offerer to the caller, directly or through a single-item conduit call.
+#[arithmetic(unchecked)]
 fn transfer_individual_721_or_1155_item(_ env: Env, item_type: u256, conduit_key: u256)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -544,30 +496,37 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     let from = cd_address(OFFERER)
     let identifier = cd(OFFER_IDENTIFIER)
     let amount = cd(OFFER_AMOUNT)
+    var data = transfer_buffer(1)
     if conduit_key != 0 {
-        var data = Buffer::new(0x104)
-        data.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-        data.write(offset: 0x04, value: 0x20)
-        data.write(offset: 0x24, value: 1)
-        data.write(offset: 0x44, value: item_type)
-        data.write(offset: 0x64, value: token.word())
-        data.write(offset: 0x84, value: from.word())
-        data.write(offset: 0xa4, value: ctx.caller().word())
-        data.write(offset: 0xc4, value: identifier)
-        data.write(offset: 0xe4, value: amount)
-        call_conduit(env, conduit_key, args: data.span())
-    } else if item_type == ERC721 as u256 {
-        if amount != 1 {
-            revert_error(InvalidERC721TransferAmount { amount })
-        }
-        perform_erc721_transfer(token, from, to: ctx.caller(), identifier)
+        // One accumulated transfer is exactly the single item `execute` call.
+        let acc = insert(
+            new_accumulator(),
+            mut data,
+            conduit_key,
+            item_type,
+            token,
+            from,
+            to: ctx.caller(),
+            identifier,
+            amount,
+        )
+        let _ = trigger_if_armed(acc, mut data, env)
     } else {
-        perform_erc1155_transfer(token, from, to: ctx.caller(), identifier, amount)
+        perform_transfer(
+            kind: item_type,
+            token,
+            from,
+            to: ctx.caller(),
+            identifier,
+            amount,
+            scratch: mut data,
+        )
     }
 }
 
 /// `_transferNativeTokensAndFinalize`: pay additional recipients and the
 /// offerer from `msg.value` and refund the rest.
+#[arithmetic(unchecked)]
 fn transfer_native_tokens_and_finalize()
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
@@ -629,15 +588,18 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     var current = acc
     var i: u256 = 0
     while i < total_recipients {
-        let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
-        let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
+        let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + (i << 6))
+        let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + 0x20 + (i << 6))
+        // The only checked subtraction of seaport-core's basic order path.
         if from_offerer {
             amount = amount - additional_amount
         }
-        current = transfer_erc20(
+        current = transfer_token(
+            kind: CONDUIT_ERC20,
             token,
             from,
             to: recipient,
+            identifier: 0,
             amount: additional_amount,
             conduit_key,
             acc: current,
@@ -646,10 +608,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
         i += 1
     }
-    transfer_erc20(
+    transfer_token(
+        kind: CONDUIT_ERC20,
         token,
         from,
         to,
+        identifier: 0,
         amount,
         conduit_key,
         acc: current,

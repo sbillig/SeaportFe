@@ -4,6 +4,7 @@ use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
 use std::abi::DynArray
 use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
+use super::abi_view::CalldataView
 
 pub struct Buffer { data: MemBuffer }
 
@@ -29,8 +30,12 @@ impl Buffer {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset))
         }
     }
+    // One shared copy of the checked store keeps each call site small.
+    #[inline(never)]
     pub fn write(mut self, offset: u256, value: u256) {
-        self.check_word(offset)
+        if offset > self.len() || self.len() - offset < 32 {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
         // The complete word lies in this exclusively held owner's allocation.
         unsafe {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
@@ -41,6 +46,16 @@ impl Buffer {
             revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
         }
         self.data.copy_from(dest_offset: offset as usize, source)
+    }
+
+    pub fn copy_calldata(mut self, offset: u256, source: CalldataView, len: u256) {
+        if offset > self.len() || len > self.len() - offset {
+            revert_error(Panic::from(PANIC_INDEX_OUT_OF_BOUNDS))
+        }
+        // The checked range lies in this exclusively held owner's allocation.
+        unsafe {
+            source.copy_to(ptr::offset_bytes(self.data.ptr(), offset), len)
+        }
     }
 
     fn check_word(self, _ offset: u256) {
@@ -106,7 +121,7 @@ impl Buffer {
         size
     }
     /// Copy `len` bytes of calldata from `source` to `offset`.
-    pub fn copy_calldata(mut self, offset: u256, source: u256, len: u256)
+    pub fn copy_calldata_range(mut self, offset: u256, source: u256, len: u256)
     uses (ops: mut RawOps)
     {
         self.check_range(offset, len)

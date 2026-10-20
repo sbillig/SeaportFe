@@ -62,6 +62,7 @@ uses (ctx: Ctx)
 /// contract orders, update statuses and emit `OrderFulfilled`. Returns the
 /// book, the order hashes (zero for skipped orders) and whether any order is
 /// restricted or a contract order.
+#[arithmetic(unchecked)]
 pub fn validate_orders_and_prepare_to_fulfill(
     _ env: Env,
     book: mut Book,
@@ -123,6 +124,7 @@ uses (
 
 /// Second pass of `_validateOrdersAndPrepareToFulfill`: authorize, record and
 /// emit for up to `maximum_fulfilled` orders.
+#[arithmetic(unchecked)]
 fn prepare_available_orders(
     _ env: Env,
     book: mut Book,
@@ -163,6 +165,7 @@ uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut
 /// Validate order `index` and derive its current amounts. Returns whether it
 /// is restricted or a contract order, and whether a non-contract order
 /// offers native tokens. Unavailable orders get a zero hash and numerator.
+#[arithmetic(unchecked)]
 fn validate_and_prepare_order(
     _ env: Env,
     book: mut Book,
@@ -175,7 +178,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     order_hashes[(index) as usize] = 0
     let (order_hash, numerator, denominator) = validate_order(
         env,
-        book,
         order: book.orders[index as usize],
         revert_on_invalid,
     )
@@ -360,6 +362,7 @@ uses (ctx: Ctx)
 }
 
 /// `_fulfillAvailableAdvancedOrders`
+#[arithmetic(unchecked)]
 pub fn fulfill_available_advanced_orders(
     _ env: Env,
     book: mut Book,
@@ -389,9 +392,9 @@ uses (
         recipient,
         non_match: true,
     )
-    let total_offer = offer_fulfillments.list.len() as u256
+    let total_offer = offer_fulfillments.len()
     var executions = MemArray<ExecutionState>::new_zeroed(
-        offer_fulfillments.list.len() + consideration_fulfillments.list.len(),
+        (offer_fulfillments.len() + consideration_fulfillments.len()) as usize,
     )
     var i: u256 = 0
     while i < total_offer {
@@ -408,7 +411,7 @@ uses (
         i += 1
     }
     i = 0
-    while i < consideration_fulfillments.list.len() as u256 {
+    while i < consideration_fulfillments.len() {
         aggregate_into(
             mut book,
             mut executions,
@@ -455,6 +458,7 @@ uses (ctx: Ctx)
 }
 
 /// `_matchAdvancedOrders`
+#[arithmetic(unchecked)]
 pub fn match_advanced_orders(
     _ env: Env,
     book: mut Book,
@@ -483,10 +487,10 @@ uses (
         non_match: false,
     )
     emit_orders_matched(order_hashes)
-    let total_fulfillments = fulfillments.list.len() / 2
-    var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments)
+    let total_fulfillments = fulfillments.len() / 2
+    var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments as usize)
     var i: u256 = 0
-    while i < total_fulfillments as u256 {
+    while i < total_fulfillments {
         apply_fulfillment_into(mut book, mut executions, groups: fulfillments, index: i)
         i += 1
     }
@@ -515,6 +519,7 @@ fn apply_fulfillment_into(
 /// met, refund native tokens and call zones and contract offerers.
 ///
 /// Each phase holds only the pool access it needs.
+#[arithmetic(unchecked)]
 fn perform_final_checks_and_execute_orders(
     _ env: Env,
     book: mut Book,
@@ -604,8 +609,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 /// Transfer the unspent offer items of an available order to the recipient
-/// and require its consideration to be met; restores the original amounts.
-/// Transfers and restores use separate loops over the owned item pool.
+/// and require its consideration to be met, restoring the original amounts.
+#[arithmetic(unchecked)]
 fn settle_order(
     _ env: Env,
     book: mut Book,
@@ -618,109 +623,50 @@ fn settle_order(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let order = ref book.orders[(index) as usize]
-    available[(index) as usize] = order.numerator != 0
     if order.numerator == 0 {
         return acc
     }
-    let settled = transfer_unspent_offer(env, book, order, recipient, acc, mut buf)
-    restore_offer_amounts(mut book.items, order)
-    check_consideration(mut book.items, order, order_index: index)
-    settled
-}
-
-fn transfer_unspent_offer(
-    _ env: Env,
-    book: Book,
-    order: OrderState,
-    recipient: Address,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
+    available[(index) as usize] = true
     var current = acc
     var j: u256 = 0
     while j < order.offer_len {
-        current = transfer_unspent_offer_item(
-            env,
-            book,
-            order,
-            index: j,
-            recipient,
-            acc: current,
-            mut buf,
-        )
+        let item = mut book.items[(order.offer_start + j) as usize]
+        let unspent = item.amount
+        item.amount = item.original
+        if unspent != 0 {
+            current = transfer(
+                Transfer {
+                    item_type: item.item_type,
+                    token: item.token,
+                    identifier: item.identifier,
+                    amount: unspent,
+                    recipient,
+                },
+                from: order.offerer,
+                conduit_key: order.conduit_key,
+                acc: current,
+                mut buf,
+                env,
+            )
+        }
         j += 1
     }
-    current
-}
-
-fn transfer_unspent_offer_item(
-    _ env: Env,
-    book: Book,
-    order: OrderState,
-    index: u256,
-    recipient: Address,
-    acc: Accumulator,
-    buf: mut Buffer,
-) -> Accumulator
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    let item = ref book.items[(order.offer_start + index) as usize]
-    if item.amount == 0 {
-        return acc
-    }
-    let unspent = Transfer {
-        item_type: item.item_type,
-        token: item.token,
-        identifier: item.identifier,
-        amount: item.amount,
-        recipient,
-    }
-    transfer(
-        unspent,
-        from: order.offerer,
-        conduit_key: order.conduit_key,
-        acc,
-        mut buf,
-        env,
-    )
-}
-
-fn restore_offer_amounts(_ items: mut MemArray<Item>, order: OrderState) {
-    var j: u256 = 0
-    while j < order.offer_len {
-        let item = mut items[(order.offer_start + j) as usize]
+    j = 0
+    while j < order.consideration_len {
+        let item = mut book.items[(order.consideration_start + j) as usize]
+        if item.amount != 0 {
+            revert_error(
+                ConsiderationNotMet {
+                    orderIndex: index,
+                    considerationIndex: j,
+                    shortfallAmount: item.amount,
+                },
+            )
+        }
         item.amount = item.original
         j += 1
     }
-}
-
-fn check_consideration(_ items: mut MemArray<Item>, order: OrderState, order_index: u256) {
-    var j: u256 = 0
-    while j < order.consideration_len {
-        check_consideration_item(mut items, order, order_index, index: j)
-        j += 1
-    }
-}
-
-fn check_consideration_item(
-    _ items: mut MemArray<Item>,
-    order: OrderState,
-    order_index: u256,
-    index: u256,
-) {
-    let item = mut items[(order.consideration_start + index) as usize]
-    if item.amount != 0 {
-        revert_error(
-            ConsiderationNotMet {
-                orderIndex: order_index,
-                considerationIndex: index,
-                shortfallAmount: item.amount,
-            },
-        )
-    }
-    item.amount = item.original
+    current
 }
 
 fn validate_available_order(

@@ -2,9 +2,10 @@
 // ZoneInteraction, the contract order parts of OrderValidator and the zone
 // and contract offerer calldata encodings of ConsiderationEncoder and
 // ConsiderationDecoder.
+#![arithmetic(unchecked)]
 use super::status::OrderStore
 use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes32}
+use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, RawOps, revert_error}
 use core::ptr::MemArray
 use super::errors::{
@@ -13,6 +14,7 @@ use super::errors::{
     InvalidRestrictedOrder,
 }
 use super::lowlevel::revert_with_reason_if_one_is_returned
+use super::abi_view::CalldataView
 use super::buffer::{Buffer, read_word, return_word}
 use super::model::{Book, Item, OrderState}
 use super::status::take_contract_nonce
@@ -93,11 +95,11 @@ fn padded(_ len: u256) -> u256 {
     (len + 31) & !(31 as u256)
 }
 
-fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: Bytes) -> u256 {
-    let size = 32 + padded(bytes.len() as u256)
-    dst.write(offset, value: bytes.len() as u256)
-    dst.copy_from(offset: offset + 32, source: bytes.payload_span())
-    size
+fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: CalldataView) -> u256 {
+    let len = bytes.len()
+    dst.write(offset, value: len)
+    dst.copy_calldata(offset: offset + 32, source: bytes.offset(32), len)
+    32 + padded(len)
 }
 
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
@@ -108,6 +110,62 @@ fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count
         i += 1
     }
     32 + count * 32
+}
+
+/// Size of the order's offer as `SpentItem[]`, its consideration as
+/// `ReceivedItem[]`, its extra data and `hashes_count` order hashes.
+fn order_tails_size(_ order: OrderState, hashes_count: u256) -> u256 {
+    32
+        + order.offer_len * 128
+        + 32
+        + order.consideration_len * 160
+        + 32
+        + padded(order.extra_data.len() as u256)
+        + 32
+        + hashes_count * 32
+}
+
+/// Write the tails measured by `order_tails_size` from `tail` on, relative to
+/// `head`, and their offsets to the four words at `slots`.
+fn write_order_tails(
+    _ data: mut Buffer,
+    head: u256,
+    slots: u256,
+    tail: u256,
+    book: Book,
+    order: OrderState,
+    order_hashes: MemArray<u256>,
+    hashes_count: u256,
+) {
+    var at = tail
+    data.write(offset: slots, value: at)
+    at = at
+        + write_spent_items(
+            mut data,
+            offset: head + at,
+            book,
+            start: order.offer_start,
+            count: order.offer_len,
+            use_original: true,
+        )
+    data.write(offset: slots + 0x20, value: at)
+    at = at
+        + write_received_items(
+            mut data,
+            offset: head + at,
+            book,
+            start: order.consideration_start,
+            count: order.consideration_len,
+        )
+    data.write(offset: slots + 0x40, value: at)
+    at = at + write_bytes(mut data, offset: head + at, order.extra_data)
+    data.write(offset: slots + 0x60, value: at)
+    write_hashes(
+        mut data,
+        offset: head + at,
+        order_hashes,
+        count: hashes_count,
+    )
 }
 
 /// `authorizeOrder(ZoneParameters)` or `validateOrder(ZoneParameters)` with
@@ -124,72 +182,27 @@ fn encode_zone_call(
 ) -> Buffer
 uses (ctx: Ctx)
 {
-    let params_size = 0x140
-        + 32
-        + order.offer_len * 128
-        + 32
-        + order.consideration_len * 160
-        + 32
-        + padded(order.extra_data.len() as u256)
-        + 32
-        + hashes_count * 32
-    let size = 0x24 + params_size
-    var data = Buffer::new(size)
+    var data = Buffer::new(0x24 + 0x140 + order_tails_size(order, hashes_count))
     data.write(offset: 0, value: selector << 224)
     data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
     data.write(offset: head, value: order_hash)
     data.write(offset: head + 0x20, value: ctx.caller().word())
     data.write(offset: head + 0x40, value: order.offerer.word())
-    var tail: u256 = 0x140
-    data.write(offset: head + 0x60, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.offer_start,
-            count: order.offer_len,
-            use_original: true,
-        )
-    data.write(offset: head + 0x80, value: tail)
-    tail = tail
-        + write_received_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.consideration_start,
-            count: order.consideration_len,
-        )
-    data.write(offset: head + 0xa0, value: tail)
-    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
-    data.write(offset: head + 0xc0, value: tail)
-    write_hashes(
+    write_order_tails(
         mut data,
-        offset: head + tail,
+        head,
+        slots: head + 0x60,
+        tail: 0x140,
+        book,
+        order,
         order_hashes,
-        count: hashes_count,
+        hashes_count,
     )
     data.write(offset: head + 0xe0, value: order.start_time)
     data.write(offset: head + 0x100, value: order.end_time)
     data.write(offset: head + 0x120, value: order.zone_hash)
     data
-}
-
-/// `_callAndCheckStatus`: call and require the selector as return value,
-/// reverting with `InvalidRestrictedOrder` or `InvalidContractOrder`.
-fn call_and_check_status(_ target: Address, order_hash: u256, data: Buffer, contract_order: bool)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if !call_and_check_status_with_skip(
-        target,
-        order_hash,
-        data,
-        contract_order,
-        revert_on_invalid: true,
-    ) {
-        revert_invalid_order(order_hash, contract_order)
-    }
 }
 
 fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
@@ -204,8 +217,9 @@ fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
 }
 
 /// `_callAndCheckStatusWithSkip`: a failed call returns false unless
-/// `revert_on_invalid`; a wrong magic value always reverts.
-fn call_and_check_status_with_skip(
+/// `revert_on_invalid`; a wrong magic value always reverts. With
+/// `revert_on_invalid` this is `_callAndCheckStatus`.
+pub fn call_and_check_status_with_skip(
     _ target: Address,
     order_hash: u256,
     data: Buffer,
@@ -237,30 +251,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     true
 }
 
-/// `_assertRestrictedAdvancedOrderAuthorization`
-pub fn assert_restricted_advanced_order_authorization(
-    _ book: Book,
-    order: OrderState,
-    order_hashes: MemArray<u256>,
-    order_hash: u256,
-    order_index: u256,
-)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let data = encode_zone_call(
-            book,
-            order,
-            order_hash,
-            order_hashes,
-            hashes_count: order_index,
-            selector: AUTHORIZE_ORDER_SELECTOR,
-        )
-        call_and_check_status(order.zone, order_hash, data, contract_order: false)
-    }
-}
-
-/// `_checkRestrictedAdvancedOrderAuthorization`
+/// `_checkRestrictedAdvancedOrderAuthorization`, or with `revert_on_invalid`
+/// `_assertRestrictedAdvancedOrderAuthorization`.
 pub fn check_restricted_advanced_order_authorization(
     _ book: Book,
     order: OrderState,
@@ -310,10 +302,22 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             hashes_count: order_hashes.len() as u256,
             selector: VALIDATE_ORDER_SELECTOR,
         )
-        call_and_check_status(order.zone, order_hash, data, contract_order: false)
+        let _ = call_and_check_status_with_skip(
+            order.zone,
+            order_hash,
+            data,
+            contract_order: false,
+            revert_on_invalid: true,
+        )
     } else if order.order_type == CONTRACT as u256 {
         let data = encode_ratify_order(book, order, order_hash, order_hashes)
-        call_and_check_status(order.offerer, order_hash, data, contract_order: true)
+        let _ = call_and_check_status_with_skip(
+            order.offerer,
+            order_hash,
+            data,
+            contract_order: true,
+            revert_on_invalid: true,
+        )
     }
 }
 
@@ -324,51 +328,22 @@ fn encode_ratify_order(
     order_hash: u256,
     order_hashes: MemArray<u256>,
 ) -> Buffer {
-    let size = 4
-        + 0xa0
-        + 32
-        + order.offer_len * 128
-        + 32
-        + order.consideration_len * 160
-        + 32
-        + padded(order.extra_data.len() as u256)
-        + 32
-        + order_hashes.len() as u256 * 32
-    var data = Buffer::new(size)
+    let hashes_count = order_hashes.len() as u256
+    var data = Buffer::new(4 + 0xa0 + order_tails_size(order, hashes_count))
     data.write(offset: 0, value: RATIFY_ORDER_SELECTOR << 224)
-    let head: u256 = 4
-    data.write(
-        offset: head + 0x80,
-        value: order_hash ^ (order.offerer.word() << 96),
-    )
-    var tail: u256 = 0xa0
-    data.write(offset: head, value: tail)
-    tail = tail
-        + write_spent_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.offer_start,
-            count: order.offer_len,
-            use_original: true,
-        )
-    data.write(offset: head + 0x20, value: tail)
-    tail = tail
-        + write_received_items(
-            mut data,
-            offset: head + tail,
-            book,
-            start: order.consideration_start,
-            count: order.consideration_len,
-        )
-    data.write(offset: head + 0x40, value: tail)
-    tail = tail + write_bytes(mut data, offset: head + tail, order.extra_data)
-    data.write(offset: head + 0x60, value: tail)
-    write_hashes(
+    write_order_tails(
         mut data,
-        offset: head + tail,
+        head: 4,
+        slots: 4,
+        tail: 0xa0,
+        book,
+        order,
         order_hashes,
-        count: order_hashes.len() as u256,
+        hashes_count,
+    )
+    data.write(
+        offset: 4 + 0x80,
+        value: order_hash ^ (order.offerer.word() << 96),
     )
     data
 }
@@ -384,7 +359,7 @@ uses (ctx: Ctx)
         + 32
         + order.consideration_len * 128
         + 32
-        + padded(order.extra_data.len() as u256)
+        + padded(order.extra_data.len())
     var data = Buffer::new(size)
     data.write(offset: 0, value: GENERATE_ORDER_SELECTOR << 224)
     let head: u256 = 4
