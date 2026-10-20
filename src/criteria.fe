@@ -2,7 +2,7 @@
 // CriteriaResolution: resolve criteria-based items to concrete identifiers
 // with Merkle proofs.
 use std::evm::{keccak_words, revert_error}
-use core::ptr::{self, MemArray}
+use super::abi_view::CalldataView
 use super::errors::{
     ConsiderationCriteriaResolverOutOfRange,
     CriteriaNotEnabledForItem,
@@ -19,8 +19,8 @@ use super::types::{CONTRACT, OFFER}
 pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
     let total_orders = book.orders.len() as u256
     var i: u256 = 0
-    while i < resolvers.list.len() as u256 {
-        let resolver = resolvers.list[(i) as usize]
+    while i < resolvers.len() {
+        let resolver = resolvers.get(i)
         if resolver.order_index >= total_orders {
             revert_error(
                 OrderCriteriaResolverOutOfRange {
@@ -37,7 +37,6 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                 update_criteria_item(
                     mut book.items[(order.consideration_start + resolver.index) as usize],
                     resolver,
-                    proofs: resolvers.proofs,
                 )
             } else {
                 if resolver.index >= order.offer_len {
@@ -46,7 +45,6 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
                 update_criteria_item(
                     mut book.items[(order.offer_start + resolver.index) as usize],
                     resolver,
-                    proofs: resolvers.proofs,
                 )
             }
         }
@@ -89,7 +87,7 @@ fn requires_resolution(_ item: Item, _ order_type: u256) -> bool {
         && (order_type != CONTRACT as u256 || item.identifier != 0)
 }
 
-fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray<u256>) {
+fn update_criteria_item(_ item: mut Item, _ resolver: Resolver) {
     if checked_enum(item.item_type, variants: 6) <= 3 {
         revert_error(CriteriaNotEnabledForItem {})
     }
@@ -97,11 +95,9 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray
         verify_proof(
             leaf: resolver.identifier,
             root: item.identifier,
-            proofs,
-            start: resolver.proof_start,
-            len: resolver.proof_len,
+            proof: resolver.proof,
         )
-    } else if resolver.proof_len != 0 {
+    } else if resolver.proof.word(0) != 0 {
         revert_error(InvalidProof {})
     }
     item.item_type = item.item_type - 2
@@ -109,18 +105,16 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray
 }
 
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
-pub fn verify_proof(leaf: u256, root: u256, proofs: MemArray<u256>, start: u256, len: u256) {
+fn verify_proof(leaf: u256, root: u256, proof: CalldataView) {
     var computed = keccak_words([leaf])
-    // Seaport's verifier walks `len << 5` bytes of memory with the raw length
-    // word: its five high bits vanish, and a length beyond the copied proof
-    // reads on until gas runs out.
-    let words = (len << 5) >> 5
+    // Seaport's verifier walks `len << 5` bytes of its proof copy with the
+    // raw length word: its five high bits vanish, and a length beyond the
+    // copied elements reads on until gas runs out, as reading on in calldata
+    // does.
+    let words = (proof.word(0) << 5) >> 5
     var i: u256 = 0
     while i < words {
-        // Reads past the pool only expand memory, like Seaport's walk.
-        let element = unsafe {
-            *ptr::offset(proofs.ptr(), start + i)
-        }
+        let element = proof.element(index: i, stride: 32).word(0)
         computed = if computed > element {
             keccak_words([element, computed])
         } else {

@@ -124,8 +124,7 @@ pub contract ModelHarness {
             let groups = nested_components(args.array_argument(32))
             let _ = aggregate_offer_items(
                 mut book,
-                groups,
-                group: ref groups.list[0],
+                group: groups.group(0),
                 recipient: Address::new(0xdef),
             )
             true

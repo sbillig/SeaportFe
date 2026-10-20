@@ -77,31 +77,87 @@ pub struct Book {
     pub used: u256,
 }
 
+/// A `CriteriaResolver`, read in calldata like the rest of `Resolvers`.
 pub struct Resolver {
     pub order_index: u256,
     pub side: u256,
     pub index: u256,
     pub identifier: u256,
-    /// Range of the proof in `Resolvers.proofs`.
-    pub proof_start: u256,
-    pub proof_len: u256,
+    /// The `bytes32[]` proof, whose raw length word Seaport's copy keeps.
+    pub proof: CalldataView,
 }
 
 impl Copy for Resolver {}
 
-pub struct Resolvers { pub list: MemArray<Resolver>, pub proofs: MemArray<u256> }
+/// `CriteriaResolver[]` in calldata. Seaport's memory copies of resolvers,
+/// fulfillment components and fulfillments are never written, so reading
+/// them in place agrees with them.
+pub struct Resolvers { input: CalldataView }
+
+impl Copy for Resolvers {}
+
+impl Resolvers {
+    pub fn len(self) -> u256 {
+        self.input.len()
+    }
+
+    pub fn get(self, _ index: u256) -> Resolver {
+        let r = self.input.dynamic_element(index)
+        Resolver {
+            order_index: r.word(0),
+            side: r.word(32),
+            index: r.word(64),
+            identifier: r.word(96),
+            proof: r.child(128),
+        }
+    }
+}
 
 pub struct Component { pub order_index: u256, pub item_index: u256 }
 
 impl Copy for Component {}
 
-/// A range of `Groups.components`.
-pub struct Group { pub start: u256, pub len: u256 }
+/// A `FulfillmentComponent[]` in calldata.
+pub struct Group { input: CalldataView }
 
 impl Copy for Group {}
 
-/// `FulfillmentComponent[][]`
-pub struct Groups { pub list: MemArray<Group>, pub components: MemArray<Component> }
+impl Group {
+    pub fn len(self) -> u256 {
+        self.input.len()
+    }
+
+    pub fn component(self, _ index: u256) -> Component {
+        let c = self.input.element(index, stride: 64)
+        Component { order_index: c.word(0), item_index: c.word(32) }
+    }
+}
+
+/// `FulfillmentComponent[][]`, or the component arrays of `Fulfillment[]`
+/// (`paired`: offer at `2 * i`, consideration at `2 * i + 1`), in calldata.
+pub struct Groups { input: CalldataView, paired: bool }
+
+impl Copy for Groups {}
+
+impl Groups {
+    pub fn len(self) -> u256 {
+        if self.paired {
+            2 * self.input.len()
+        } else {
+            self.input.len()
+        }
+    }
+
+    pub fn group(self, _ index: u256) -> Group {
+        Group {
+            input: if self.paired {
+                self.input.dynamic_element(index >> 1).child((index & 1) * 32)
+            } else {
+                self.input.dynamic_element(index)
+            },
+        }
+    }
+}
 
 /// Solidity validates protocol enums when their words are read as enums.
 pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
@@ -237,126 +293,19 @@ pub fn single_order(_ input: CalldataView, advanced: bool) -> Book {
 
 /// `_decodeCriteriaResolvers`
 pub fn resolvers(_ input: CalldataView) -> Resolvers {
-    let n = input.len() as usize
-    var total: usize = 0
-    var i: usize = 0
-    while i < n {
-        total += input.dynamic_element(i as u256).child(128).len() as usize
-        i += 1
-    }
-    var out = Resolvers {
-        list: unsafe {
-            MemArray<Resolver>::new_uninit(n)
-        },
-        proofs: unsafe {
-            MemArray<u256>::new_uninit(total)
-        },
-    }
-    var start: usize = 0
-    i = 0
-    while i < n {
-        let r = input.dynamic_element(i as u256)
-        let proof = r.child(128)
-        let len = proof.len() as usize
-        var j: usize = 0
-        while j < len {
-            out.proofs[start + j] = proof.element(index: j as u256, stride: 32).word(0)
-            j += 1
-        }
-        out.list[i] = Resolver {
-            order_index: r.word(0),
-            side: r.word(32),
-            index: r.word(64),
-            identifier: r.word(96),
-            proof_start: start as u256,
-            // `_decodeCriteriaProof` copies the raw length word.
-            proof_len: proof.word(0),
-        }
-        start += len
-        i += 1
-    }
-    out
+    Resolvers { input }
 }
 
 pub fn no_resolvers() -> Resolvers {
-    Resolvers { list: MemArray<Resolver>::new_zeroed(0), proofs: MemArray<u256>::new_zeroed(0) }
+    Resolvers { input: CalldataView::empty() }
 }
 
-/// `_decodeFulfillmentComponents` into group `index` at `start`.
-fn group_components(
-    _ groups: mut Groups,
-    index: usize,
-    start: usize,
-    items: CalldataView,
-) -> usize {
-    let len = items.len() as usize
-    var i: usize = 0
-    while i < len {
-        let c = items.element(index: i as u256, stride: 64)
-        groups.components[start + i] = Component { order_index: c.word(0), item_index: c.word(32) }
-        i += 1
-    }
-    groups.list[index] = Group { start: start as u256, len: len as u256 }
-    start + len
+/// `_decodeNestedFulfillmentComponents`
+pub fn nested_components(_ input: CalldataView) -> Groups {
+    Groups { input, paired: false }
 }
 
-/// `FulfillmentComponent[][]` as groups of one component pool.
-pub fn nested_components(_ nested: CalldataView) -> Groups {
-    let n = nested.len() as usize
-    var total: usize = 0
-    var i: usize = 0
-    while i < n {
-        total += nested.dynamic_element(i as u256).len() as usize
-        i += 1
-    }
-    var groups = Groups {
-        list: unsafe {
-            MemArray<Group>::new_uninit(n)
-        },
-        components: unsafe {
-            MemArray<Component>::new_uninit(total)
-        },
-    }
-    var start: usize = 0
-    i = 0
-    while i < n {
-        start = group_components(
-            mut groups,
-            index: i,
-            start,
-            items: nested.dynamic_element(i as u256),
-        )
-        i += 1
-    }
-    groups
-}
-
-/// `Fulfillment[]` as pairs of groups (offer at `2 * i`, consideration at
-/// `2 * i + 1`).
+/// `_decodeFulfillments`
 pub fn fulfillments(_ input: CalldataView) -> Groups {
-    let n = input.len() as usize
-    var total: usize = 0
-    var i: usize = 0
-    while i < n {
-        let f = input.dynamic_element(i as u256)
-        total += (f.child(0).len() + f.child(32).len()) as usize
-        i += 1
-    }
-    var groups = Groups {
-        list: unsafe {
-            MemArray<Group>::new_uninit(2 * n)
-        },
-        components: unsafe {
-            MemArray<Component>::new_uninit(total)
-        },
-    }
-    var start: usize = 0
-    i = 0
-    while i < n {
-        let f = input.dynamic_element(i as u256)
-        start = group_components(mut groups, index: 2 * i, start, items: f.child(0))
-        start = group_components(mut groups, index: 2 * i + 1, start, items: f.child(32))
-        i += 1
-    }
-    groups
+    Groups { input, paired: true }
 }
