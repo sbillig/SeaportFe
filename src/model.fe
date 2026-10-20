@@ -188,6 +188,7 @@ pub fn checked_enum(_ value: u256, variants: u256) -> u256 {
 /// Copy an offer (`consideration: false`) or consideration array into the
 /// pool at `start`.
 #[arithmetic(unchecked)]
+#[inline(always)]
 fn fill_items(_ items: mut MemArray<Item>, start: u256, input: CalldataView, consideration: bool) {
     let stride: u256 = if consideration { 192 } else { 160 }
     var i: u256 = 0

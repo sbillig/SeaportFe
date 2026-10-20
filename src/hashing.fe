@@ -79,6 +79,7 @@ pub fn derive_components_hash(_ order: CalldataView) -> u256 {
 /// array at `items`. Each item is hashed from frame scratch; only the item
 /// hashes take heap memory.
 #[arithmetic(unchecked)]
+#[inline(always)]
 fn hash_items(_ items: CalldataView, count: u256, consideration: bool) -> u256 {
     let hashes = ptr::alloc_bytes(count * 32)
     var i: u256 = 0
