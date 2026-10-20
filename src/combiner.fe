@@ -741,13 +741,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
+#[arithmetic(unchecked)]
 pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
     let count = values.len() as u256
-    var out = Buffer::new(32 + count * 32)
-    // The buffer holds the length word and a zeroed word per value.
-    unsafe {
-        out.put(offset: 0, value: count)
-    }
+    // The tail holds a zeroed word per value, so no offset overflows.
+    var out = Buffer::array(count, stride: 32)
     var i: u256 = 0
     while i < count {
         if values[i as usize] {
@@ -773,13 +771,11 @@ fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
     log.log1(data: data.span(), topic0: OrdersMatched::TOPIC0)
 }
 
+#[arithmetic(unchecked)]
 pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
     let count = executions.len() as u256
-    var out = Buffer::new(32 + count * 224)
-    // The buffer holds the length word and seven words per execution.
-    unsafe {
-        out.put(offset: 0, value: count)
-    }
+    // The tail holds seven words per execution, so no offset overflows.
+    var out = Buffer::array(count, stride: 224)
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]

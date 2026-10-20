@@ -13,6 +13,16 @@ impl Buffer {
         data.truncate(len as usize)
         Buffer { data }
     }
+    /// A zeroed ABI array tail for `count` elements of `stride` bytes, with
+    /// its length word written.
+    pub fn array(_ count: u256, stride: u256) -> Self {
+        var data = Buffer::new(32 + count * stride)
+        // The buffer holds the length word.
+        unsafe {
+            data.put(offset: 0, value: count)
+        }
+        data
+    }
     pub fn len(self) -> u256 {
         self.data.len() as u256
     }
@@ -80,6 +90,14 @@ impl Buffer {
             src_offset: source,
             len,
         )
+    }
+    /// The size `32 + count * stride` of an array tail at `offset`, which
+    /// must lie in the buffer (see `check_range`). Offsets within the tail
+    /// can then be computed without overflow checks.
+    pub fn check_array(self, offset: u256, count: u256, stride: u256) -> u256 {
+        let size = 32 + count * stride
+        self.check_range(offset, len: size)
+        size
     }
     /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
     /// buffer. One check can cover a run of `put`s.

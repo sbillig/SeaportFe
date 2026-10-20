@@ -259,17 +259,15 @@ uses (ctx: Ctx, conduits: mut StorageMap<Address, ConduitProperties>, log: mut L
     properties.owner = ctx.caller().word()
 }
 
+#[arithmetic(unchecked)]
 pub fn get_channels(_ conduit: Address) -> DynArray<Address>
 uses (conduits: StorageMap<Address, ConduitProperties>)
 {
     let properties = ref conduits[conduit]
     properties.assert_exists()
     let length = properties.channels.len()
-    var channels = Buffer::new(32 + length * 32)
-    // The buffer holds the length word and a word per channel.
-    unsafe {
-        channels.put(offset: 0, value: length)
-    }
+    // The tail holds a word per channel, so no offset overflows.
+    var channels = Buffer::array(length, stride: 32)
     var i: u256 = 0
     while i < length {
         unsafe {

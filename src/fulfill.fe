@@ -316,6 +316,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 /// `SpentItem[]`, or with `received` as a `ReceivedItem[]`; returns its size.
 /// The words are those of the typed event fields: the item type truncated to
 /// `uint8`, the current amount and the receiver.
+#[arithmetic(unchecked)]
 fn write_fulfilled_items(
     _ dst: mut Buffer,
     offset: u256,
@@ -325,9 +326,8 @@ fn write_fulfilled_items(
     received: bool,
 ) -> u256 {
     let stride: u256 = if received { 160 } else { 128 }
-    let size = 32 + count * stride
-    dst.check_range(offset, len: size)
-    // Every word below lies in the checked range.
+    let size = dst.check_array(offset, count, stride)
+    // Every word below lies in the checked range, so no offset overflows.
     unsafe {
         dst.put(offset, value: count)
     }

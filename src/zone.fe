@@ -45,6 +45,7 @@ fn item_amount(_ item: Item, _ use_original: bool) -> u256 {
     }
 }
 
+#[arithmetic(unchecked)]
 fn write_spent_items(
     _ dst: mut Buffer,
     offset: u256,
@@ -53,9 +54,8 @@ fn write_spent_items(
     count: u256,
     use_original: bool,
 ) -> u256 {
-    let size = 32 + count * 128
-    dst.check_range(offset, len: size)
-    // Every word below lies in the checked range.
+    let size = dst.check_array(offset, count, stride: 128)
+    // Every word below lies in the checked range, so no offset overflows.
     unsafe {
         dst.put(offset, value: count)
     }
@@ -74,6 +74,7 @@ fn write_spent_items(
     size
 }
 
+#[arithmetic(unchecked)]
 fn write_received_items(
     _ dst: mut Buffer,
     offset: u256,
@@ -81,9 +82,8 @@ fn write_received_items(
     start: u256,
     count: u256,
 ) -> u256 {
-    let size = 32 + count * 160
-    dst.check_range(offset, len: size)
-    // Every word below lies in the checked range.
+    let size = dst.check_array(offset, count, stride: 160)
+    // Every word below lies in the checked range, so no offset overflows.
     unsafe {
         dst.put(offset, value: count)
     }
@@ -114,10 +114,10 @@ fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: Bytes) -> u256 {
     size
 }
 
+#[arithmetic(unchecked)]
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
-    let size = 32 + count * 32
-    dst.check_range(offset, len: size)
-    // Every word below lies in the checked range.
+    let size = dst.check_array(offset, count, stride: 32)
+    // Every word below lies in the checked range, so no offset overflows.
     unsafe {
         dst.put(offset, value: count)
     }
