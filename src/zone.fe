@@ -335,7 +335,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 /// `_assertRestrictedAdvancedOrderValidity`: `validateOrder` for restricted
-/// orders and `ratifyOrder` for contract orders.
+/// orders and `ratifyOrder` for contract orders. One encoding and call site
+/// for both keeps a single call buffer in the frame.
 pub fn assert_restricted_advanced_order_validity(
     _ book: Book,
     order: OrderState,
@@ -344,39 +345,34 @@ pub fn assert_restricted_advanced_order_validity(
 )
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let data = encode_zone_call(
-            book,
-            order,
-            order_hash,
-            order_hashes,
-            hashes_count: order_hashes.len() as u256,
-            selector: VALIDATE_ORDER_SELECTOR,
-        )
-        let _ = call_and_check_status_with_skip(
-            order.zone,
-            order_hash,
-            data,
-            contract_order: false,
-            revert_on_invalid: true,
-        )
-    } else if order.order_type == CONTRACT as u256 {
-        let data = encode_zone_call(
-            book,
-            order,
-            order_hash,
-            order_hashes,
-            hashes_count: order_hashes.len() as u256,
-            selector: RATIFY_ORDER_SELECTOR,
-        )
-        let _ = call_and_check_status_with_skip(
-            order.offerer,
-            order_hash,
-            data,
-            contract_order: true,
-            revert_on_invalid: true,
-        )
+    // Contract orders are never restricted.
+    let restricted = is_restricted_and_caller_not_zone(order.order_type, order.zone)
+    if !restricted && order.order_type != CONTRACT as u256 {
+        return
     }
+    let data = encode_zone_call(
+        book,
+        order,
+        order_hash,
+        order_hashes,
+        hashes_count: order_hashes.len() as u256,
+        selector: if restricted {
+            VALIDATE_ORDER_SELECTOR
+        } else {
+            RATIFY_ORDER_SELECTOR
+        },
+    )
+    let _ = call_and_check_status_with_skip(
+        if restricted {
+            order.zone
+        } else {
+            order.offerer
+        },
+        order_hash,
+        data,
+        contract_order: !restricted,
+        revert_on_invalid: true,
+    )
 }
 
 /// `_encodeGenerateOrder`: offer and consideration both as `SpentItem[]`.
