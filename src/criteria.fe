@@ -131,11 +131,12 @@ fn verify_proof(leaf: u256, root: u256, proof: CalldataView) {
     var i: u256 = 0
     while i < words {
         let element = proof.element(index: i, stride: 32).word(0)
-        computed = if computed > element {
-            keccak_words([element, computed])
+        let (low, high) = if computed > element {
+            (element, computed)
         } else {
-            keccak_words([computed, element])
+            (computed, element)
         }
+        computed = keccak_words([low, high])
         i += 1
     }
     if computed != root {

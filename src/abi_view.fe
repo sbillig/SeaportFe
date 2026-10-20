@@ -127,6 +127,14 @@ impl CalldataView {
         Self { pos: self.pos + 32 + index * stride }
     }
 
+    /// The words from `self` on as the element heads of an array with
+    /// dynamic elements: its element `i` is the tail whose offset word, relative
+    /// to `self`, is word `i`. For the arguments, element 0 is the first.
+    #[arithmetic(unchecked)]
+    pub fn heads(self) -> Self {
+        Self { pos: self.pos - 32 }
+    }
+
     /// Element `index` of the array at `self` with dynamic elements.
     #[arithmetic(unchecked)]
     pub fn dynamic_element(self, _ index: u256) -> Self {

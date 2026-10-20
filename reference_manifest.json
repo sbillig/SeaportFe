@@ -5,9 +5,11 @@
     "seaport_core": "1.6.5"
   },
   "compiler": {
-    "url": "https://github.com/argotorg/fe.git",
-    "branch": "master",
-    "revision": "822e8087859a6f2c298394fb8f5ffca0f400245c",
-    "sonatina_revision": "897941a7450c0d0e5aa4c7e4539c79beb008eea5"
+    "url": "https://github.com/sbillig/fe.git",
+    "branch": "opt/seaport-size-20261019",
+    "revision": "509d672b816238cf741885478079ac30b623b7f9",
+    "sonatina_url": "https://github.com/sbillig/sonatina.git",
+    "sonatina_revision": "572125c0a81eb8e113d4b1d9eed7efc8c892d72b",
+    "optimize": "s"
   }
 }

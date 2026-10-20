@@ -178,7 +178,7 @@ entry points (fulfill, match, validate, cancel, `getOrderHash`) and the
 conduit batch functions use numeric selectors (their calldata is read raw),
 so they have no ABI entry. `SeaportMsg` keeps the typed forms for callers.
 `OrderValidated` is written with a raw log operation, and custom errors with
-static fields revert through the shared encoders of `error_data.fe`; the Fe
+static fields revert through the shared encoders of `raw_abi.fe`; the Fe
 ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
 
 ## Limitations
