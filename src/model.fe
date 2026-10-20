@@ -13,9 +13,8 @@
 // - `original`: the current amount before fulfillment aggregation.
 //
 // All items of all orders live in one owned pool (`Book.items`); orders
-// describe their offer and consideration as index ranges. Signatures and
-// extra data stay in calldata.
-// Resolver proofs and fulfillment components also have non-Copy owners.
+// describe their offer and consideration as index ranges. Signatures, extra
+// data, criteria resolvers and fulfillment components stay in calldata.
 // Separate order and item fields allow scoped views of descriptors during item
 // mutation; replacing an item pool requires exclusive access to its Book.
 //
