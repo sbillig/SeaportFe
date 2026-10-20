@@ -5,7 +5,7 @@
 use core::ptr::{MemArray, MemBuffer}
 use std::abi::{Bytes, Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
-use super::buffer::{Buffer, return_word}
+use super::buffer::Buffer
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
@@ -29,7 +29,6 @@ use super::executor::{
     Accumulator,
 }
 use super::hashing::{CONSIDERATION_ITEM_TYPEHASH, Env, OFFER_ITEM_TYPEHASH, ORDER_TYPEHASH}
-use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -44,9 +43,9 @@ use super::types::{ReceivedItem, SpentItem}
 use super::zone::{
     AUTHORIZE_ORDER_SELECTOR,
     VALIDATE_ORDER_SELECTOR,
+    call_and_check_status_with_skip,
     is_restricted_and_caller_not_zone,
 }
-use super::errors::InvalidRestrictedOrder
 
 // Calldata offsets of BasicOrderParameters (behind the selector and the
 // struct offset word).
@@ -483,28 +482,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     if hashes_count == 1 {
         data.write(offset: head + extra_data_offset + 64, value: order_hash)
     }
-    let magic = selector << 224
-    var ret = MemBuffer::with_capacity(32)
-    let zone = cd_address(ZONE)
-    let outcome = call
-        .raw_call(
-            addr: zone,
-            gas: ctx.gas(),
-            value: 0,
-            args: data.span(),
-            ret: mut ret,
-        )
-    if !outcome.success() {
-        revert_with_reason_if_one_is_returned()
-        revert_error(
-            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
-        )
-    }
-    if return_word(ret.span(), initial: 0) != magic {
-        revert_error(
-            InvalidRestrictedOrder { orderHash: Bytes32 { val: order_hash } },
-        )
-    }
+    let _ = call_and_check_status_with_skip(
+        cd_address(ZONE),
+        order_hash,
+        data,
+        contract_order: false,
+        revert_on_invalid: true,
+    )
 }
 
 /// `_transferIndividual721Or1155Item`: the offered token goes from the

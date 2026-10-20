@@ -177,22 +177,6 @@ uses (ctx: Ctx)
     data
 }
 
-/// `_callAndCheckStatus`: call and require the selector as return value,
-/// reverting with `InvalidRestrictedOrder` or `InvalidContractOrder`.
-fn call_and_check_status(_ target: Address, order_hash: u256, data: Buffer, contract_order: bool)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if !call_and_check_status_with_skip(
-        target,
-        order_hash,
-        data,
-        contract_order,
-        revert_on_invalid: true,
-    ) {
-        revert_invalid_order(order_hash, contract_order)
-    }
-}
-
 fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
     if contract_order {
         revert_error(
@@ -205,8 +189,9 @@ fn revert_invalid_order(_ order_hash: u256, _ contract_order: bool) -> ! {
 }
 
 /// `_callAndCheckStatusWithSkip`: a failed call returns false unless
-/// `revert_on_invalid`; a wrong magic value always reverts.
-fn call_and_check_status_with_skip(
+/// `revert_on_invalid`; a wrong magic value always reverts. With
+/// `revert_on_invalid` this is `_callAndCheckStatus`.
+pub fn call_and_check_status_with_skip(
     _ target: Address,
     order_hash: u256,
     data: Buffer,
@@ -238,30 +223,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     true
 }
 
-/// `_assertRestrictedAdvancedOrderAuthorization`
-pub fn assert_restricted_advanced_order_authorization(
-    _ book: Book,
-    order: OrderState,
-    order_hashes: MemArray<u256>,
-    order_hash: u256,
-    order_index: u256,
-)
-uses (ctx: Ctx, call: mut Call, ops: RawOps)
-{
-    if is_restricted_and_caller_not_zone(order.order_type, order.zone) {
-        let data = encode_zone_call(
-            book,
-            order,
-            order_hash,
-            order_hashes,
-            hashes_count: order_index,
-            selector: AUTHORIZE_ORDER_SELECTOR,
-        )
-        call_and_check_status(order.zone, order_hash, data, contract_order: false)
-    }
-}
-
-/// `_checkRestrictedAdvancedOrderAuthorization`
+/// `_checkRestrictedAdvancedOrderAuthorization`, or with `revert_on_invalid`
+/// `_assertRestrictedAdvancedOrderAuthorization`.
 pub fn check_restricted_advanced_order_authorization(
     _ book: Book,
     order: OrderState,
@@ -311,10 +274,22 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             hashes_count: order_hashes.len() as u256,
             selector: VALIDATE_ORDER_SELECTOR,
         )
-        call_and_check_status(order.zone, order_hash, data, contract_order: false)
+        let _ = call_and_check_status_with_skip(
+            order.zone,
+            order_hash,
+            data,
+            contract_order: false,
+            revert_on_invalid: true,
+        )
     } else if order.order_type == CONTRACT as u256 {
         let data = encode_ratify_order(book, order, order_hash, order_hashes)
-        call_and_check_status(order.offerer, order_hash, data, contract_order: true)
+        let _ = call_and_check_status_with_skip(
+            order.offerer,
+            order_hash,
+            data,
+            contract_order: true,
+            revert_on_invalid: true,
+        )
     }
 }
 
