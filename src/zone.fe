@@ -55,18 +55,22 @@ fn write_spent_items(
     count: u256,
     use_original: bool,
 ) -> u256 {
-    dst.write(offset, value: count)
-    var i: u256 = 0
-    while i < count {
-        let item = ref book.items[(start + i) as usize]
-        let out = offset + 32 + i * 128
-        dst.write(offset: out, value: item.item_type)
-        dst.write(offset: out + 32, value: item.token.word())
-        dst.write(offset: out + 64, value: item.identifier)
-        dst.write(offset: out + 96, value: item_amount(item, use_original))
-        i += 1
+    let size = dst.check_array(offset, count, stride: 128)
+    // The checked range holds the length word and every item.
+    unsafe {
+        dst.put(offset, value: count)
+        var i: u256 = 0
+        while i < count {
+            let item = ref book.items[(start + i) as usize]
+            let out = offset + 32 + i * 128
+            dst.put(offset: out, value: item.item_type)
+            dst.put(offset: out + 32, value: item.token.word())
+            dst.put(offset: out + 64, value: item.identifier)
+            dst.put(offset: out + 96, value: item_amount(item, use_original))
+            i += 1
+        }
     }
-    32 + count * 128
+    size
 }
 
 fn write_received_items(
@@ -76,19 +80,23 @@ fn write_received_items(
     start: u256,
     count: u256,
 ) -> u256 {
-    dst.write(offset, value: count)
-    var i: u256 = 0
-    while i < count {
-        let item = ref book.items[(start + i) as usize]
-        let out = offset + 32 + i * 160
-        dst.write(offset: out, value: item.item_type)
-        dst.write(offset: out + 32, value: item.token.word())
-        dst.write(offset: out + 64, value: item.identifier)
-        dst.write(offset: out + 96, value: item.original)
-        dst.write(offset: out + 128, value: item.receiver.word())
-        i += 1
+    let size = dst.check_array(offset, count, stride: 160)
+    // The checked range holds the length word and every item.
+    unsafe {
+        dst.put(offset, value: count)
+        var i: u256 = 0
+        while i < count {
+            let item = ref book.items[(start + i) as usize]
+            let out = offset + 32 + i * 160
+            dst.put(offset: out, value: item.item_type)
+            dst.put(offset: out + 32, value: item.token.word())
+            dst.put(offset: out + 64, value: item.identifier)
+            dst.put(offset: out + 96, value: item.original)
+            dst.put(offset: out + 128, value: item.receiver.word())
+            i += 1
+        }
     }
-    32 + count * 160
+    size
 }
 
 fn padded(_ len: u256) -> u256 {
@@ -103,13 +111,17 @@ fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: CalldataView) -> u256 {
 }
 
 fn write_hashes(_ dst: mut Buffer, offset: u256, _ hashes: MemArray<u256>, count: u256) -> u256 {
-    dst.write(offset, value: count)
-    var i: u256 = 0
-    while i < count {
-        dst.write(offset: offset + 32 + i * 32, value: hashes[(i) as usize])
-        i += 1
+    let size = dst.check_array(offset, count, stride: 32)
+    // The checked range holds the length word and every hash.
+    unsafe {
+        dst.put(offset, value: count)
+        var i: u256 = 0
+        while i < count {
+            dst.put(offset: offset + 32 + i * 32, value: hashes[(i) as usize])
+            i += 1
+        }
     }
-    32 + count * 32
+    size
 }
 
 /// Size of the order's offer as `SpentItem[]`, its consideration as
@@ -137,8 +149,12 @@ fn write_order_tails(
     order_hashes: MemArray<u256>,
     hashes_count: u256,
 ) {
+    data.check_range(offset: slots, len: 0x80)
     var at = tail
-    data.write(offset: slots, value: at)
+    // The checked range holds the four offset words.
+    unsafe {
+        data.put(offset: slots, value: at)
+    }
     at = at
         + write_spent_items(
             mut data,
@@ -148,7 +164,9 @@ fn write_order_tails(
             count: order.offer_len,
             use_original: true,
         )
-    data.write(offset: slots + 0x20, value: at)
+    unsafe {
+        data.put(offset: slots + 0x20, value: at)
+    }
     at = at
         + write_received_items(
             mut data,
@@ -157,9 +175,13 @@ fn write_order_tails(
             start: order.consideration_start,
             count: order.consideration_len,
         )
-    data.write(offset: slots + 0x40, value: at)
+    unsafe {
+        data.put(offset: slots + 0x40, value: at)
+    }
     at = at + write_bytes(mut data, offset: head + at, order.extra_data)
-    data.write(offset: slots + 0x60, value: at)
+    unsafe {
+        data.put(offset: slots + 0x60, value: at)
+    }
     write_hashes(
         mut data,
         offset: head + at,
@@ -183,12 +205,18 @@ fn encode_zone_call(
 uses (ctx: Ctx)
 {
     var data = Buffer::new(0x24 + 0x140 + order_tails_size(order, hashes_count))
-    data.write(offset: 0, value: selector << 224)
-    data.write(offset: 4, value: 0x20)
     let head: u256 = 0x24
-    data.write(offset: head, value: order_hash)
-    data.write(offset: head + 0x20, value: ctx.caller().word())
-    data.write(offset: head + 0x40, value: order.offerer.word())
+    // The buffer holds the selector, the parameters offset and the head.
+    unsafe {
+        data.put(offset: 0, value: selector << 224)
+        data.put(offset: 4, value: 0x20)
+        data.put(offset: head, value: order_hash)
+        data.put(offset: head + 0x20, value: ctx.caller().word())
+        data.put(offset: head + 0x40, value: order.offerer.word())
+        data.put(offset: head + 0xe0, value: order.start_time)
+        data.put(offset: head + 0x100, value: order.end_time)
+        data.put(offset: head + 0x120, value: order.zone_hash)
+    }
     write_order_tails(
         mut data,
         head,
@@ -199,9 +227,6 @@ uses (ctx: Ctx)
         order_hashes,
         hashes_count,
     )
-    data.write(offset: head + 0xe0, value: order.start_time)
-    data.write(offset: head + 0x100, value: order.end_time)
-    data.write(offset: head + 0x120, value: order.zone_hash)
     data
 }
 

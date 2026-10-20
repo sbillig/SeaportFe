@@ -123,12 +123,15 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
     var failure = Buffer::new(0x44)
-    failure.write(
-            offset: 0,
-            value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
-        )
-    failure.write(offset: 0x04, value: to.word())
-    failure.write(offset: 0x24, value: amount)
+    // The buffer was sized for exactly these words.
+    unsafe {
+        failure.put(
+                offset: 0,
+                value: NATIVE_TOKEN_TRANSFER_GENERIC_FAILURE_SELECTOR << 224,
+            )
+        failure.put(offset: 0x04, value: to.word())
+        failure.put(offset: 0x24, value: amount)
+    }
     var ret = MemBuffer::empty()
     let outcome = call
         .raw_call(
@@ -203,13 +206,18 @@ pub fn trigger_if_armed(_ acc: Accumulator, _ buf: mut Buffer, _ env: Env) -> Ac
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if !acc.armed { return acc }
-    buf.write(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
-    buf.write(offset: 4, value: 0x20)
-    buf.write(offset: 0x24, value: acc.count)
+    let size = ACCUMULATOR_HEAD + acc.count * 0xc0
+    buf.check_range(offset: 0, len: size)
+    // The checked range covers the header.
+    unsafe {
+        buf.put(offset: 0, value: CONDUIT_EXECUTE_SELECTOR << 224)
+        buf.put(offset: 4, value: 0x20)
+        buf.put(offset: 0x24, value: acc.count)
+    }
     call_conduit(
         env,
         conduit_key: acc.conduit_key,
-        args: buf.slice(offset: 0, len: ACCUMULATOR_HEAD + acc.count * 0xc0),
+        args: buf.slice(offset: 0, len: size),
     )
     var disarmed = acc
     disarmed.armed = false
@@ -259,12 +267,16 @@ pub fn insert(
         acc.count = 0
     }
     let at = ACCUMULATOR_HEAD + acc.count * 0xc0
-    buf.write(offset: at, value: item_type)
-    buf.write(offset: at + 0x20, value: token.word())
-    buf.write(offset: at + 0x40, value: from.word())
-    buf.write(offset: at + 0x60, value: to.word())
-    buf.write(offset: at + 0x80, value: identifier)
-    buf.write(offset: at + 0xa0, value: amount)
+    buf.check_range(offset: at, len: 0xc0)
+    // The checked range holds the six words of the transfer.
+    unsafe {
+        buf.put(offset: at, value: item_type)
+        buf.put(offset: at + 0x20, value: token.word())
+        buf.put(offset: at + 0x40, value: from.word())
+        buf.put(offset: at + 0x60, value: to.word())
+        buf.put(offset: at + 0x80, value: identifier)
+        buf.put(offset: at + 0xa0, value: amount)
+    }
     acc.count = acc.count + 1
     acc
 }
@@ -294,26 +306,31 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     // transferFrom(from, to, amount or identifier), or
     // safeTransferFrom(from, to, identifier, amount, "").
-    scratch
-        .write(
-            offset: 0,
-            value: (if erc1155 {
-                    ERC1155_SAFE_TRANSFER_FROM_SELECTOR
-                } else {
-                    TRANSFER_FROM_SELECTOR
-                })
-                << 224,
-        )
-    scratch.write(offset: 0x04, value: from.word())
-    scratch.write(offset: 0x24, value: to.word())
-    scratch.write(
-            offset: 0x44,
-            value: if erc20 { amount } else { identifier },
-        )
-    if erc1155 {
-        scratch.write(offset: 0x64, value: amount)
-        scratch.write(offset: 0x84, value: 0xa0)
-        scratch.write(offset: 0xa4, value: 0)
+    let size: u256 = if erc1155 { 0xc4 } else { 0x64 }
+    scratch.check_range(offset: 0, len: size)
+    // The checked range holds every word written.
+    unsafe {
+        scratch
+            .put(
+                offset: 0,
+                value: (if erc1155 {
+                        ERC1155_SAFE_TRANSFER_FROM_SELECTOR
+                    } else {
+                        TRANSFER_FROM_SELECTOR
+                    })
+                    << 224,
+            )
+        scratch.put(offset: 0x04, value: from.word())
+        scratch.put(offset: 0x24, value: to.word())
+        scratch.put(
+                offset: 0x44,
+                value: if erc20 { amount } else { identifier },
+            )
+        if erc1155 {
+            scratch.put(offset: 0x64, value: amount)
+            scratch.put(offset: 0x84, value: 0xa0)
+            scratch.put(offset: 0xa4, value: 0)
+        }
     }
     var ret = MemBuffer::with_capacity(32)
     let outcome = call
@@ -321,7 +338,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             addr: token,
             gas: ctx.gas(),
             value: 0,
-            args: scratch.slice(offset: 0, len: if erc1155 { 0xc4 } else { 0x64 }),
+            args: scratch.slice(offset: 0, len: size),
             ret: mut ret,
         )
     if !outcome.success() {
