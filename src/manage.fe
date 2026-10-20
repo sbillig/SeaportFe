@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._cancel and _validate.
+use core::abi::store_word
+use core::ptr
 use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Call, Ctx, Log, RawOps, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_empty, revert_error}
+use super::abi_view::CalldataView
 use super::errors::{
     CannotCancelOrder,
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -10,7 +13,7 @@ use super::errors::{
 }
 use super::fulfill::consideration_length_checked_order_hash
 use super::hashing::{Env, derive_components_hash}
-use super::model::single_order
+use super::model::{Book, OrderState, checked_enum, orders_book}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -20,11 +23,12 @@ use super::status::{
     set_validated,
     verify_order_status,
 }
-use super::types::{CONTRACT, Order, OrderComponents}
+use super::types::{CONTRACT, ConsiderationItem, OfferItem, OrderParameters}
 
 /// `_cancel`: only the offerer or the zone may cancel; contract orders
-/// cannot be cancelled.
-pub fn cancel(_ env: Env, orders: DynArray<OrderComponents>) -> bool
+/// cannot be cancelled. The fields read through Solidity's typed calldata
+/// accessors get their checks; the hash covers the raw words.
+pub fn cancel(_ env: Env, orders: CalldataView) -> bool
 uses (
     store: mut OrderStore,
     guard_state: u256,
@@ -35,21 +39,23 @@ uses (
 {
     assert_non_reentrant(env)
     var any_invalid = false
-    var i: usize = 0
-    while i < orders.len() {
-        let order = orders.get(i)
-        if order.orderType == CONTRACT
-            || (ctx.caller() != order.offerer && ctx.caller() != order.zone) {
+    var i: u256 = 0
+    let len = orders.len()
+    while i < len {
+        let order = orders.components_element(i)
+        let offerer = order.checked_address(0)
+        let zone = order.checked_address(32)
+        let order_type = order.word(128)
+        if order_type > 4 {
+            revert_empty()
+        }
+        if order_type == CONTRACT as u256 || (ctx.caller() != offerer && ctx.caller() != zone) {
             any_invalid = true
         }
         let order_hash = derive_components_hash(order)
         set_cancelled(order_hash)
         log.emit(
-            OrderCancelled {
-                orderHash: Bytes32 { val: order_hash },
-                offerer: order.offerer,
-                zone: order.zone,
-            },
+            OrderCancelled { orderHash: Bytes32 { val: order_hash }, offerer, zone },
         )
         i += 1
     }
@@ -60,8 +66,8 @@ uses (
 }
 
 /// `_validate`: mark signed orders as validated so that later fulfillments
-/// skip signature verification.
-pub fn validate(_ env: Env, orders: DynArray<Order>) -> bool
+/// skip signature verification. Seaport decodes all orders first.
+pub fn validate(_ env: Env, orders: CalldataView) -> bool
 uses (
     store: mut OrderStore,
     guard_state: u256,
@@ -72,13 +78,13 @@ uses (
     log: mut Log,
 )
 {
+    let book = orders_book(orders, advanced: false)
     assert_non_reentrant(env)
     var i: usize = 0
-    while i < orders.len() {
-        let book = single_order(orders.get(i))
-        let order = ref book.orders[(0) as usize]
-        if order.order_type != CONTRACT as u256 {
-            let order_hash = consideration_length_checked_order_hash(book, order)
+    while i < book.orders.len() {
+        let order = ref book.orders[i]
+        if checked_enum(order.order_type, variants: 5) != CONTRACT as u256 {
+            let order_hash = consideration_length_checked_order_hash(order)
             let status = read_status(order_hash)
             verify_order_status(
                 order_hash,
@@ -100,7 +106,7 @@ uses (
                 log.emit(
                     OrderValidated {
                         orderHash: Bytes32 { val: order_hash },
-                        orderParameters: orders.get(i).parameters,
+                        orderParameters: validated_parameters(book, order),
                     },
                 )
             }
@@ -108,4 +114,78 @@ uses (
         i += 1
     }
     true
+}
+
+/// The unchanged order as the typed `OrderValidated` event encodes it from
+/// Seaport's memory copy: addresses cleaned and item types checked.
+fn validated_parameters(_ book: Book, _ order: OrderState) -> OrderParameters {
+    let (offer, offer_size) = event_items(
+        book,
+        start: order.offer_start,
+        count: order.offer_len,
+        consideration: false,
+    )
+    let (consideration, consideration_size) = event_items(
+        book,
+        start: order.consideration_start,
+        count: order.consideration_len,
+        consideration: true,
+    )
+    // Both tails were written by `event_items` as complete ABI tails.
+    OrderParameters {
+        offerer: order.offerer,
+        zone: order.zone,
+        offer: unsafe {
+            DynArray<OfferItem>::from_abi_tail(
+                data: offer,
+                len: order.offer_len as usize,
+                size: offer_size,
+            )
+        },
+        consideration: unsafe {
+            DynArray<ConsiderationItem>::from_abi_tail(
+                data: consideration,
+                len: order.consideration_len as usize,
+                size: consideration_size,
+            )
+        },
+        orderType: order.order_type.downcast_truncate(),
+        startTime: order.start_time,
+        endTime: order.end_time,
+        zoneHash: Bytes32 { val: order.zone_hash },
+        salt: order.salt,
+        conduitKey: Bytes32 { val: order.conduit_key },
+        totalOriginalConsiderationItems: order.total_original,
+    }
+}
+
+/// The ABI tail of `count` items of `book` from `start`, and its size.
+fn event_items(_ book: Book, start: u256, count: u256, consideration: bool) -> (*u8, u256) {
+    let stride: u256 = if consideration { 192 } else { 160 }
+    let size = 32 + count * stride
+    let data = ptr::alloc_bytes(size)
+    // Every word of the `size` bytes allocated above is written.
+    unsafe {
+        store_word(ptr: data, value: count)
+    }
+    var i: u256 = 0
+    while i < count {
+        let item = ref book.items[(start + i) as usize]
+        let out = ptr::offset_bytes(data, 32 + i * stride)
+        unsafe {
+            store_word(ptr: out, value: checked_enum(item.item_type, variants: 6))
+            store_word(ptr: ptr::offset_bytes(out, 32), value: item.token.word())
+            store_word(ptr: ptr::offset_bytes(out, 64), value: item.identifier)
+            store_word(ptr: ptr::offset_bytes(out, 96), value: item.start_amount)
+            store_word(ptr: ptr::offset_bytes(out, 128), value: item.end_amount)
+            if consideration {
+                store_word(
+                    ptr: ptr::offset_bytes(out, 160),
+                    value: item.recipient.word(),
+                )
+            }
+        }
+        i += 1
+    }
+    (data, size)
 }

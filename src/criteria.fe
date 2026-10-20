@@ -12,7 +12,7 @@ use super::errors::{
     UnresolvedConsiderationCriteria,
     UnresolvedOfferCriteria,
 }
-use super::model::{Book, Item, OrderState, Resolver, Resolvers}
+use super::model::{Book, Item, OrderState, Resolver, Resolvers, checked_enum}
 use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
@@ -23,12 +23,14 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
         let resolver = resolvers.list[(i) as usize]
         if resolver.order_index >= total_orders {
             revert_error(
-                OrderCriteriaResolverOutOfRange { side: resolver.side.downcast_truncate() },
+                OrderCriteriaResolverOutOfRange {
+                    side: checked_enum(resolver.side, variants: 2).downcast_truncate(),
+                },
             )
         }
         let order = ref book.orders[(resolver.order_index) as usize]
         if order.numerator != 0 {
-            if resolver.side != OFFER as u256 {
+            if checked_enum(resolver.side, variants: 2) != OFFER as u256 {
                 if resolver.index >= order.consideration_len {
                     revert_error(ConsiderationCriteriaResolverOutOfRange {})
                 }
@@ -83,11 +85,12 @@ pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
 
 /// Criteria items stay unresolved only as wildcards of contract orders.
 fn requires_resolution(_ item: Item, _ order_type: u256) -> bool {
-    item.item_type > 3 && (order_type != CONTRACT as u256 || item.identifier != 0)
+    checked_enum(item.item_type, variants: 6) > 3
+        && (order_type != CONTRACT as u256 || item.identifier != 0)
 }
 
 fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray<u256>) {
-    if item.item_type <= 3 {
+    if checked_enum(item.item_type, variants: 6) <= 3 {
         revert_error(CriteriaNotEnabledForItem {})
     }
     if item.identifier != 0 {
@@ -108,8 +111,12 @@ fn update_criteria_item(_ item: mut Item, _ resolver: Resolver, proofs: MemArray
 /// `_verifyProof`: sorted-pair Merkle proof of `keccak256(leaf)`.
 pub fn verify_proof(leaf: u256, root: u256, proofs: MemArray<u256>, start: u256, len: u256) {
     var computed = keccak_words([leaf])
+    // Seaport's verifier walks `len << 5` bytes of the raw length word, so
+    // its five high bits vanish. Seaport reads past the proof's memory until
+    // it runs out of gas where the pool's bounds check panics here.
+    let words = (len << 5) >> 5
     var i: u256 = 0
-    while i < len {
+    while i < words {
         let element = proofs[(start + i) as usize]
         computed = if computed > element {
             keccak_words([element, computed])

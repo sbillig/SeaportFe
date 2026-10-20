@@ -23,6 +23,7 @@ The library code follows the `seaport-core` structure:
 
 | Module | seaport-core |
 | --- | --- |
+| `abi_view.fe` | argument checks and calldata reads of ConsiderationDecoder |
 | `model.fe` | decoded orders as a mutable in-memory model (ConsiderationDecoder) |
 | `hashing.fe` | ConsiderationBase, GettersAndDerivers |
 | `status.fe` | CounterManager, OrderValidator storage, ReentrancyGuard |
@@ -172,16 +173,22 @@ port follows the optimized one.
 The ABIs match except for listings: Solidity lists every error of the
 inherited interfaces and the shared events of `PausableZone` and its
 controller, Fe lists the errors a contract can raise, and Fe
-marks `PausableZone.supportsInterface` as `pure`, not `view`. The basic
-order entry points and the conduit batch functions use numeric selectors
-(their calldata is read raw), so they have no ABI entry.
+marks `PausableZone.supportsInterface` as `pure`, not `view`. The order
+entry points (fulfill, match, validate, cancel, `getOrderHash`) and the
+conduit batch functions use numeric selectors (their calldata is read raw),
+so they have no ABI entry. `SeaportMsg` keeps the typed forms for callers.
 
 ## Limitations
 
-- Typed ABI dispatch retains the baseline's strict decoding. Malformed
-  calldata can be rejected earlier than the optimized Solidity implementation,
-  which sometimes reads raw words with zero padding. The deferred manual
-  decoder changes address those differences.
+- Order arguments are read from calldata as seaport-core reads them: the
+  Solidity dispatcher's head checks, then 32-bit masked offsets and lengths,
+  zero-padded reads, raw words in order hashes, and enum checks
+  (`Panic(0x21)`) where Seaport reads an enum from memory. Two differences
+  remain for malformed calldata. The model holds addresses truncated, as
+  Solidity's typed reads see them, so zones and contract offerers receive
+  truncated item and offerer words where seaport-core copies the raw words.
+  A `bytes` length word whose low 32 bits are within 31 of `2**32` panics
+  instead of producing seaport-core's inconsistent copy.
 - A Fe `Address` holds no bits above the low 160. Raw words become addresses
   either after the check Solidity performs (basic orders, conduit transfers)
   or by truncation, like Solidity's masked storage reads. The conduit batch
@@ -218,9 +225,8 @@ order entry points and the conduit batch functions use numeric selectors
   (upstream #1618) cost about 5 to 8% gas on these calls in exchange for
   the smaller code.
 
-  Most of the difference is fixed cost per call: ABI decoding into the
-  in-memory order model and memory management, where seaport-core works on
-  calldata pointers directly.
+  Most of the difference is fixed cost per call: copying orders into the
+  in-memory model and memory management.
 
   The prior rooted-storage differential benchmark compared the raw source at
   d176b8c and rooted owners at efd2b89, both built with d6c0f863e / Sonatina

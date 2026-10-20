@@ -175,7 +175,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     order_hashes[(index) as usize] = 0
     let (order_hash, numerator, denominator) = validate_order(
         env,
-        book,
         order: book.orders[index as usize],
         revert_on_invalid,
     )

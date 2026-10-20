@@ -9,14 +9,13 @@ use super::combiner::{fulfill_available_advanced_orders, match_advanced_orders}
 use super::fulfill::validate_and_fulfill_advanced_order
 use super::hashing::{Env, derive_components_hash, derive_domain_separator}
 use super::manage::{cancel, validate}
+use super::abi_view::CalldataView
 use super::model::{
-    advanced_orders,
     no_resolvers,
     fulfillments,
     nested_components,
-    orders_as_advanced,
+    orders_book,
     resolvers,
-    single_advanced,
     single_order,
 }
 use super::signature::domain_separator
@@ -129,6 +128,39 @@ pub msg SeaportMsg {
     ActivateTstore {},
 }
 
+/// The entry points whose arguments Seaport reads from calldata itself, as
+/// seaport-core's ConsiderationDecoder does (see `abi_view`). `SeaportMsg`
+/// has their typed forms for callers; each comment gives the signature.
+msg SeaportCalldataMsg {
+    // fulfillOrder(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes),bytes32)
+    #[selector = 0xb3a34c4c]
+    FulfillOrder {} -> bool,
+    // fulfillAdvancedOrder(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes),(uint256,uint8,uint256,uint256,bytes32[])[],bytes32,address)
+    #[selector = 0xe7acab24]
+    FulfillAdvancedOrder {} -> bool,
+    // fulfillAvailableOrders(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],(uint256,uint256)[][],(uint256,uint256)[][],bytes32,uint256)
+    #[selector = 0xed98a574]
+    FulfillAvailableOrders {} -> (DynArray<bool>, DynArray<Execution>),
+    // fulfillAvailableAdvancedOrders(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],(uint256,uint256)[][],(uint256,uint256)[][],bytes32,address,uint256)
+    #[selector = 0x87201b41]
+    FulfillAvailableAdvancedOrders {} -> (DynArray<bool>, DynArray<Execution>),
+    // matchOrders(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[],((uint256,uint256)[],(uint256,uint256)[])[])
+    #[selector = 0xa8174404]
+    MatchOrders {} -> DynArray<Execution>,
+    // matchAdvancedOrders(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],((uint256,uint256)[],(uint256,uint256)[])[],address)
+    #[selector = 0xf2d12b12]
+    MatchAdvancedOrders {} -> DynArray<Execution>,
+    // cancel((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256)[])
+    #[selector = 0xfd9f1e10]
+    Cancel {} -> bool,
+    // validate(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),bytes)[])
+    #[selector = 0x88147732]
+    Validate {} -> bool,
+    // getOrderHash((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256))
+    #[selector = 0x79df72bd]
+    GetOrderHash {} -> Bytes32,
+}
+
 msg ConduitControllerQuery {
     #[selector = sol("getConduitCodeHashes()")]
     GetConduitCodeHashes {} -> (Bytes32, Bytes32),
@@ -179,7 +211,7 @@ uses (
     validate_and_fulfill_basic_order(env)
 }
 
-pub fn fulfill_order(_ env: Env, order: Order, fulfiller_conduit_key: Bytes32) -> bool
+pub fn fulfill_order(_ env: Env) -> bool
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -190,23 +222,18 @@ uses (
     log: mut Log,
 )
 {
-    var book = single_order(order)
+    let args = CalldataView::arguments(64)
+    var book = single_order(args.struct_argument(offset: 0, size: 64), advanced: false)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
         resolvers: no_resolvers(),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        fulfiller_conduit_key: args.word(32),
         recipient: ctx.caller(),
     )
 }
 
-pub fn fulfill_advanced_order(
-    _ env: Env,
-    advanced_order: AdvancedOrder,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    fulfiller_conduit_key: Bytes32,
-    recipient: Address,
-) -> bool
+pub fn fulfill_advanced_order(_ env: Env) -> bool
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -217,24 +244,21 @@ uses (
     log: mut Log,
 )
 {
-    var book = single_advanced(advanced_order)
+    let args = CalldataView::arguments(128)
+    let order = args.struct_argument(offset: 0, size: 160)
+    let criteria = args.array_argument(32)
+    let recipient = args.checked_address(96)
+    var book = single_order(order, advanced: true)
     validate_and_fulfill_advanced_order(
         env,
         mut book,
-        resolvers: resolvers(criteria_resolvers),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        resolvers: resolvers(criteria),
+        fulfiller_conduit_key: args.word(64),
         recipient: caller_if_zero(recipient),
     )
 }
 
-pub fn fulfill_available_orders(
-    _ env: Env,
-    orders: DynArray<Order>,
-    offer_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    consideration_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    fulfiller_conduit_key: Bytes32,
-    maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+pub fn fulfill_available_orders(_ env: Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -245,29 +269,24 @@ uses (
     log: mut Log,
 )
 {
-    var book = orders_as_advanced(orders)
+    let args = CalldataView::arguments(160)
+    let orders = args.array_argument(0)
+    let offer = args.array_argument(32)
+    let consideration = args.array_argument(64)
+    var book = orders_book(orders, advanced: false)
     fulfill_available_advanced_orders(
         env,
         mut book,
         resolvers: no_resolvers(),
-        offer_fulfillments: nested_components(offer_fulfillments),
-        consideration_fulfillments: nested_components(consideration_fulfillments),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        offer_fulfillments: nested_components(offer),
+        consideration_fulfillments: nested_components(consideration),
+        fulfiller_conduit_key: args.word(96),
         recipient: ctx.caller(),
-        maximum_fulfilled,
+        maximum_fulfilled: args.word(128),
     )
 }
 
-pub fn fulfill_available_advanced(
-    _ env: Env,
-    orders: DynArray<AdvancedOrder>,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    offer_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    consideration_fulfillments: DynArray<DynArray<FulfillmentComponent>>,
-    fulfiller_conduit_key: Bytes32,
-    recipient: Address,
-    maximum_fulfilled: u256,
-) -> (DynArray<bool>, DynArray<Execution>)
+pub fn fulfill_available_advanced(_ env: Env) -> (DynArray<bool>, DynArray<Execution>)
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -278,24 +297,26 @@ uses (
     log: mut Log,
 )
 {
-    var book = advanced_orders(orders)
+    let args = CalldataView::arguments(224)
+    let orders = args.array_argument(0)
+    let criteria = args.array_argument(32)
+    let offer = args.array_argument(64)
+    let consideration = args.array_argument(96)
+    let recipient = args.checked_address(160)
+    var book = orders_book(orders, advanced: true)
     fulfill_available_advanced_orders(
         env,
         mut book,
-        resolvers: resolvers(criteria_resolvers),
-        offer_fulfillments: nested_components(offer_fulfillments),
-        consideration_fulfillments: nested_components(consideration_fulfillments),
-        fulfiller_conduit_key: fulfiller_conduit_key.val,
+        resolvers: resolvers(criteria),
+        offer_fulfillments: nested_components(offer),
+        consideration_fulfillments: nested_components(consideration),
+        fulfiller_conduit_key: args.word(128),
         recipient: caller_if_zero(recipient),
-        maximum_fulfilled,
+        maximum_fulfilled: args.word(192),
     )
 }
 
-pub fn match_orders(
-    _ env: Env,
-    orders: DynArray<Order>,
-    fulfillments_in: DynArray<Fulfillment>,
-) -> DynArray<Execution>
+pub fn match_orders(_ env: Env) -> DynArray<Execution>
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -306,23 +327,20 @@ uses (
     log: mut Log,
 )
 {
-    var book = orders_as_advanced(orders)
+    let args = CalldataView::arguments(64)
+    let orders = args.array_argument(0)
+    let groups = args.array_argument(32)
+    var book = orders_book(orders, advanced: false)
     match_advanced_orders(
         env,
         mut book,
         resolvers: no_resolvers(),
-        fulfillments: fulfillments(fulfillments_in),
+        fulfillments: fulfillments(groups),
         recipient: ctx.caller(),
     )
 }
 
-pub fn match_advanced(
-    _ env: Env,
-    orders: DynArray<AdvancedOrder>,
-    criteria_resolvers: DynArray<CriteriaResolver>,
-    fulfillments_in: DynArray<Fulfillment>,
-    recipient: Address,
-) -> DynArray<Execution>
+pub fn match_advanced(_ env: Env) -> DynArray<Execution>
 uses (
     store: mut OrderStore,
     guard_state: mut u256,
@@ -333,18 +351,29 @@ uses (
     log: mut Log,
 )
 {
-    var book = advanced_orders(orders)
+    let args = CalldataView::arguments(128)
+    let orders = args.array_argument(0)
+    let criteria = args.array_argument(32)
+    let groups = args.array_argument(64)
+    let recipient = args.checked_address(96)
+    var book = orders_book(orders, advanced: true)
     match_advanced_orders(
         env,
         mut book,
-        resolvers: resolvers(criteria_resolvers),
-        fulfillments: fulfillments(fulfillments_in),
+        resolvers: resolvers(criteria),
+        fulfillments: fulfillments(groups),
         recipient: caller_if_zero(recipient),
     )
 }
 
-pub fn get_order_hash(_ order: OrderComponents) -> Bytes32 {
-    Bytes32 { val: derive_components_hash(order) }
+/// `getOrderHash(OrderComponents calldata)`: Solidity checks the argument
+/// head; the hash covers the raw words.
+pub fn get_order_hash() -> Bytes32 {
+    Bytes32 {
+        val: derive_components_hash(
+            CalldataView::arguments(32).struct_argument(offset: 0, size: 352),
+        ),
+    }
 }
 
 pub fn get_order_status(_ order_hash: Bytes32) -> (bool, bool, u256, u256)
@@ -417,7 +446,7 @@ pub contract Seaport {
             fulfill_basic_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillOrder { order, fulfillerConduitKey } -> bool
+        SeaportCalldataMsg::FulfillOrder {} -> bool
         uses (
             mut store,
             mut guard_state,
@@ -429,15 +458,10 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            fulfill_order(env, order, fulfiller_conduit_key: fulfillerConduitKey)
+            fulfill_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillAdvancedOrder {
-            advancedOrder,
-            criteriaResolvers,
-            fulfillerConduitKey,
-            recipient,
-        } -> bool
+        SeaportCalldataMsg::FulfillAdvancedOrder {} -> bool
         uses (
             mut store,
             mut guard_state,
@@ -449,22 +473,10 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            fulfill_advanced_order(
-                env,
-                advanced_order: advancedOrder,
-                criteria_resolvers: criteriaResolvers,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-            )
+            fulfill_advanced_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableOrders {
-            orders,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        SeaportCalldataMsg::FulfillAvailableOrders {} -> (DynArray<bool>, DynArray<Execution>)
         uses (
             mut store,
             mut guard_state,
@@ -476,25 +488,13 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            fulfill_available_orders(
-                env,
-                orders,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_orders(env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableAdvancedOrders {
-            advancedOrders,
-            criteriaResolvers,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            recipient,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        SeaportCalldataMsg::FulfillAvailableAdvancedOrders {} -> (
+            DynArray<bool>,
+            DynArray<Execution>,
+        )
         uses (
             mut store,
             mut guard_state,
@@ -506,19 +506,10 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            fulfill_available_advanced(
-                env,
-                orders: advancedOrders,
-                criteria_resolvers: criteriaResolvers,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_advanced(env)
         }
         #[payable]
-        SeaportMsg::MatchOrders { orders, fulfillments } -> DynArray<Execution>
+        SeaportCalldataMsg::MatchOrders {} -> DynArray<Execution>
         uses (
             mut store,
             mut guard_state,
@@ -530,15 +521,10 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            match_orders(env, orders, fulfillments_in: fulfillments)
+            match_orders(env)
         }
         #[payable]
-        SeaportMsg::MatchAdvancedOrders {
-            orders,
-            criteriaResolvers,
-            fulfillments,
-            recipient,
-        } -> DynArray<Execution>
+        SeaportCalldataMsg::MatchAdvancedOrders {} -> DynArray<Execution>
         uses (
             mut store,
             mut guard_state,
@@ -550,15 +536,9 @@ pub contract Seaport {
             log: mut Log,
         )
         {
-            match_advanced(
-                env,
-                orders,
-                criteria_resolvers: criteriaResolvers,
-                fulfillments_in: fulfillments,
-                recipient,
-            )
+            match_advanced(env)
         }
-        SeaportMsg::Cancel { orders } -> bool uses (
+        SeaportCalldataMsg::Cancel {} -> bool uses (
             mut store,
             guard_state,
             transient_guard,
@@ -566,9 +546,9 @@ pub contract Seaport {
             ctx: Ctx,
             log: mut Log,
         ) {
-            cancel(env, orders)
+            cancel(env, orders: CalldataView::arguments(32).array_argument(0))
         }
-        SeaportMsg::Validate { orders } -> bool uses (
+        SeaportCalldataMsg::Validate {} -> bool uses (
             mut store,
             guard_state,
             transient_guard,
@@ -578,7 +558,7 @@ pub contract Seaport {
             ops: mut RawOps,
             log: mut Log,
         ) {
-            validate(env, orders)
+            validate(env, orders: CalldataView::arguments(32).array_argument(0))
         }
         SeaportMsg::IncrementCounter {} -> u256 uses (
             mut store,
@@ -592,10 +572,10 @@ pub contract Seaport {
             increment_counter()
         }
         // Match Solidity's view ABI even though deriving the hash is pure.
-        SeaportMsg::GetOrderHash { order } -> Bytes32
+        SeaportCalldataMsg::GetOrderHash {} -> Bytes32
         uses (ctx: Ctx)
         {
-            get_order_hash(order)
+            get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)
         uses (store)
@@ -678,7 +658,7 @@ pub contract Consideration {
             fulfill_basic_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillOrder { order, fulfillerConduitKey } -> bool
+        SeaportCalldataMsg::FulfillOrder {} -> bool
         uses (
             mut store,
             mut guard_state,
@@ -690,15 +670,10 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            fulfill_order(env, order, fulfiller_conduit_key: fulfillerConduitKey)
+            fulfill_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillAdvancedOrder {
-            advancedOrder,
-            criteriaResolvers,
-            fulfillerConduitKey,
-            recipient,
-        } -> bool
+        SeaportCalldataMsg::FulfillAdvancedOrder {} -> bool
         uses (
             mut store,
             mut guard_state,
@@ -710,22 +685,10 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            fulfill_advanced_order(
-                env,
-                advanced_order: advancedOrder,
-                criteria_resolvers: criteriaResolvers,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-            )
+            fulfill_advanced_order(env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableOrders {
-            orders,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        SeaportCalldataMsg::FulfillAvailableOrders {} -> (DynArray<bool>, DynArray<Execution>)
         uses (
             mut store,
             mut guard_state,
@@ -737,25 +700,13 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            fulfill_available_orders(
-                env,
-                orders,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_orders(env)
         }
         #[payable]
-        SeaportMsg::FulfillAvailableAdvancedOrders {
-            advancedOrders,
-            criteriaResolvers,
-            offerFulfillments,
-            considerationFulfillments,
-            fulfillerConduitKey,
-            recipient,
-            maximumFulfilled,
-        } -> (DynArray<bool>, DynArray<Execution>)
+        SeaportCalldataMsg::FulfillAvailableAdvancedOrders {} -> (
+            DynArray<bool>,
+            DynArray<Execution>,
+        )
         uses (
             mut store,
             mut guard_state,
@@ -767,19 +718,10 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            fulfill_available_advanced(
-                env,
-                orders: advancedOrders,
-                criteria_resolvers: criteriaResolvers,
-                offer_fulfillments: offerFulfillments,
-                consideration_fulfillments: considerationFulfillments,
-                fulfiller_conduit_key: fulfillerConduitKey,
-                recipient,
-                maximum_fulfilled: maximumFulfilled,
-            )
+            fulfill_available_advanced(env)
         }
         #[payable]
-        SeaportMsg::MatchOrders { orders, fulfillments } -> DynArray<Execution>
+        SeaportCalldataMsg::MatchOrders {} -> DynArray<Execution>
         uses (
             mut store,
             mut guard_state,
@@ -791,15 +733,10 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            match_orders(env, orders, fulfillments_in: fulfillments)
+            match_orders(env)
         }
         #[payable]
-        SeaportMsg::MatchAdvancedOrders {
-            orders,
-            criteriaResolvers,
-            fulfillments,
-            recipient,
-        } -> DynArray<Execution>
+        SeaportCalldataMsg::MatchAdvancedOrders {} -> DynArray<Execution>
         uses (
             mut store,
             mut guard_state,
@@ -811,15 +748,9 @@ pub contract Consideration {
             log: mut Log,
         )
         {
-            match_advanced(
-                env,
-                orders,
-                criteria_resolvers: criteriaResolvers,
-                fulfillments_in: fulfillments,
-                recipient,
-            )
+            match_advanced(env)
         }
-        SeaportMsg::Cancel { orders } -> bool uses (
+        SeaportCalldataMsg::Cancel {} -> bool uses (
             mut store,
             guard_state,
             transient_guard,
@@ -827,9 +758,9 @@ pub contract Consideration {
             ctx: Ctx,
             log: mut Log,
         ) {
-            cancel(env, orders)
+            cancel(env, orders: CalldataView::arguments(32).array_argument(0))
         }
-        SeaportMsg::Validate { orders } -> bool uses (
+        SeaportCalldataMsg::Validate {} -> bool uses (
             mut store,
             guard_state,
             transient_guard,
@@ -839,7 +770,7 @@ pub contract Consideration {
             ops: mut RawOps,
             log: mut Log,
         ) {
-            validate(env, orders)
+            validate(env, orders: CalldataView::arguments(32).array_argument(0))
         }
         SeaportMsg::IncrementCounter {} -> u256 uses (
             mut store,
@@ -853,10 +784,10 @@ pub contract Consideration {
             increment_counter()
         }
         // Match Solidity's view ABI even though deriving the hash is pure.
-        SeaportMsg::GetOrderHash { order } -> Bytes32
+        SeaportCalldataMsg::GetOrderHash {} -> Bytes32
         uses (ctx: Ctx)
         {
-            get_order_hash(order)
+            get_order_hash()
         }
         SeaportMsg::GetOrderStatus { orderHash } -> (bool, bool, u256, u256)
         uses (store)

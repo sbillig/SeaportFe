@@ -6,7 +6,7 @@
 For each Fe contract, lists functions, events and errors whose canonical
 signature (including output types for functions) differs from the Solidity
 contract it replaces. Fe skips recv arms with numeric selectors in the ABI
-(basic order entry points), so those are reported as missing and listed
+(order entry points), so those are reported as missing and listed
 separately as expected.
 """
 import json
@@ -31,6 +31,15 @@ PAIRS = {
 NUMERIC = {
     "fulfillBasicOrder(",
     "fulfillBasicOrder_efficient_6GL6yc(",
+    "fulfillOrder(",
+    "fulfillAdvancedOrder(",
+    "fulfillAvailableOrders(",
+    "fulfillAvailableAdvancedOrders(",
+    "matchOrders(",
+    "matchAdvancedOrders(",
+    "cancel(",
+    "validate(",
+    "getOrderHash(",
     "executeBatch1155(",
     "executeWithBatch1155(",
 }

@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: MIT
+// Seaport's calldata decoding: the Solidity dispatcher's argument checks and
+// seaport-core's ConsiderationDecoder.
+use core::abi::{ByteInput, checked_frame_end, store_word}
+use core::ptr
+use std::abi::{Bytes, Sol}
+use std::evm::{Address, CallData, revert_empty}
+
+const SIGN_BIT: u256 = 0x8000000000000000000000000000000000000000000000000000000000000000
+
+/// A position in the current calldata. Solidity validates only the argument
+/// heads; Seaport resolves nested offsets and lengths through their low 32
+/// bits, and calldata past the end reads as zeros.
+pub struct CalldataView { pos: u256 }
+
+impl Copy for CalldataView {}
+
+impl CalldataView {
+    /// The arguments, once the calldata holds their `size`-byte head.
+    pub fn arguments(_ size: u256) -> Self {
+        checked_frame_end<Sol>(4, size, CallData::new().len())
+        Self { pos: 4 }
+    }
+
+    /// The position of the argument whose offset word is at `offset`, which
+    /// Solidity requires to be below 2**64.
+    #[arithmetic(unchecked)]
+    fn argument_pos(self, _ offset: u256) -> u256 {
+        let relative = self.word(offset)
+        if relative >= 0x10000000000000000 {
+            revert_empty()
+        }
+        self.pos + relative
+    }
+
+    /// A struct argument with a `size`-byte head.
+    pub fn struct_argument(self, offset: u256, size: u256) -> Self {
+        checked_frame_end<Sol>(self.argument_pos(offset), size, CallData::new().len())
+        self.child(offset)
+    }
+
+    /// A dynamic array argument whose element heads are words.
+    #[arithmetic(unchecked)]
+    pub fn array_argument(self, _ offset: u256) -> Self {
+        let pos = self.argument_pos(offset)
+        let input = CallData::new()
+        checked_frame_end<Sol>(pos, 32, input.len())
+        let len = input.word_at(pos)
+        if len >= 0x10000000000000000 {
+            revert_empty()
+        }
+        checked_frame_end<Sol>(pos + 32, len * 32, input.len())
+        self.child(offset)
+    }
+
+    /// The word at `offset` read as a Solidity calldata `address` (an
+    /// argument or a field of a calldata struct), which must be clean.
+    pub fn checked_address(self, _ offset: u256) -> Address {
+        let word = self.word(offset)
+        if word >> 160 != 0 {
+            revert_empty()
+        }
+        Address::from_word_truncate(word)
+    }
+
+    /// Element `index` of the `OrderComponents[]` argument `self`, with
+    /// solc's calldata struct-array access check: its signed relative offset
+    /// must leave room for the 352-byte struct head.
+    #[arithmetic(unchecked)]
+    pub fn components_element(self, _ index: u256) -> Self {
+        let heads = self.pos + 32
+        let relative = self.word(32 + index * 32)
+        let limit = CallData::new().len() - heads - 351
+        if relative ^ SIGN_BIT >= limit ^ SIGN_BIT {
+            revert_empty()
+        }
+        Self { pos: heads + relative }
+    }
+
+    /// Copy `len` bytes from `self` to `dest`, which must have room for them.
+    pub unsafe fn copy_to(self, _ dest: *u8, len: u256) {
+        CallData::new().copy_to_memory_unchecked(dest, src_offset: self.pos, len)
+    }
+
+    #[arithmetic(unchecked)]
+    pub fn word(self, _ offset: u256) -> u256 {
+        CallData::new().word_at(self.pos + offset)
+    }
+
+    /// The word at `offset` read as a Solidity `address` from memory.
+    pub fn address(self, _ offset: u256) -> Address {
+        Address::from_word_truncate(self.word(offset))
+    }
+
+    /// The tail whose offset word, relative to `self`, is at `offset`.
+    #[arithmetic(unchecked)]
+    pub fn child(self, _ offset: u256) -> Self {
+        Self { pos: self.pos + (self.word(offset) & 0xffffffff) }
+    }
+
+    /// The length of the array at `self`.
+    pub fn len(self) -> u256 {
+        self.word(0) & 0xffffffff
+    }
+
+    /// Element `index` of the array at `self` with inline `stride`-byte
+    /// elements.
+    #[arithmetic(unchecked)]
+    pub fn element(self, index: u256, stride: u256) -> Self {
+        Self { pos: self.pos + 32 + index * stride }
+    }
+
+    /// Element `index` of the array at `self` with dynamic elements.
+    #[arithmetic(unchecked)]
+    pub fn dynamic_element(self, _ index: u256) -> Self {
+        self.element(index: 0, stride: 32).child(index * 32)
+    }
+
+    /// `_decodeBytes`: a copy of the padded extent of the raw length word,
+    /// including any nonzero padding, holding the masked length.
+    #[arithmetic(unchecked)]
+    pub fn bytes(self) -> Bytes {
+        let size = 32 + ((self.word(0) + 31) & 0xffffffe0)
+        let len = self.len()
+        let data = ptr::alloc_bytes(size)
+        // `size` bytes were allocated above; calldata past the end reads as
+        // zeros.
+        unsafe {
+            CallData::new().copy_to_memory_unchecked(dest: data, src_offset: self.pos, len: size)
+            store_word(ptr: data, value: len)
+            Bytes::from_abi_tail(data, len: len as usize, size)
+        }
+    }
+}

@@ -1,33 +1,49 @@
 use std::abi::{Bytes32, DynArray, dyn_array_from}
-use std::evm::Address
-use super::hashing::{bulk_order_typehash, derive_components_hash}
+use std::evm::{Address, Evm}
+use super::conduit_controller::ConduitController
+use super::hashing::bulk_order_typehash
+use super::seaport::{Seaport, SeaportMsg}
 use super::types::{ConsiderationItem, OfferItem, OrderComponents}
 
+pub fn deploy_seaport() -> Address uses (evm: mut Evm) {
+    let controller = evm.create2<ConduitController>(value: 0, args: (), salt: 0)
+    evm.create2<Seaport>(value: 0, args: (controller,), salt: 1)
+}
+
+/// `getOrderHash`, which hashes its calldata argument.
 fn hash_components(
     offer: DynArray<OfferItem>,
     consideration: DynArray<ConsiderationItem>,
     counter: u256,
-) -> u256 {
-    derive_components_hash(
-        OrderComponents {
-            offerer: Address::new(0xabc),
-            zone: Address::new(0xdef),
-            offer,
-            consideration,
-            orderType: 1,
-            startTime: 7,
-            endTime: 123,
-            zoneHash: Bytes32 { val: 0x42 },
-            salt: 9,
-            conduitKey: Bytes32 { val: 0x99 },
-            counter,
-        },
-    )
+) -> u256
+uses (evm: mut Evm)
+{
+    let order = OrderComponents {
+        offerer: Address::new(0xabc),
+        zone: Address::new(0xdef),
+        offer,
+        consideration,
+        orderType: 1,
+        startTime: 7,
+        endTime: 123,
+        zoneHash: Bytes32 { val: 0x42 },
+        salt: 9,
+        conduitKey: Bytes32 { val: 0x99 },
+        counter,
+    }
+    let hash: Bytes32 = evm
+        .call(
+            addr: deploy_seaport(),
+            gas: 10000000,
+            value: 0,
+            message: SeaportMsg::GetOrderHash { order },
+        )
+    hash.val
 }
 
 // Expected hashes come from the deployed, pinned Solidity Seaport reference.
 #[test]
-fn components_hash_empty_item_arrays() {
+fn components_hash_empty_item_arrays() uses (evm: mut Evm) {
     assert(
         hash_components(
                 offer: DynArray<OfferItem>::empty(),
@@ -39,7 +55,9 @@ fn components_hash_empty_item_arrays() {
 }
 
 #[test]
-fn components_hash_distinct_item_types_and_full_width_counter() {
+fn components_hash_distinct_item_types_and_full_width_counter()
+uses (evm: mut Evm)
+{
     let offer = dyn_array_from(
         [
             OfferItem {
