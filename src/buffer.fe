@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // An initialized, exclusively owned byte buffer for exact protocol encodings.
+use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
+use std::abi::DynArray
 use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, revert_error}
 
 pub struct Buffer { data: MemBuffer }
@@ -29,9 +31,28 @@ impl Buffer {
     }
     pub fn write(mut self, offset: u256, value: u256) {
         self.check_word(offset)
+        unsafe {
+            self.put(offset, value)
+        }
+    }
+    /// An unchecked `write`: the caller must ensure `offset + 32 <= len()`,
+    /// typically because the buffer was sized for exactly these writes.
+    pub unsafe fn put(mut self, offset: u256, value: u256) {
         // The complete word lies in this exclusively held owner's allocation.
         unsafe {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
+        }
+    }
+    /// The buffer as the ABI tail of a `len` element array of static `T`.
+    /// Fails unless the buffer is exactly the length word `len` and `len`
+    /// element heads.
+    pub fn into_dyn_array<T>(own self, len: u256) -> DynArray<T> where T: AbiSize {
+        if T::IS_DYNAMIC {
+            core::panic()
+        }
+        // `from_abi_tail` validates a static element array completely.
+        unsafe {
+            DynArray::from_abi_tail(data: self.data.ptr(), len: len as usize, size: self.len())
         }
     }
     pub fn copy_from(mut self, offset: u256, source: MemSpan) {
