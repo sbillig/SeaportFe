@@ -7,7 +7,7 @@
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, dyn_array_from, sol}
 use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, create2_address, keccak256}
-use super::raw_abi::{emit_words, error_selector, revert_with0, revert_with1}
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::buffer::Buffer
 use super::seaport::SeaportMsg
 use super::types::{
@@ -177,7 +177,7 @@ pub contract PausableZone {
     uses (mut controller, ctx: Ctx, log: mut Log)
     {
         controller = ctx.caller()
-        emit_words(Unpaused::TOPIC0, words: 0, a: 0, b: 0)
+        log.emit(Unpaused {})
     }
 
     recv PausableZoneMsg {
@@ -192,7 +192,7 @@ pub contract PausableZone {
         }
         Pause {} uses (controller, ctx: Ctx, mut zone_state, log: mut Log) {
             assert_controller(controller)
-            emit_words(Paused::TOPIC0, words: 0, a: 0, b: 0)
+            log.emit(Paused {})
             zone_state |= 1 << 160
         }
         AssignOperator { operatorToAssign } uses (
@@ -206,12 +206,7 @@ pub contract PausableZone {
                 revert_with0(error_selector<PauserCanNotBeSetAsZero>())
             }
             zone_state = (zone_state & !OPERATOR_MASK) | operatorToAssign.word()
-            emit_words(
-                OperatorUpdated::TOPIC0,
-                words: 1,
-                a: operatorToAssign.word(),
-                b: 0,
-            )
+            log.emit(OperatorUpdated { newOperator: operatorToAssign })
         }
         #[payable]
         ExecuteMatchOrders { seaport, orders, fulfillments } -> DynArray<Execution>
@@ -379,12 +374,7 @@ pub contract PausableZoneController {
                 revert_with1(error_selector<ZoneAlreadyExists>(), derived.word())
             }
             create.create2<PausableZone>(value: 0, args: (), salt: salt.val)
-            emit_words(
-                ZoneCreated::TOPIC0,
-                words: 2,
-                a: derived.word(),
-                b: salt.val,
-            )
+            log.emit(ZoneCreated { zone: derived, salt })
             derived
         }
         Pause { zone } -> bool uses (owner, pauser, ctx: Ctx, call: mut Call) {
@@ -457,30 +447,29 @@ pub contract PausableZoneController {
             if newPotentialOwner.word() == 0 {
                 revert_with0(error_selector<OwnerCanNotBeSetAsZero>())
             }
-            emit_words(
-                PotentialOwnerUpdated::TOPIC0,
-                words: 1,
-                a: newPotentialOwner.word(),
-                b: 0,
-            )
+            log.emit(PotentialOwnerUpdated { newPotentialOwner })
             potential_owner = newPotentialOwner.word()
         }
         CancelOwnershipTransfer {} uses (owner, mut potential_owner, ctx: Ctx, log: mut Log) {
             assert_owner(owner)
-            emit_words(PotentialOwnerUpdated::TOPIC0, words: 1, a: 0, b: 0)
+            log.emit(
+                PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
+            )
             potential_owner = 0
         }
         AcceptOwnership {} uses (mut owner, mut potential_owner, ctx: Ctx, log: mut Log) {
             if ctx.caller().word() != potential_owner {
                 revert_with0(error_selector<CallerIsNotPotentialOwner>())
             }
-            emit_words(PotentialOwnerUpdated::TOPIC0, words: 1, a: 0, b: 0)
+            log.emit(
+                PotentialOwnerUpdated { newPotentialOwner: Address::zero() },
+            )
             potential_owner = 0
-            emit_words(
-                OwnershipTransferred::TOPIC0,
-                words: 2,
-                a: Address::from_word_truncate(owner).word(),
-                b: ctx.caller().word(),
+            log.emit(
+                OwnershipTransferred {
+                    previousOwner: Address::from_word_truncate(owner),
+                    newOwner: ctx.caller(),
+                },
             )
             owner = ctx.caller().word()
         }
@@ -490,12 +479,7 @@ pub contract PausableZoneController {
                 revert_with0(error_selector<PauserCanNotBeSetAsZero>())
             }
             pauser = pauserToAssign.word()
-            emit_words(
-                PauserUpdated::TOPIC0,
-                words: 1,
-                a: pauserToAssign.word(),
-                b: 0,
-            )
+            log.emit(PauserUpdated { newPauser: pauserToAssign })
         }
         AssignOperator { pausableZoneAddress, operatorToAssign }
         uses (owner, ctx: Ctx, call: mut Call)
