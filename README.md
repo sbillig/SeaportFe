@@ -185,11 +185,14 @@ list it.
 - Order arguments are read from calldata as seaport-core reads them: the
   Solidity dispatcher's head checks, then 32-bit masked offsets and lengths,
   zero-padded reads, raw words in order hashes, and enum checks
-  (`Panic(0x21)`) where Seaport reads an enum from memory. Signatures and
-  extra data are read in place rather than copied. One difference remains
-  for malformed calldata: the model holds addresses truncated, as Solidity's
-  typed reads see them, so zones and contract offerers receive truncated item
-  and offerer words where seaport-core copies the raw words.
+  (`Panic(0x21)`) where Seaport reads an enum from memory. Signatures, extra
+  data, criteria resolvers and fulfillment components are read in place
+  rather than copied. Two differences remain for malformed calldata. The
+  model holds addresses truncated, as Solidity's typed reads see them, so
+  zones and contract offerers receive truncated item and offerer words where
+  seaport-core copies the raw words. And Seaport copies those in-place values
+  before use, so absurd 32-bit lengths that exhaust its gas while copying
+  only fail here if the value is read.
 - A Fe `Address` holds no bits above the low 160. Raw words become addresses
   either after the check Solidity performs (basic orders, conduit transfers)
   or by truncation, like Solidity's masked storage reads. The conduit batch
