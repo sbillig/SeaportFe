@@ -10,6 +10,7 @@ use super::fulfill::validate_and_fulfill_advanced_order
 use super::hashing::{Env, derive_components_hash, derive_domain_separator}
 use super::manage::{cancel, validate}
 use super::abi_view::CalldataView
+use super::raw_abi::return_name
 use super::model::{
     no_resolvers,
     fulfillments,
@@ -595,8 +596,8 @@ pub contract Seaport {
         {
             get_contract_nonce(contractOfferer)
         }
-        SeaportMsg::Name {} -> DynString {
-            "Seaport"
+        SeaportMsg::Name {} -> DynString uses (ops: RawOps) {
+            return_name("Seaport")
         }
         SeaportMsg::ActivateTstore {} uses (mut guard_state, env, ctx: Ctx, call: Call) {
             activate_tstore(env)
@@ -804,8 +805,8 @@ pub contract Consideration {
         {
             get_contract_nonce(contractOfferer)
         }
-        SeaportMsg::Name {} -> DynString {
-            "Consideration"
+        SeaportMsg::Name {} -> DynString uses (ops: RawOps) {
+            return_name("Consideration")
         }
         SeaportMsg::ActivateTstore {} uses (mut guard_state, env, ctx: Ctx, call: Call) {
             activate_tstore(env)
