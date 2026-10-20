@@ -105,6 +105,11 @@ impl Buffer {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
         }
     }
+    /// The address of byte `offset`, for a run of `store_at`s within a
+    /// range checked with `check_range` or `check_array`.
+    pub unsafe fn at(self, _ offset: u256) -> *u8 {
+        ptr::offset_bytes(self.data.ptr(), offset)
+    }
     /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
     /// buffer. One check can cover a run of `put`s.
     pub fn check_range(self, offset: u256, len: u256) {
@@ -224,4 +229,12 @@ fn byte_copy_cannot_use_allocation_padding() {
     var data = Buffer::new(33)
     let source = Buffer::new(1)
     data.copy_from(offset: 33, source: source.span())
+}
+
+/// Store `value` at byte `offset` from `base`; the word must lie in a range
+/// of a buffer the caller checked (see `Buffer::at`).
+pub unsafe fn store_at(_ base: *u8, offset: u256, value: u256) {
+    unsafe {
+        *ptr::cast<u8, u256>(ptr::offset_bytes(base, offset)) = value
+    }
 }

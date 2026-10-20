@@ -2,7 +2,7 @@
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
 use std::abi::DynArray
 use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
-use super::buffer::Buffer
+use super::buffer::{Buffer, store_at}
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
 use core::ptr::MemArray
@@ -728,18 +728,21 @@ pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execu
     var out = unsafe {
         Buffer::uninit_array(count, stride: 224)
     }
+    let base = unsafe {
+        out.at(32)
+    }
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]
-        let at = 32 + i * 224
+        let at = i * 224
         unsafe {
-            out.put(offset: at, value: e.item_type & 0xff)
-            out.put(offset: at + 32, value: e.token.word())
-            out.put(offset: at + 64, value: e.identifier)
-            out.put(offset: at + 96, value: e.amount)
-            out.put(offset: at + 128, value: e.recipient.word())
-            out.put(offset: at + 160, value: e.offerer.word())
-            out.put(offset: at + 192, value: e.conduit_key)
+            store_at(base, offset: at, value: e.item_type & 0xff)
+            store_at(base, offset: at + 32, value: e.token.word())
+            store_at(base, offset: at + 64, value: e.identifier)
+            store_at(base, offset: at + 96, value: e.amount)
+            store_at(base, offset: at + 128, value: e.recipient.word())
+            store_at(base, offset: at + 160, value: e.offerer.word())
+            store_at(base, offset: at + 192, value: e.conduit_key)
         }
         i += 1
     }
