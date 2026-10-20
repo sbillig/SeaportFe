@@ -5,6 +5,7 @@
 #![arithmetic(unchecked)]
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::status::OrderStore
+use core::abi::store_word
 use core::ptr::{self, MemArray, MemBuffer}
 use std::evm::{Address, Call, Ctx, RawOps}
 use super::errors::{
@@ -14,7 +15,7 @@ use super::errors::{
 }
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::abi_view::CalldataView
-use super::buffer::{Buffer, return_word}
+use super::buffer::Buffer
 use super::model::{Book, Item, OrderState, elem}
 use super::status::take_contract_nonce
 use super::types::CONTRACT
@@ -274,6 +275,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let magic = data.word(0) & 0xffffffff00000000000000000000000000000000000000000000000000000000
     var ret = MemBuffer::with_capacity(32)
+    // Short returndata overwrites only a prefix of this zero word, as
+    // `return_word` with a zero initial word reads it.
+    unsafe {
+        store_word(ptr: ret.ptr(), value: 0)
+    }
     let outcome = call
         .raw_call(
             addr: target,
@@ -289,7 +295,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         revert_with_reason_if_one_is_returned()
         revert_invalid_order(order_hash, contract_order)
     }
-    if return_word(ret.span(), initial: 0) != magic {
+    // The call wrote at most the 32 bytes of `ret`'s capacity.
+    if unsafe { *ptr::cast<u8, u256>(ret.ptr()) } != magic {
         revert_invalid_order(order_hash, contract_order)
     }
     true
