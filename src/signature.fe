@@ -38,7 +38,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     }
     let domain = domain_separator(env)
     let original_digest = derive_eip712_digest(domain_separator: domain, order_hash)
-    let original_length = signature.len()
+    let original_length = signature.len() as u256
     var digest = original_digest
     var signature_length = original_length
     if is_valid_bulk_order_size(original_length) {
@@ -74,17 +74,17 @@ pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) 
     } else {
         keccak_words([leaf, first])
     }
-    var i: u256 = 1
+    var i: usize = 1
     while i < height {
         let element = signature.word_at(signature_length + 3 + i * 32)
-        node = if (key >> i) & 1 == 1 {
+        node = if (key >> i as u256) & 1 == 1 {
             keccak_words([element, node])
         } else {
             keccak_words([node, element])
         }
         i += 1
     }
-    (keccak_words([bulk_order_typehash(height), node]), signature_length)
+    (keccak_words([bulk_order_typehash(height as u256), node]), signature_length as u256)
 }
 
 /// `_assertValidSignature`: ECDSA (65 bytes, or 64-byte EIP-2098) recovery
@@ -126,7 +126,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         args.write(offset: 0x44, value: original_length)
         args.copy_from(
             offset: 0x64,
-            source: signature.payload_span().slice(offset: 0, len: original_length),
+            source: signature.payload_span().slice(offset: 0, len: original_length as usize),
         )
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.

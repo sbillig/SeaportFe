@@ -2,8 +2,8 @@
 // TransferHelper (contracts/helpers/TransferHelper.sol): bulk transfers of
 // ERC20/721/1155 tokens through a conduit.
 use core::option::Option
-use core::ptr::{MemBuffer, MemSpan}
-use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, MemVec, sol}
+use core::ptr::{MemArray, MemBuffer, MemSpan}
+use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
 use super::conduit::{ConduitMsg, ConduitTransfer}
 use super::buffer::{read_word, return_word}
@@ -112,7 +112,7 @@ pub fn setup(_ controller: Address) -> TransferHelperEnv uses (call: Call) {
 /// `catch Error(string memory)` clause does; `None` when the returndata is
 /// something else.
 pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
-    let size = data.len()
+    let size = data.len() as u256
     if size < 0x44 || return_word(data, initial: 0) >> 224 != ERROR_STRING_SELECTOR {
         return Option::None
     }
@@ -126,7 +126,10 @@ pub fn try_decode_error_string(_ data: MemSpan) -> Option<DynString> {
     }
     Option::Some(
         DynString::from_payload(
-            source: data.slice(offset: 4 + offset + 0x20, len: length),
+            source: data.slice(
+                offset: (4 + offset + 0x20) as usize,
+                len: length as usize,
+            ),
         ),
     )
 }
@@ -199,14 +202,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         salt: conduit_key,
         init_code_hash: env.conduit_creation_code_hash,
     )
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < transfers.len() {
         total = total + transfers.get(i).items.len()
         i += 1
     }
-    var conduit_transfers = MemVec<ConduitTransfer>::zeroed(total)
-    var index: u256 = 0
+    var conduit_transfers = MemArray<ConduitTransfer>::new_zeroed(total)
+    var index: usize = 0
     i = 0
     while i < transfers.len() {
         let transfer = transfers.get(i)
@@ -217,7 +220,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let call_erc721_receiver = transfer.validateERC721Receiver
             && ctx.extcodesize(recipient) != 0
         let items = transfer.items
-        var j: u256 = 0
+        var j: usize = 0
         while j < items.len() {
             let item = items.get(j)
             if item.itemType > 3 {
@@ -230,18 +233,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             if item.itemType == 2 && call_erc721_receiver {
                 check_erc721_receiver(conduit, recipient, token_id: item.identifier)
             }
-            conduit_transfers
-                .set(
-                    index,
-                    value: ConduitTransfer {
-                        itemType: item.itemType,
-                        token: item.token,
-                        from: ctx.caller(),
-                        to: recipient,
-                        identifier: item.identifier,
-                        amount: item.amount,
-                    },
-                )
+            conduit_transfers[index] = ConduitTransfer {
+                itemType: item.itemType,
+                token: item.token,
+                from: ctx.caller(),
+                to: recipient,
+                identifier: item.identifier,
+                amount: item.amount,
+            }
             index += 1
             j += 1
         }
@@ -252,7 +251,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             addr: conduit,
             gas: ctx.gas(),
             value: 0,
-            message: ConduitMsg::Execute { transfers: conduit_transfers.to_dyn_array() },
+            message: ConduitMsg::Execute {
+                transfers: DynArray::from_slice(conduit_transfers.as_slice()),
+            },
         )
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != CONDUIT_EXECUTE_SELECTOR {

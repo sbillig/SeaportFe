@@ -75,10 +75,10 @@ pub fn derive_order_hash(_ book: Book, order: OrderState, counter: u256) -> u256
 pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     let offer = order.offer
     var offer_hashes = MemArray<u256>::new_zeroed(offer.len())
-    var i: u256 = 0
+    var i: usize = 0
     while i < offer.len() {
         let item = offer.get(i)
-        offer_hashes[i as usize] = keccak_words(
+        offer_hashes[i] = keccak_words(
             [
                 OFFER_ITEM_TYPEHASH,
                 item.itemType as u256,
@@ -95,7 +95,7 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
     i = 0
     while i < consideration.len() {
         let item = consideration.get(i)
-        consideration_hashes[i as usize] = keccak_words(
+        consideration_hashes[i] = keccak_words(
             [
                 CONSIDERATION_ITEM_TYPEHASH,
                 item.itemType as u256,
@@ -129,7 +129,7 @@ pub fn derive_components_hash(_ order: OrderComponents) -> u256 {
 }
 
 fn hash_items(_ items: MemArray<Item>, start: u256, count: u256, consideration: bool) -> u256 {
-    var hashes = MemArray<u256>::new_zeroed(count)
+    var hashes = MemArray<u256>::new_zeroed(count as usize)
     var i: u256 = 0
     while i < count {
         let item = ref items[(start + i) as usize]

@@ -109,7 +109,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn execute_transfers(_ transfers: DynArray<ConduitTransfer>)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var i: u256 = 0
+    var i: usize = 0
     while i < transfers.len() {
         transfer_item(transfers.get(i))
         i += 1

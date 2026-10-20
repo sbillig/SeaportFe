@@ -1,5 +1,7 @@
-use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol::Uint120}
-use std::evm::Address
+use core::abi::{AbiSize, Encode}
+use core::ptr::MemBuffer
+use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
+use std::evm::{Address, encode_abi_payload}
 use super::applier::aggregate_offer_items
 use super::model::{advanced_orders, nested_components, orders_as_advanced, single_advanced}
 use super::types::{
@@ -9,6 +11,19 @@ use super::types::{
     OfferItem,
     Order,
     OrderParameters,
+}
+
+/// A two-element ABI array of non-Copy records. The tuple encoding of the
+/// pair is exactly the element section of the array's ABI tail.
+fn pair<T>(_ values: own (T, T)) -> DynArray<T> where T: Encode<Sol> + AbiSize {
+    let elements = encode_abi_payload(values)
+    var data = MemBuffer::alloc(32 + elements.len())
+    data.write_word(offset: 0, value: 2)
+    data.copy_from(dest_offset: 32, elements.span())
+    // A complete ABI tail: the length word followed by the pair's encoding.
+    unsafe {
+        DynArray::from_abi_tail(data: data.ptr(), len: 2, size: data.len() as u256)
+    }
 }
 
 fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
@@ -57,10 +72,7 @@ fn owned_items_mutate_independently_of_order_views() {
 
 #[test]
 fn multiple_orders_keep_their_item_and_byte_ranges() {
-    var input = DynVec<AdvancedOrder>::new()
-    input.push(order(4, amount: 7))
-    input.push(order(5, amount: 13))
-    var book = advanced_orders(input.to_dyn_array())
+    var book = advanced_orders(pair((order(4, amount: 7), order(5, amount: 13))))
     assert(book.used == 2)
     assert(book.orders[0].offer_start == 0)
     assert(book.orders[1].offer_start == 1)
@@ -106,14 +118,14 @@ fn empty_order_batches_have_initialized_empty_pools() {
 fn regular_orders_initialize_signature_and_empty_extra_data() {
     let first = order(4, amount: 7)
     let second = order(5, amount: 13)
-    var input = DynVec<Order>::new()
-    input.push(
-            Order { parameters: first.parameters, signature: first.signature },
-        )
-    input.push(
-            Order { parameters: second.parameters, signature: second.signature },
-        )
-    let book = orders_as_advanced(input.to_dyn_array())
+    let book = orders_as_advanced(
+        pair(
+            (
+                Order { parameters: first.parameters, signature: first.signature },
+                Order { parameters: second.parameters, signature: second.signature },
+            ),
+        ),
+    )
     assert(book.used == 2)
     assert(book.orders[0].offer_start == 0)
     assert(book.orders[1].offer_start == 1)

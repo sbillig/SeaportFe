@@ -5,7 +5,7 @@
 // `isPaused` into slot 0; the controller keeps `_owner`, `_potentialOwner`
 // and `_pauser` in slots 0 to 2.
 use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynVec, DynString, sol}
+use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, dyn_array_from, sol}
 use std::evm::{
     Address,
     Call,
@@ -67,6 +67,8 @@ pub struct ZoneIsPaused {}
 
 #[abi]
 pub struct Schema { pub id: u256, pub metadata: Bytes }
+
+impl Copy for Schema {}
 
 const ZONE_INTERFACE_ID: u256 = 0x39dd6933
 const ERC165_INTERFACE_ID: u256 = 0x01ffc9a7
@@ -233,11 +235,7 @@ pub contract PausableZone {
         GetSeaportMetadata {} -> (DynString, DynArray<Schema>) {
             // "PausableZone"
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
-            let schemas = DynVec<Schema>::filled(
-                1,
-                value: Schema { id: 3003, metadata: Bytes::empty() },
-            )
-            (name, schemas.to_dyn_array())
+            (name, dyn_array_from([Schema { id: 3003, metadata: Bytes::empty() }]))
         }
         SupportsInterface { interfaceId } -> bool {
             interfaceId.val == ZONE_INTERFACE_ID || interfaceId.val == ERC165_INTERFACE_ID
@@ -311,7 +309,7 @@ fn assert_owner(_ owner: u256) uses (ctx: Ctx) {
 
 fn zone_init_code_hash() -> u256 uses (ops: mut RawOps) {
     let len = <PausableZone as Contract>::init_code_len()
-    var code = MemBuffer::with_capacity(len)
+    var code = MemBuffer::with_capacity(len as usize)
     ops.codecopy(
         dest: mut code,
         dest_offset: 0,

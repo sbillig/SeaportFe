@@ -2,8 +2,8 @@
 // BasicOrderFulfiller: `fulfillBasicOrder` reads its parameters directly
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
-use core::ptr::MemBuffer
-use std::abi::{Bytes, Bytes32, MemVec}
+use core::ptr::{MemArray, MemBuffer}
+use std::abi::{Bytes, Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, keccak_words, keccak256, revert_error}
 use super::buffer::{Buffer, return_word}
 use super::errors::{
@@ -288,18 +288,14 @@ uses (
                 ],
             ),
         )
-    var received = MemVec<ReceivedItem>::zeroed(total_recipients + 1)
-    received
-        .set(
-            index: 0,
-            value: ReceivedItem {
-                itemType: received_item_type.downcast_truncate(),
-                token: cd_address(CONSIDERATION_TOKEN),
-                identifier: cd(CONSIDERATION_IDENTIFIER),
-                amount: cd(CONSIDERATION_AMOUNT),
-                recipient: offerer,
-            },
-        )
+    var received = MemArray<ReceivedItem>::new_zeroed((total_recipients + 1) as usize)
+    received[0] = ReceivedItem {
+        itemType: received_item_type.downcast_truncate(),
+        token: cd_address(CONSIDERATION_TOKEN),
+        identifier: cd(CONSIDERATION_IDENTIFIER),
+        amount: cd(CONSIDERATION_AMOUNT),
+        recipient: offerer,
+    }
     var combined_recipients: u256 = 0
     var i: u256 = 0
     while i < total_recipients {
@@ -323,17 +319,13 @@ uses (
                 )
         }
         combined_recipients = combined_recipients | recipient
-        received
-            .set(
-                index: i + 1,
-                value: ReceivedItem {
-                    itemType: additional_recipients_item_type.downcast_truncate(),
-                    token: additional_recipients_token,
-                    identifier: 0,
-                    amount,
-                    recipient: Address::from_word_truncate(recipient),
-                },
-            )
+        received[(i + 1) as usize] = ReceivedItem {
+            itemType: additional_recipients_item_type.downcast_truncate(),
+            token: additional_recipients_token,
+            identifier: 0,
+            amount,
+            recipient: Address::from_word_truncate(recipient),
+        }
         i += 1
     }
     if combined_recipients >= (1 << 160) {
@@ -368,19 +360,15 @@ uses (
         ],
     )
 
-    var spent = MemVec<SpentItem>::zeroed(1)
-    spent
-        .set(
-            index: 0,
-            value: SpentItem {
-                itemType: offered_item_type.downcast_truncate(),
-                token: cd_address(OFFER_TOKEN),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-            },
-        )
-    let offer_items = spent.to_dyn_array()
-    let consideration_items = received.to_dyn_array()
+    var spent = MemArray<SpentItem>::new_zeroed(1)
+    spent[0] = SpentItem {
+        itemType: offered_item_type.downcast_truncate(),
+        token: cd_address(OFFER_TOKEN),
+        identifier: cd(OFFER_IDENTIFIER),
+        amount: cd(OFFER_AMOUNT),
+    }
+    let offer_items = DynArray::from_slice(spent.as_slice())
+    let consideration_items = DynArray::from_slice(received.as_slice())
     log.emit(
         OrderFulfilled {
             orderHash: Bytes32 { val: order_hash },
@@ -420,7 +408,7 @@ uses (
 fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
     let at = cd(SIGNATURE_HEAD) + 0x24
     let len = cd(at) & 0xffffffff
-    var payload = MemBuffer::with_capacity(len)
+    var payload = MemBuffer::with_capacity(len as usize)
     ops.calldatacopy(
         dest: mut payload,
         dest_offset: 0,

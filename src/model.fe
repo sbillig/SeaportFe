@@ -135,19 +135,19 @@ fn consideration_item_state(_ item: ConsiderationItem) -> Item {
 /// Copy an offer and consideration into the pool at `start`.
 fn fill_items(
     _ items: mut MemArray<Item>,
-    start: u256,
+    start: usize,
     offer: DynArray<OfferItem>,
     consideration: DynArray<ConsiderationItem>,
 ) {
-    var i: u256 = 0
+    var i: usize = 0
     while i < offer.len() {
-        items[(start + i) as usize] = offer_item_state(offer.get(i))
+        items[start + i] = offer_item_state(offer.get(i))
         i += 1
     }
     let consideration_start = start + offer.len()
     i = 0
     while i < consideration.len() {
-        items[(consideration_start + i) as usize] = consideration_item_state(consideration.get(i))
+        items[consideration_start + i] = consideration_item_state(consideration.get(i))
         i += 1
     }
 }
@@ -164,9 +164,9 @@ fn order_state(
         offerer: p.offerer,
         zone: p.zone,
         offer_start: items_start,
-        offer_len: p.offer.len(),
-        consideration_start: items_start + p.offer.len(),
-        consideration_len: p.consideration.len(),
+        offer_len: p.offer.len() as u256,
+        consideration_start: items_start + p.offer.len() as u256,
+        consideration_len: p.consideration.len() as u256,
         order_type: p.orderType as u256,
         start_time: p.startTime,
         end_time: p.endTime,
@@ -181,14 +181,14 @@ fn order_state(
     }
 }
 
-fn parameters_items(_ p: OrderParameters) -> u256 {
+fn parameters_items(_ p: OrderParameters) -> usize {
     p.offer.len() + p.consideration.len()
 }
 
 pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
     let n = orders.len()
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < n {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
@@ -199,7 +199,7 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         MemArray<OrderState>::new_uninit(n)
     }
     var items = MemArray<Item>::new_zeroed(total)
-    var start: u256 = 0
+    var start: usize = 0
     i = 0
     while i < n {
         let order = orders.get(i)
@@ -210,9 +210,9 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
             offer: p.offer,
             consideration: p.consideration,
         )
-        states[(i) as usize] = order_state(
+        states[i] = order_state(
             orders.get(i).parameters,
-            items_start: start,
+            items_start: start as u256,
             numerator: order.numerator.val as u256,
             denominator: order.denominator.val as u256,
             signature: order.signature,
@@ -221,13 +221,13 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    Book { orders: states, items, used: total }
+    Book { orders: states, items, used: total as u256 }
 }
 
 pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
     let n = orders.len()
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < n {
         total = total + parameters_items(orders.get(i).parameters)
         i += 1
@@ -238,7 +238,7 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         MemArray<OrderState>::new_uninit(n)
     }
     var items = MemArray<Item>::new_zeroed(total)
-    var start: u256 = 0
+    var start: usize = 0
     i = 0
     while i < n {
         let order = orders.get(i)
@@ -249,9 +249,9 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
             offer: p.offer,
             consideration: p.consideration,
         )
-        states[(i) as usize] = order_state(
+        states[i] = order_state(
             orders.get(i).parameters,
-            items_start: start,
+            items_start: start as u256,
             numerator: 1,
             denominator: 1,
             signature: order.signature,
@@ -260,7 +260,7 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         start = start + parameters_items(orders.get(i).parameters)
         i += 1
     }
-    Book { orders: states, items, used: total }
+    Book { orders: states, items, used: total as u256 }
 }
 
 pub fn single_advanced(_ order: AdvancedOrder) -> Book {
@@ -308,13 +308,13 @@ fn single_book(
     )
     var items = MemArray<Item>::new_zeroed(offer_len + consideration_len)
     fill_items(mut items, start: 0, offer, consideration)
-    Book { orders: states, items, used: offer_len + consideration_len }
+    Book { orders: states, items, used: (offer_len + consideration_len) as u256 }
 }
 
 pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
     let n = resolvers.len()
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < n {
         total = total + resolvers.get(i).criteriaProof.len()
         i += 1
@@ -323,23 +323,23 @@ pub fn resolvers(_ resolvers: DynArray<CriteriaResolver>) -> Resolvers {
         list: MemArray<Resolver>::new_zeroed(n),
         proofs: MemArray<u256>::new_zeroed(total),
     }
-    var start: u256 = 0
+    var start: usize = 0
     i = 0
     while i < n {
         let r = resolvers.get(i)
         let proof = r.criteriaProof
-        var j: u256 = 0
+        var j: usize = 0
         while j < proof.len() {
-            out.proofs[(start + j) as usize] = proof.get(j).val
+            out.proofs[start + j] = proof.get(j).val
             j += 1
         }
-        out.list[(i) as usize] = Resolver {
+        out.list[i] = Resolver {
             order_index: r.orderIndex,
             side: r.side as u256,
             index: r.index,
             identifier: r.identifier,
-            proof_start: start,
-            proof_len: proof.len(),
+            proof_start: start as u256,
+            proof_len: proof.len() as u256,
         }
         start = start + proof.len()
         i += 1
@@ -353,28 +353,28 @@ pub fn no_resolvers() -> Resolvers {
 
 fn group_components(
     _ groups: mut Groups,
-    index: u256,
-    start: u256,
+    index: usize,
+    start: usize,
     items: DynArray<FulfillmentComponent>,
-) -> u256 {
-    var i: u256 = 0
+) -> usize {
+    var i: usize = 0
     while i < items.len() {
         let c = items.get(i)
-        groups.components[(start + i) as usize] = Component {
+        groups.components[start + i] = Component {
             order_index: c.orderIndex,
             item_index: c.itemIndex,
         }
         i += 1
     }
-    groups.list[(index) as usize] = Group { start, len: items.len() }
+    groups.list[index] = Group { start: start as u256, len: items.len() as u256 }
     start + items.len()
 }
 
 /// `FulfillmentComponent[][]` as groups of one component pool.
 pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> Groups {
     let n = nested.len()
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < n {
         total = total + nested.get(i).len()
         i += 1
@@ -383,7 +383,7 @@ pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> 
         list: MemArray<Group>::new_zeroed(n),
         components: MemArray<Component>::new_zeroed(total),
     }
-    var start: u256 = 0
+    var start: usize = 0
     i = 0
     while i < n {
         start = group_components(mut groups, index: i, start, items: nested.get(i))
@@ -396,8 +396,8 @@ pub fn nested_components(_ nested: DynArray<DynArray<FulfillmentComponent>>) -> 
 /// `2 * i + 1`).
 pub fn fulfillments(_ items: DynArray<Fulfillment>) -> Groups {
     let n = items.len()
-    var total: u256 = 0
-    var i: u256 = 0
+    var total: usize = 0
+    var i: usize = 0
     while i < n {
         let f = items.get(i)
         total = total + f.offerComponents.len() + items.get(i).considerationComponents.len()
@@ -407,7 +407,7 @@ pub fn fulfillments(_ items: DynArray<Fulfillment>) -> Groups {
         list: MemArray<Group>::new_zeroed(2 * n),
         components: MemArray<Component>::new_zeroed(total),
     }
-    var start: u256 = 0
+    var start: usize = 0
     i = 0
     while i < n {
         start = group_components(

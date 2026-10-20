@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
-use std::abi::{Bytes32, DynArray, MemVec}
+use std::abi::{Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
 use super::buffer::Buffer
 use super::amount::{get_fraction, locate_current_amount}
@@ -82,8 +82,8 @@ uses (
 )
 {
     set_reentrancy_guard(env, accept_native_tokens: true)
-    let total_orders = book.orders.len()
-    var order_hashes = MemArray<u256>::new_zeroed(total_orders)
+    let total_orders = book.orders.len() as u256
+    var order_hashes = MemArray<u256>::new_zeroed(book.orders.len())
     var contains_non_open = false
     var invalid_native_offer_item = false
     var i: u256 = 0
@@ -133,7 +133,7 @@ fn prepare_available_orders(
 )
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let total_orders = book.orders.len()
+    let total_orders = book.orders.len() as u256
     var remaining = maximum_fulfilled
     var some_order_available = false
     var i: u256 = 0
@@ -389,9 +389,9 @@ uses (
         recipient,
         non_match: true,
     )
-    let total_offer = offer_fulfillments.list.len()
+    let total_offer = offer_fulfillments.list.len() as u256
     var executions = MemArray<ExecutionState>::new_zeroed(
-        total_offer + consideration_fulfillments.list.len(),
+        offer_fulfillments.list.len() + consideration_fulfillments.list.len(),
     )
     var i: u256 = 0
     while i < total_offer {
@@ -408,7 +408,7 @@ uses (
         i += 1
     }
     i = 0
-    while i < consideration_fulfillments.list.len() {
+    while i < consideration_fulfillments.list.len() as u256 {
         aggregate_into(
             mut book,
             mut executions,
@@ -472,7 +472,7 @@ uses (
     log: mut Log,
 )
 {
-    let maximum_fulfilled = book.orders.len()
+    let maximum_fulfilled = book.orders.len() as u256
     let (order_hashes, contains_non_open) = validate_orders_and_prepare_to_fulfill(
         env,
         mut book,
@@ -486,7 +486,7 @@ uses (
     let total_fulfillments = fulfillments.list.len() / 2
     var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments)
     var i: u256 = 0
-    while i < total_fulfillments {
+    while i < total_fulfillments as u256 {
         apply_fulfillment_into(mut book, mut executions, groups: fulfillments, index: i)
         i += 1
     }
@@ -531,13 +531,13 @@ uses (
     ops: mut RawOps,
 )
 {
-    let total_orders = book.orders.len()
-    var available = MemArray<bool>::new_zeroed(total_orders)
+    let total_orders = book.orders.len() as u256
+    var available = MemArray<bool>::new_zeroed(book.orders.len())
     // Executions plus unspent offer items bound the number of transfers.
-    var buf = transfer_buffer(executions.len() + book.used)
+    var buf = transfer_buffer(executions.len() as u256 + book.used)
     var acc = new_accumulator()
     var i: u256 = 0
-    while i < executions.len() {
+    while i < executions.len() as u256 {
         acc = run_execution(env, executions, index: i, acc, mut buf)
         i += 1
     }
@@ -742,45 +742,36 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
-    var out = MemVec<bool>::zeroed(values.len())
-    var i: u256 = 0
-    while i < values.len() {
-        out.set(index: i, value: values[(i) as usize])
-        i += 1
-    }
-    out.to_dyn_array()
+    DynArray::from_slice(values.as_slice())
 }
 
 pub fn hash_array(_ values: MemArray<u256>) -> DynArray<Bytes32> {
-    var out = MemVec<Bytes32>::zeroed(values.len())
-    var i: u256 = 0
+    var out = MemArray<Bytes32>::new_zeroed(values.len())
+    var i: usize = 0
     while i < values.len() {
-        out.set(index: i, value: Bytes32 { val: values[(i) as usize] })
+        out[i] = Bytes32 { val: values[i] }
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_slice(out.as_slice())
 }
 
 fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
-    var out = MemVec<Execution>::zeroed(executions.len())
-    var i: u256 = 0
+    var out = MemArray<Execution>::new_zeroed(executions.len())
+    var i: usize = 0
     while i < executions.len() {
-        let e = executions[(i) as usize]
-        out.set(
-            index: i,
-            value: Execution {
-                item: ReceivedItem {
-                    itemType: e.item_type.downcast_truncate(),
-                    token: e.token,
-                    identifier: e.identifier,
-                    amount: e.amount,
-                    recipient: e.recipient,
-                },
-                offerer: e.offerer,
-                conduitKey: Bytes32 { val: e.conduit_key },
+        let e = executions[i]
+        out[i] = Execution {
+            item: ReceivedItem {
+                itemType: e.item_type.downcast_truncate(),
+                token: e.token,
+                identifier: e.identifier,
+                amount: e.amount,
+                recipient: e.recipient,
             },
-        )
+            offerer: e.offerer,
+            conduitKey: Bytes32 { val: e.conduit_key },
+        }
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_slice(out.as_slice())
 }
