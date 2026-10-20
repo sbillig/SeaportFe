@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 // SeaportRouter (contracts/helpers/SeaportRouter.sol): fulfill available
 // orders across Seaport 1.5 and 1.6 in one call.
-use core::ptr::MemSpan
+use core::abi::AbiSize
+use core::ptr::{self, MemArray, MemSpan}
 use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
 use std::abi::sol::decode_output
 use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error}
-use super::error_data::{error_selector, revert_with0, revert_with1}
 use super::hashing::Env
 use super::buffer::return_word
 use super::seaport::SeaportMsg
@@ -89,7 +89,7 @@ uses (guard_state: mut u256, ctx: Ctx, call: Call, create: mut Create)
 
 fn assert_seaport_allowed(_ env: RouterEnv, seaport: Address) {
     if seaport != env.seaport_v1_5 && seaport != env.seaport_v1_6 {
-        revert_with1(error_selector<SeaportNotAllowed>(), seaport.word())
+        revert_error(SeaportNotAllowed { seaport })
     }
 }
 
@@ -170,16 +170,40 @@ uses (
         i += 1
     }
     if fulfillments_left == maximum_fulfilled {
-        revert_with0(error_selector<NoSpecifiedOrdersAvailable>())
+        revert_error(NoSpecifiedOrdersAvailable {})
     }
     if ctx.selfbalance() > 0 {
         return_excess_ether()
     }
     clear_reentrancy_guard(env.guard)
-    (
-        DynArray::from_slice(available_parts.as_slice()),
-        DynArray::from_slice(execution_parts.as_slice()),
-    )
+    (nested_array(available_parts), nested_array(execution_parts))
+}
+
+/// `parts` as an ABI array of arrays, in canonical layout.
+fn nested_array<T>(_ parts: MemArray<DynArray<T>>) -> DynArray<DynArray<T>>
+where T: AbiSize
+{
+    let count = parts.len()
+    var size = 32 + count as u256 * 32
+    for part in parts.as_slice() {
+        size += part.encoded_size()
+    }
+    let data = ptr::alloc_bytes(size)
+    // The allocation holds the length word, a head per part and a copy of
+    // each part's complete encoding, which ends exactly at `size`.
+    unsafe {
+        *ptr::cast<u8, u256>(data) = count as u256
+        var tail = count as u256 * 32
+        for (i, part) in parts.as_slice().enumerate() {
+            *ptr::cast<u8, u256>(ptr::offset_bytes(data, 32 + i as u256 * 32)) = tail
+            ptr::copy(
+                dest: ptr::offset_bytes(data, 32 + tail),
+                source: part.encoded_span(),
+            )
+            tail += part.encoded_size()
+        }
+        DynArray::from_abi_tail(data, len: count, size)
+    }
 }
 
 /// `_returnExcessEther`
@@ -248,4 +272,30 @@ pub contract SeaportRouter {
             assert_seaport_allowed(env, seaport: ctx.caller())
         }
     }
+}
+
+#[test]
+fn nested_output_matches_the_typed_encoding() {
+    var parts = MemArray<DynArray<bool>>::from_fn(3, |_| DynArray<bool>::empty())
+    parts[0] = dyn_array_from([true, false])
+    parts[2] = dyn_array_from([true])
+    let actual = nested_array(parts)
+    let expected = DynArray::from_slice(parts.as_slice())
+    assert(
+        actual.len() == 3 && actual.encoded_size() == expected.encoded_size(),
+    )
+    let a = actual.encoded_span()
+    let b = expected.encoded_span()
+    var i: usize = 0
+    while i < a.len() {
+        assert(a.byte_at(i) == b.byte_at(i))
+        i += 1
+    }
+    assert(
+        actual.get(0).get(0) && !actual.get(0).get(1) && actual.get(1).len() == 0,
+    )
+    let empty = nested_array(
+        MemArray<DynArray<bool>>::from_fn(0, |_| DynArray<bool>::empty()),
+    )
+    assert(empty.len() == 0 && empty.encoded_size() == 32)
 }

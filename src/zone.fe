@@ -3,7 +3,7 @@
 // and contract offerer calldata encodings of ConsiderationEncoder and
 // ConsiderationDecoder.
 #![arithmetic(unchecked)]
-use super::error_data::{error_selector, revert_with0, revert_with1}
+use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::status::OrderStore
 use core::ptr::MemBuffer
 use std::evm::{Address, Call, Ctx, RawOps}

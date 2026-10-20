@@ -4,7 +4,7 @@ use core::abi::AbiSize
 use core::ptr::{self, MemArray, MemBuffer, MemSpan}
 use std::abi::DynArray
 use std::evm::{Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps}
-use super::error_data::{error_selector, revert_with1}
+use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
 pub struct Buffer { data: MemBuffer }
@@ -68,10 +68,30 @@ impl Buffer {
     // Exact output encodings: a buffer sized for the words written to it
     // checks its ranges once and then stores words unchecked.
 
+    /// A buffer of `len` uninitialized bytes. The caller must write every
+    /// byte before the buffer is read.
+    pub unsafe fn uninit(_ len: u256) -> Self {
+        unsafe {
+            Buffer { data: MemBuffer::alloc_uninit(len as usize) }
+        }
+    }
     /// A zeroed ABI array tail for `count` elements of `stride` bytes, with
     /// its length word written.
     pub fn array(_ count: u256, stride: u256) -> Self {
         var data = Buffer::new(32 + count * stride)
+        // The buffer holds the length word.
+        unsafe {
+            data.put(offset: 0, value: count)
+        }
+        data
+    }
+    /// An uninitialized ABI array tail for `count` elements of `stride`
+    /// bytes, with its length word written. The caller must write every
+    /// element byte before the buffer is read.
+    pub unsafe fn uninit_array(_ count: u256, stride: u256) -> Self {
+        var data = unsafe {
+            Buffer::uninit(32 + count * stride)
+        }
         // The buffer holds the length word.
         unsafe {
             data.put(offset: 0, value: count)
@@ -85,6 +105,11 @@ impl Buffer {
         unsafe {
             *ptr::cast<u8, u256>(ptr::offset_bytes(self.data.ptr(), offset)) = value
         }
+    }
+    /// The address of byte `offset`, for a run of `store_at`s within a
+    /// range checked with `check_range` or `check_array`.
+    pub unsafe fn at(self, _ offset: u256) -> *u8 {
+        ptr::offset_bytes(self.data.ptr(), offset)
     }
     /// Fail with `Panic(0x32)` unless `offset..offset + len` lies in the
     /// buffer. One check can cover a run of `put`s.
@@ -205,4 +230,12 @@ fn byte_copy_cannot_use_allocation_padding() {
     var data = Buffer::new(33)
     let source = Buffer::new(1)
     data.copy_from(offset: 33, source: source.span())
+}
+
+/// Store `value` at byte `offset` from `base`; the word must lie in a range
+/// of a buffer the caller checked (see `Buffer::at`).
+pub unsafe fn store_at(_ base: *u8, offset: u256, value: u256) {
+    unsafe {
+        *ptr::cast<u8, u256>(ptr::offset_bytes(base, offset)) = value
+    }
 }
