@@ -18,6 +18,7 @@ use std::evm::{
     keccak256,
     revert_error,
 }
+use super::buffer::Buffer
 use super::seaport::SeaportMsg
 use super::types::{
     AdvancedOrder,
@@ -141,6 +142,36 @@ fn assert_not_paused(_ zone_state: u256) {
     }
 }
 
+/// `[Schema { id: 3003, metadata: "" }]`: the length, the element offset,
+/// the id, the metadata offset and the empty metadata.
+#[inline(always)]
+fn metadata_schemas() -> DynArray<Schema> {
+    var schemas = Buffer::new(0xa0)
+    unsafe {
+        schemas.put(offset: 0, value: 1)
+        schemas.put(offset: 0x20, value: 0x20)
+        schemas.put(offset: 0x40, value: 3003)
+        schemas.put(offset: 0x60, value: 0x40)
+        schemas.into_dyn_array_unvalidated(len: 1)
+    }
+}
+
+#[test]
+fn metadata_schemas_match_the_typed_encoding() {
+    let schemas = metadata_schemas()
+    let expected = dyn_array_from([Schema { id: 3003, metadata: Bytes::empty() }])
+    assert(schemas.encoded_size() == expected.encoded_size())
+    let actual = schemas.encoded_span()
+    let typed = expected.encoded_span()
+    var i: usize = 0
+    while i < actual.len() {
+        assert(actual.byte_at(i) == typed.byte_at(i))
+        i += 1
+    }
+    let schema = schemas.get(0)
+    assert(schema.id == 3003 && schema.metadata.len() == 0)
+}
+
 fn assert_controller(_ controller: Address) uses (ctx: Ctx) {
     if ctx.caller() != controller {
         revert_error(InvalidController {})
@@ -235,7 +266,7 @@ pub contract PausableZone {
         GetSeaportMetadata {} -> (DynString, DynArray<Schema>) {
             // "PausableZone"
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
-            (name, dyn_array_from([Schema { id: 3003, metadata: Bytes::empty() }]))
+            (name, metadata_schemas())
         }
         SupportsInterface { interfaceId } -> bool {
             interfaceId.val == ZONE_INTERFACE_ID || interfaceId.val == ERC165_INTERFACE_ID

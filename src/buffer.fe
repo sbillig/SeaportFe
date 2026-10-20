@@ -55,6 +55,16 @@ impl Buffer {
             DynArray::from_abi_tail(data: self.data.ptr(), len: len as usize, size: self.len())
         }
     }
+    /// The buffer as the ABI tail of a `len` element array of any `T`. The
+    /// caller must ensure the buffer is the length word `len`, the element
+    /// heads and valid tails ending at the buffer's end.
+    pub unsafe fn into_dyn_array_unvalidated<T>(own self, len: u256) -> DynArray<T>
+    where T: AbiSize
+    {
+        unsafe {
+            DynArray::from_abi_tail(data: self.data.ptr(), len: len as usize, size: self.len())
+        }
+    }
     pub fn copy_from(mut self, offset: u256, source: MemSpan) {
         self.check_range(offset, len: source.len() as u256)
         self.data.copy_from(dest_offset: offset as usize, source)

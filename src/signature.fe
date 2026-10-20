@@ -119,11 +119,14 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     var success = signer.word() == recovered && signer.word() != 0
     if !success {
         // isValidSignature(bytes32,bytes) with the unpadded signature bytes.
+        // The buffer holds the selector, the head and the signature length.
         var args = Buffer::new(original_length + 0x64)
-        args.write(offset: 0, value: EIP1271_SELECTOR_WORD)
-        args.write(offset: 4, value: original_digest)
-        args.write(offset: 0x24, value: 0x40)
-        args.write(offset: 0x44, value: original_length)
+        unsafe {
+            args.put(offset: 0, value: EIP1271_SELECTOR_WORD)
+            args.put(offset: 4, value: original_digest)
+            args.put(offset: 0x24, value: 0x40)
+            args.put(offset: 0x44, value: original_length)
+        }
         args.copy_from(
             offset: 0x64,
             source: signature.payload_span().slice(offset: 0, len: original_length as usize),
