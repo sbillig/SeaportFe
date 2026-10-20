@@ -570,13 +570,8 @@ uses (
     var available = MemArray<bool>::new_zeroed(book.orders.len())
     // Executions plus unspent offer items bound the number of transfers.
     var buf = transfer_buffer(executions.len() as u256 + book.used)
-    var acc = new_accumulator()
+    var acc = run_executions(env, executions, mut buf)
     var i: u256 = 0
-    while i < executions.len() as u256 {
-        acc = run_execution(env, executions, index: i, acc, mut buf)
-        i += 1
-    }
-    i = 0
     while i < total_orders {
         acc = settle_order(
             env,
@@ -603,6 +598,22 @@ uses (
     }
     clear_reentrancy_guard(env)
     available
+}
+
+/// Run every execution, out of line so that the values its loop keeps live
+/// take a frame of its own.
+#[arithmetic(unchecked)]
+#[inline(never)]
+fn run_executions(_ env: Env, executions: MemArray<ExecutionState>, buf: mut Buffer) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    var acc = new_accumulator()
+    var i: u256 = 0
+    while i < executions.len() as u256 {
+        acc = run_execution(env, executions, index: i, acc, mut buf)
+        i += 1
+    }
+    acc
 }
 
 fn run_execution(
