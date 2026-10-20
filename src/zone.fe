@@ -5,7 +5,7 @@
 #![arithmetic(unchecked)]
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::status::OrderStore
-use core::ptr::{MemArray, MemBuffer}
+use core::ptr::{self, MemArray, MemBuffer}
 use std::evm::{Address, Call, Ctx, RawOps}
 use super::errors::{
     ConsiderationLengthNotEqualToTotalOriginal,
@@ -14,7 +14,7 @@ use super::errors::{
 }
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::abi_view::CalldataView
-use super::buffer::{Buffer, read_word, return_word}
+use super::buffer::{Buffer, return_word}
 use super::model::{Book, Item, OrderState, elem}
 use super::status::take_contract_nonce
 use super::types::CONTRACT
@@ -408,11 +408,17 @@ uses (ctx: Ctx)
     data
 }
 
-/// One word of returndata at `offset`.
+/// One word of returndata at `offset`. One shared copy keeps the many call
+/// sites small; reading the word directly keeps it free of calls and of a
+/// frame.
+#[inline(never)]
 fn returndata_word(_ offset: u256) -> u256 uses (ops: mut RawOps) {
     var buf = MemBuffer::with_capacity(32)
     ops.returndatacopy(dest: mut buf, dest_offset: 0, src_offset: offset, len: 32)
-    read_word(buf.span(), offset: 0)
+    // The copy filled the 32 bytes of the buffer.
+    unsafe {
+        *ptr::cast<u8, u256>(buf.ptr())
+    }
 }
 
 /// The layout of valid `generateOrder` returndata.
