@@ -242,13 +242,18 @@ port follows the optimized one.
 The ABIs match except for listings: Solidity lists every error of the
 inherited interfaces and the shared events of `PausableZone` and its
 controller, Fe lists the errors a contract can raise, and Fe
-marks `PausableZone.supportsInterface` as `pure`, not `view`. The order
-entry points (fulfill, match, validate, cancel, `getOrderHash`) and the
-conduit batch functions use numeric selectors (their calldata is read raw),
-so they have no ABI entry. `SeaportMsg` keeps the typed forms for callers.
-`OrderValidated` is written with a raw log operation, and custom errors with
-static fields revert through the shared encoders of `raw_abi.fe`; the Fe
-ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
+marks `PausableZone.supportsInterface` as `pure`, not `view`, and the
+`name()` of Seaport and Consideration as `view`, not `pure`: its arm returns
+the hand-encoded name through `RawOps`. The order
+entry points (fulfill, match, validate, cancel, `getOrderHash`), the
+conduit's `execute` functions and PausableZone's `authorizeOrder` and
+`validateOrder` use numeric selectors (their calldata is read raw), so they
+have no ABI entry. `SeaportMsg` keeps the typed forms for callers.
+`OrderValidated`, `OrderCancelled`, `OrderFulfilled` and `OrdersMatched` are
+written with raw log operations, and custom errors with static fields revert
+through the shared encoders of `raw_abi.fe`; the Fe ABI walk only sees typed
+emits and `revert_error` calls, so it lists neither. `scripts/compare_abi.py`
+checks exactly these differences.
 
 ## Limitations
 
@@ -273,7 +278,9 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   `(bool[], Execution[])` returndata strictly. One difference remains: for a
   bytes or array length below 2^64 that exceeds what solc's free-memory
   pointer can still address, solc reverts with `Panic(0x41)` and Fe reverts
-  without data. `tests/router-diff.cjs` finds no other difference.
+  without data. `tests/router-diff.cjs` finds no other difference in the
+  calls the router forwards for a first and a second group or in its
+  returndata decoding; it sends no value, which the Hardhat suite covers.
 - PausableZone's `authorizeOrder` and `validateOrder` check only the
   `ZoneParameters` offset and 320-byte head, as Solidity does for a calldata
   struct it never reads, instead of decoding the whole struct.
@@ -284,7 +291,10 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   `InvalidERC20Identifier`. PausableZone passes the orders and fulfillments
   its operator sends on to Seaport as encoded, and returns Seaport's
   executions unchecked; Solidity's re-encoding rejects dirty addresses and
-  out-of-range enums in them.
+  out-of-range enums in them. So the operator can complete a match that
+  Solidity's zone would reject, such as one with high bits in a recipient
+  word; Seaport then pays the truncated address, as it does when called
+  directly.
 - A Fe `Address` holds no bits above the low 160. Raw words become addresses
   either after the check Solidity performs (basic orders, conduit transfers)
   or by truncation, like Solidity's masked storage reads. The conduit batch
