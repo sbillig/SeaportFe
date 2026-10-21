@@ -85,6 +85,14 @@ fn cd_address(_ offset: u256) -> Address uses (ops: RawOps) {
     Address::from_word_truncate(ops.calldataload(offset))
 }
 
+/// The bytes of a basic order's `OrderFulfilled` data with
+/// `total_recipients` additional recipients. Checked, because the event's
+/// unchecked stores rely on it; seaport-core runs out of gas on any count
+/// that would overflow it.
+fn order_fulfilled_size(_ total_recipients: u256) -> u256 {
+    0x140 + (total_recipients + 1) * 160
+}
+
 #[arithmetic(unchecked)]
 fn byte_at(_ index: u256, _ word: u256) -> u256 {
     if index >= 32 { return 0 }
@@ -277,7 +285,7 @@ uses (
     // offsets, the offer (one SpentItem) and the consideration (the primary
     // item and one ReceivedItem per additional recipient). Item types come
     // from byte maps, so they are their own `uint8` truncation.
-    var event = Buffer::new(0x140 + (total_recipients + 1) * 160)
+    var event = Buffer::new(order_fulfilled_size(total_recipients))
     // The buffer holds every word written to it below.
     unsafe {
         event.put(offset: 0x120, value: total_recipients + 1)
