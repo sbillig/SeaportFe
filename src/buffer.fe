@@ -75,16 +75,6 @@ impl Buffer {
             Buffer { data: MemBuffer::alloc_uninit(len as usize) }
         }
     }
-    /// A zeroed ABI array tail for `count` elements of `stride` bytes, with
-    /// its length word written.
-    pub fn array(_ count: u256, stride: u256) -> Self {
-        var data = Buffer::new(32 + count * stride)
-        // The buffer holds the length word.
-        unsafe {
-            data.put(offset: 0, value: count)
-        }
-        data
-    }
     /// An uninitialized ABI array tail for `count` elements of `stride`
     /// bytes, with its length word written. The caller must write every
     /// element byte before the buffer is read.
@@ -107,7 +97,7 @@ impl Buffer {
         }
     }
     /// The address of byte `offset`, for a run of `store_at`s within a
-    /// range checked with `check_range` or `check_array`.
+    /// range checked with `check_range`.
     pub unsafe fn at(self, _ offset: u256) -> *u8 {
         ptr::offset_bytes(self.data.ptr(), offset)
     }
@@ -117,14 +107,6 @@ impl Buffer {
         if offset > self.len() || len > self.len() - offset {
             revert_with1(error_selector<Panic>(), PANIC_INDEX_OUT_OF_BOUNDS)
         }
-    }
-    /// The size `32 + count * stride` of an array tail at `offset`, which
-    /// must lie in the buffer (see `check_range`). Offsets within the tail
-    /// can then be computed without overflow checks.
-    pub fn check_array(self, offset: u256, count: u256, stride: u256) -> u256 {
-        let size = 32 + count * stride
-        self.check_range(offset, len: size)
-        size
     }
     /// Copy `len` bytes of calldata from `source` to `offset`.
     pub fn copy_calldata_range(mut self, offset: u256, source: u256, len: u256)
