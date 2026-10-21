@@ -262,6 +262,9 @@ uses (
         revert_with0(error_selector<MissingOriginalConsiderationItems>())
     }
 
+    // The checked event size also bounds the hash buffer's, since
+    // `total_original <= total_recipients`.
+    let event_size = order_fulfilled_size(total_recipients)
     // Consideration item hashes of the primary item and the original
     // additional recipients, and the ReceivedItems of all of them.
     let offerer = cd_address(OFFERER)
@@ -285,7 +288,7 @@ uses (
     // offsets, the offer (one SpentItem) and the consideration (the primary
     // item and one ReceivedItem per additional recipient). Item types come
     // from byte maps, so they are their own `uint8` truncation.
-    var event = Buffer::new(order_fulfilled_size(total_recipients))
+    var event = Buffer::new(event_size)
     // The buffer holds every word written to it below.
     unsafe {
         event.put(offset: 0x120, value: total_recipients + 1)
