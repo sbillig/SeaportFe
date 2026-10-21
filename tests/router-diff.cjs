@@ -211,4 +211,8 @@ async function main() {
   }
   finish();
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+// Hardhat's in-process network keeps the event loop alive, so exit explicitly.
+main().then(
+  () => process.exit(process.exitCode ?? 0),
+  (e) => { console.error(e); process.exit(1); },
+);
