@@ -258,14 +258,16 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
   (`Panic(0x21)`) where Seaport reads an enum from memory. Signatures, extra
   data, criteria resolvers and fulfillment components are read in place
   rather than copied. Three differences remain for malformed calldata. The
-  model holds addresses truncated, as Solidity's typed reads see them, so
+  model holds addresses truncated, as Solidity's typed reads see them:
   zones and contract offerers receive truncated item and offerer words where
-  seaport-core copies the raw words. And Seaport copies those in-place values
-  before use, so absurd 32-bit lengths that exhaust its gas while copying
-  only fail here if the value is read. And a basic order with more
-  additional recipients than memory can hold reverts with `Panic(0x41)`
-  (`Panic(0x11)` if its event size overflows), where seaport-core runs out
-  of gas.
+  seaport-core copies the raw words, and fulfillment aggregation and
+  offer/consideration matching compare truncated tokens, offerers and
+  recipients where seaport-core compares the raw words. Seaport copies the
+  in-place values before use, so absurd 32-bit lengths that exhaust its gas
+  while copying only fail here if the value is read. And a basic order with
+  more additional recipients than memory can hold reverts with
+  `Panic(0x41)` (`Panic(0x11)` if its event size overflows), where
+  seaport-core runs out of gas.
 - SeaportRouter validates `fulfillAvailableAdvancedOrders` parameters from
   calldata with solc's checks, in solc's order, and decodes Seaport's
   `(bool[], Execution[])` returndata strictly. One difference remains: for a
