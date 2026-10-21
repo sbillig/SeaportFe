@@ -7,7 +7,7 @@ use core::abi::store_word
 use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, revert_error}
-use super::raw_abi::{error_selector, revert_custom5, revert_with0, revert_with1, revert_with2}
+use super::raw_abi::{error_selector, revert_with0, revert_with1, revert_with2, revert_with4, revert_with5}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -400,14 +400,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_custom5(
+        revert_with5(
             error_selector<TokenTransferGenericFailure>(),
-            words: 5,
-            a: token.word(),
-            b: from.word(),
-            c: to.word(),
-            d: if erc20 { 0 } else { identifier },
-            e: amount,
+            token.word(),
+            from.word(),
+            to.word(),
+            if erc20 { 0 } else { identifier },
+            amount,
         )
     }
     if !erc20 { return }
@@ -420,14 +419,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     // At least 32 returned bytes fill `ret`'s capacity.
     if size < 32 || unsafe { *ptr::cast<u8, u256>(ret.ptr()) } != 1 {
-        revert_custom5(
+        revert_with4(
             error_selector<BadReturnValueFromERC20OnTransfer>(),
-            words: 4,
-            a: token.word(),
-            b: from.word(),
-            c: to.word(),
-            d: amount,
-            e: 0,
+            token.word(),
+            from.word(),
+            to.word(),
+            amount,
         )
     }
 }

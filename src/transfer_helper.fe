@@ -5,7 +5,7 @@ use core::option::Option
 use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, create2_address, revert_error}
-use super::raw_abi::{error_selector, revert_with_reason}
+use super::raw_abi::{error_selector, revert_with_reason2, revert_with_reason3}
 use super::buffer::{Buffer, read_word, return_word}
 
 #[abi]
@@ -171,10 +171,9 @@ uses (ctx: Ctx, call: mut Call)
         },
         Option::None => {},
     }
-    revert_with_reason(
+    revert_with_reason3(
         selector,
         reason: returned.slice(offset: start as usize, len: length as usize),
-        words: 3,
         a: recipient.word(),
         b: ctx.caller().word(),
         c: token_id,
@@ -262,13 +261,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     let data = outcome.returndata()
     match try_decode_error_string(data) {
-        Option::Some((at, len)) => revert_with_reason(
+        Option::Some((at, len)) => revert_with_reason2(
             error_selector<ConduitErrorRevertString>(),
             reason: data.slice(offset: at as usize, len: len as usize),
-            words: 2,
             a: conduit_key,
             b: conduit.word(),
-            c: 0,
         ),
         Option::None => {},
     }
@@ -281,13 +278,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         || (data.len() == 36 && selector == INVALID_ERC721_TRANSFER_AMOUNT_SELECTOR) {
         ops.revert(data)
     }
-    revert_with_reason(
+    revert_with_reason2(
         error_selector<ConduitErrorRevertBytes>(),
         reason: data,
-        words: 2,
         a: conduit_key,
         b: conduit.word(),
-        c: 0,
     )
 }
 

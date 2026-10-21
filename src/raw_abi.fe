@@ -14,10 +14,11 @@ pub fn error_selector<E>() -> u256 where E: ErrorVariant<Sol> {
 }
 
 /// Revert with custom error data: the 4-byte `selector`, then the first
-/// `words` of the argument words `a` to `c`. For an error whose fields are
-/// all static this is exactly what `revert_error` reverts with; the shared
-/// encoding avoids an encoder per error type.
-pub fn revert_custom(_ selector: u256, words: u256, a: u256, b: u256, c: u256) -> ! {
+/// `words` (at most three) of the argument words `a` to `c`. For an error
+/// whose fields are all static this is exactly what `revert_error` reverts
+/// with; the shared encoding avoids an encoder per error type. Callers use
+/// the `revert_with` wrappers, which fix `words`.
+fn revert_custom(_ selector: u256, words: u256, a: u256, b: u256, c: u256) -> ! {
     let data = ptr::alloc_bytes(0x64)
     // The allocation holds the selector and all three words.
     unsafe {
@@ -32,7 +33,7 @@ pub fn revert_custom(_ selector: u256, words: u256, a: u256, b: u256, c: u256) -
 }
 
 /// Like `revert_custom`, for errors with four or five static words.
-pub fn revert_custom5(
+fn revert_custom5(
     _ selector: u256,
     words: u256,
     a: u256,
@@ -71,9 +72,31 @@ pub fn revert_with2(_ selector: u256, _ a: u256, _ b: u256) -> ! {
     revert_custom(selector, words: 2, a, b, c: 0)
 }
 
+#[inline(always)]
+pub fn revert_with3(_ selector: u256, _ a: u256, _ b: u256, _ c: u256) -> ! {
+    revert_custom(selector, words: 3, a, b, c)
+}
+
+#[inline(always)]
+pub fn revert_with4(_ selector: u256, _ a: u256, _ b: u256, _ c: u256, _ d: u256) -> ! {
+    revert_custom5(selector, words: 4, a, b, c, d, e: 0)
+}
+
+#[inline(always)]
+pub fn revert_with5(
+    _ selector: u256,
+    _ a: u256,
+    _ b: u256,
+    _ c: u256,
+    _ d: u256,
+    _ e: u256,
+) -> ! {
+    revert_custom5(selector, words: 5, a, b, c, d, e)
+}
+
 /// Revert with a custom error whose first field is the `bytes` or `string`
-/// `reason`, followed by `words` static words of `a` to `c`.
-pub fn revert_with_reason(
+/// `reason`, followed by `words` (two or three) static words of `a` to `c`.
+fn revert_with_reason(
     _ selector: u256,
     reason: MemSpan,
     words: u256,
@@ -97,6 +120,16 @@ pub fn revert_with_reason(
     }
     data.copy_from(offset: 4 + tail + 32, source: reason)
     revert_bytes(data.span())
+}
+
+#[inline(always)]
+pub fn revert_with_reason2(_ selector: u256, reason: MemSpan, a: u256, b: u256) -> ! {
+    revert_with_reason(selector, reason, words: 2, a, b, c: 0)
+}
+
+#[inline(always)]
+pub fn revert_with_reason3(_ selector: u256, reason: MemSpan, a: u256, b: u256, c: u256) -> ! {
+    revert_with_reason(selector, reason, words: 3, a, b, c)
 }
 
 /// Return `name` ABI-encoded as a `string`, as Seaport's `_name()` does: the
