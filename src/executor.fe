@@ -21,6 +21,7 @@ use super::errors::{
 use super::hashing::{Env, derive_conduit}
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::buffer::Buffer
+use super::model::checked_enum
 use super::types::{ERC20, NATIVE}
 
 /// transferFrom(address,address,uint256), shared by ERC20 and ERC721.
@@ -114,7 +115,8 @@ pub fn transfer_item(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if item_type == NATIVE as u256 {
+    // `_transfer` reads the item type as an `ItemType`.
+    if checked_enum(item_type, variants: 6) == NATIVE as u256 {
         if (token.word() | identifier) != 0 {
             revert_with0(error_selector<UnusedItemParameters>())
         }
