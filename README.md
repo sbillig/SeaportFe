@@ -277,6 +277,14 @@ ABI walk only sees typed emits and `revert_error` calls, so it lists neither.
 - PausableZone's `authorizeOrder` and `validateOrder` check only the
   `ZoneParameters` offset and 320-byte head, as Solidity does for a calldata
   struct it never reads, instead of decoding the whole struct.
+- The periphery decodes some calldata earlier than solc reads it.
+  `Conduit.execute` and TransferHelper's `bulkTransfer` check a transfer's
+  addresses as they decode it, so a dirty address reverts without data where
+  Solidity first reports `InvalidItemType`, `InvalidERC721TransferAmount` or
+  `InvalidERC20Identifier`. PausableZone passes the orders and fulfillments
+  its operator sends on to Seaport as encoded, and returns Seaport's
+  executions unchecked; Solidity's re-encoding rejects dirty addresses and
+  out-of-range enums in them.
 - A Fe `Address` holds no bits above the low 160. Raw words become addresses
   either after the check Solidity performs (basic orders, conduit transfers)
   or by truncation, like Solidity's masked storage reads. The conduit batch
