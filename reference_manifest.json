@@ -7,7 +7,7 @@
   "compiler": {
     "url": "https://github.com/sbillig/fe.git",
     "branch": "opt/seaport-size-20261019",
-    "revision": "1626697e5d8a4d659eb42d7077553c214e33225d",
+    "revision": "5a3f8bbe187aad5aab465ba0ee9a59f3ce574af3",
     "sonatina_url": "https://github.com/sbillig/sonatina.git",
     "sonatina_revision": "6f264b4606ade9d227483f3c727f969b83fed57e",
     "optimize": "s"

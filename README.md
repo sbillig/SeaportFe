@@ -47,7 +47,7 @@ and write order status slots directly).
 
 This branch builds with the size-optimized Fe branch
 [`sbillig/fe` `opt/seaport-size-20261019`](https://github.com/sbillig/fe/tree/opt/seaport-size-20261019)
-at `1626697e5`, which is Fe master `822e80878` plus the compiler changes listed
+at `5a3f8bbe1`, which is Fe master `822e80878` plus the compiler changes listed
 under [Size and gas](#size-and-gas). Its Cargo dependencies pin Sonatina from
 [`sbillig/sonatina` `opt/seaport-size-20261019`](https://github.com/sbillig/sonatina/tree/opt/seaport-size-20261019)
 at `6f264b46`. `scripts/bootstrap.py` builds that exact compiler with
@@ -95,38 +95,38 @@ identical calls.
 
 | Contract | Before | `-Os` | `-O1` | solc |
 | --- | ---: | ---: | ---: | ---: |
-| Seaport | 54,156 | 21,860 | 22,283 | 23,963 |
-| Consideration | 54,162 | 21,866 | 22,289 | 23,969 |
-| Conduit | 3,970 | 2,513 | 2,531 | 2,850 |
-| ConduitController | 7,589 | 5,079 | 5,096 | 7,298 |
-| TransferHelper | 4,796 | 3,535 | 3,566 | 3,712 |
-| SeaportRouter | 11,151 | 4,929 | 4,944 | 6,759 |
-| PausableZone | 7,411 | 5,578 | 5,644 | 6,162 |
-| PausableZoneController | 14,099 | 11,565 | 11,883 | 12,730 |
-| Total | 157,334 | 76,925 | 78,236 | 87,443 |
+| Seaport | 54,156 | 21,933 | 22,492 | 23,963 |
+| Consideration | 54,162 | 21,939 | 22,498 | 23,969 |
+| Conduit | 3,970 | 2,510 | 2,528 | 2,850 |
+| ConduitController | 7,589 | 5,097 | 5,114 | 7,298 |
+| TransferHelper | 4,796 | 3,549 | 3,560 | 3,712 |
+| SeaportRouter | 11,151 | 4,939 | 4,954 | 6,759 |
+| PausableZone | 7,411 | 5,575 | 5,659 | 6,162 |
+| PausableZoneController | 14,099 | 11,591 | 11,948 | 12,730 |
+| Total | 157,334 | 77,133 | 78,753 | 87,443 |
 
 | Call | Before | `-Os` | `-O1` | solc |
 | --- | ---: | ---: | ---: | ---: |
-| Advanced ERC721/native self fulfillment | 128,191 | 111,886 | 112,060 | 113,085 |
-| Validate one order | 57,334 | 40,269 | 40,248 | 40,064 |
-| Cancel one order | 40,521 | 32,765 | 32,980 | 33,272 |
-| Increment counter | 29,255 | 27,967 | 28,276 | 27,976 |
-| getOrderStatus (cold) | 25,160 | 23,654 | 23,654 | 23,669 |
+| Advanced ERC721/native self fulfillment | 128,191 | 111,978 | 112,274 | 113,085 |
+| Validate one order | 57,334 | 40,269 | 40,343 | 40,064 |
+| Cancel one order | 40,521 | 32,765 | 33,103 | 33,272 |
+| Increment counter | 29,255 | 27,970 | 28,279 | 27,976 |
+| getOrderStatus (cold) | 25,160 | 23,720 | 24,116 | 23,669 |
 | name (cold) | 22,527 | 21,288 | 21,288 | 21,240 |
 | getCounter (cold) | 24,076 | 24,055 | 24,055 | 24,109 |
-| Create conduit | 908,150 | 615,484 | 619,090 | 676,738 |
-| Create zone | 1,554,667 | 1,186,340 | 1,199,980 | 1,297,167 |
-| Open a channel | 120,746 | 120,070 | 120,070 | 120,891 |
+| Create conduit | 908,150 | 614,894 | 618,493 | 676,738 |
+| Create zone | 1,554,667 | 1,185,740 | 1,202,980 | 1,297,167 |
+| Open a channel | 120,746 | 120,105 | 120,105 | 120,891 |
 | Transfer conduit ownership | 49,879 | 49,812 | 49,812 | 50,233 |
 
 Every contract is now at or below the solc size at both levels, and
 Seaport/Consideration fit under the 24,576-byte EIP-170 limit.
 
 Compiler changes (Fe and Sonatina branches above):
-- Messages and custom errors encode into one buffer. `revert_error` stays out
-  of line and writes static errors to scratch memory. Static return values of
-  up to 0x80 bytes go to scratch memory too, the way Solidity returns small
-  values.
+- Messages and custom errors encode into one buffer, zeroing only the
+  payload after the selector. `revert_error` stays out of line. (Return and
+  revert payloads in scratch memory were tried and dropped: Sonatina's fixed
+  spill slots share those bytes.)
 - The free pointer is set once at the section entry. IR reaches the reserved
   free-pointer slot only through immediate addresses, so stores through
   pointers keep the known heap floor and heap allocations need no clamp.
@@ -304,7 +304,7 @@ checks exactly these differences.
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
 - Code size: with the compiler above at `-Os`, the Seaport and Consideration
-  runtimes are 21,860 and 21,866 bytes, under the 24 KB EIP-170 limit
+  runtimes are 21,933 and 21,939 bytes, under the 24 KB EIP-170 limit
   (ISSUES.md #13); see [Size and gas](#size-and-gas). Earlier builds:
   Fe master 735827147 / committed Sonatina 6bef907f at `-O1`
   produced a 57,339-byte Seaport runtime and a 57,345-byte Consideration
