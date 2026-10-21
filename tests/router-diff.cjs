@@ -2,9 +2,11 @@
 // Run from reference/seaport (pristine artifacts):
 //   FE_BUILD=<dir with SeaportRouter.bin> npx hardhat run --no-compile ../../tests/router-diff.cjs
 // Both routers get stub Seaports: one reverting with its calldata (exposing the
-// forwarded call) and ones returning crafted (bool[], Execution[]) data. Prints
-// every case whose return or revert data differ. RELATIVE=1 instead shifts
-// every word of the valid calldata by +-32, +1 and +64.
+// forwarded call), ones returning crafted (bool[], Execution[]) data, and one
+// reverting with NoSpecifiedOrdersAvailable(), which the router skips. Prints
+// every case whose return or revert data differ and exits nonzero if any
+// differs other than the documented Panic(0x41) case. No call sends value.
+// RELATIVE=1 instead shifts every word of the valid calldata by +-32, +1 and +64.
 const hre = require("hardhat");
 const fs = require("fs");
 const { ethers } = hre;
@@ -19,11 +21,22 @@ async function deployRaw(initHex) {
 }
 // Runtime that reverts with its calldata.
 const REVERT_STUB = "0x66365f5f37365ffd5f5260076019f3";
+// Runtime that calls the address in its first calldata word with the rest of
+// the calldata and returns the success flag word, then the returndata. The
+// Seaport Hardhat config sets throwOnCallFailures: false, so an eth_call
+// doesn't otherwise tell a revert from a return.
+const PROBE = "602036038060205f375f5f825f5f5f355af15f523d5f60203e3d6020015ff3";
+function deployCode(runtimeHex) {
+  const len = (runtimeHex.length / 2).toString(16).padStart(4, "0");
+  // PUSH2 len PUSH2 13 PUSH0 CODECOPY PUSH2 len PUSH0 RETURN
+  return "0x61" + len + "61000d5f3961" + len + "5ff3" + runtimeHex;
+}
 // Runtime returning fixed `data`: PUSH2 len PUSH2 off PUSH0 CODECOPY PUSH2 len PUSH0 RETURN data
-function returnStub(dataHex) {
+// With `revert`, the runtime reverts with `data` instead.
+function returnStub(dataHex, revert = false) {
   const data = dataHex.slice(2);
   const len = data.length / 2;
-  const code = "61" + len.toString(16).padStart(4, "0") + "6000".slice(0,0) + "61" + (13).toString(16).padStart(4, "0") + "5f39" + "61" + len.toString(16).padStart(4, "0") + "5ff3" + data;
+  const code = "61" + len.toString(16).padStart(4, "0") + "6000".slice(0,0) + "61" + (13).toString(16).padStart(4, "0") + "5f39" + "61" + len.toString(16).padStart(4, "0") + (revert ? "5ffd" : "5ff3") + data;
   // runtime prefix is 3+3+2+3+2 = 13 bytes
   const rlen = code.length / 2;
   // init: PUSH2 rlen PUSH2 initlen PUSH0 CODECOPY PUSH2 rlen PUSH0 RETURN
@@ -36,29 +49,47 @@ async function main() {
   const iface = new ethers.utils.Interface(solArt.abi);
   const feInit = "0x" + fs.readFileSync(FE + "/SeaportRouter.bin", "utf8").trim();
   const revertStub = await deployRaw(REVERT_STUB);
+  const probe = await deployRaw(deployCode(PROBE));
   const results = [];
-  async function routers(seaport) {
-    const args = abiCoder.encode(["address", "address"], [seaport, seaport]).slice(2);
+  async function routers(seaport, second = seaport) {
+    const args = abiCoder.encode(["address", "address"], [seaport, second]).slice(2);
     const sol = await deployRaw(solArt.bytecode + args);
     const fe = await deployRaw(feInit + args);
     return { sol, fe };
   }
   async function call(to, data) {
-    try {
-      const r = await ethers.provider.call({ to, data, gasLimit: 3_000_000 });
-      return "ok:" + r;
-    } catch (e) {
-      const d = e.data ?? e.error?.data ?? e.error?.error?.data ?? (e.message.match(/0x[0-9a-f]*/)?.[0]);
-      return "revert:" + (typeof d === "string" ? d : JSON.stringify(d ?? e.message.slice(0, 200)));
-    }
+    const r = await ethers.provider.call({ to: probe, data: "0x" + to.slice(2).padStart(64, "0") + data.slice(2), gasLimit: 3_000_000 });
+    return (BigInt(r.slice(0, 66)) === 1n ? "ok:0x" : "revert:0x") + r.slice(66);
   }
-  let fails = 0, n = 0;
+  // solc reverts with Panic(0x41) for a length below 2^64 its free-memory
+  // pointer can't address, where Fe reverts without data (see README).
+  const PANIC_41 = "revert:0x4e487b710000000000000000000000000000000000000000000000000000000000000041";
+  let fails = 0, unexpected = 0, n = 0;
   async function compare(name, rs, data) {
     const a = await call(rs.sol, data);
     const b = await call(rs.fe, data);
     n++;
     if (n % 200 == 0) console.log("progress", n, fails);
-    if (a !== b) { fails++; console.log("MISMATCH", name, "\n  sol", a.slice(0, 300), "\n  fe ", b.slice(0, 300)); }
+    if (a !== b) {
+      fails++;
+      if (!(a === PANIC_41 && b === "revert:0x")) unexpected++;
+      console.log("MISMATCH", name, "\n  sol", a.slice(0, 300), "\n  fe ", b.slice(0, 300));
+    }
+    return a;
+  }
+  // A positive control: the case must reach the expected outcome, so that
+  // a broken setup can't pass by both routers failing early.
+  function control(name, outcome, prefix) {
+    if (!outcome.startsWith(prefix)) {
+      unexpected++;
+      console.log("CONTROL", name, "expected", prefix, "got", outcome.slice(0, 80));
+    }
+  }
+  // Seaport's fulfillAvailableAdvancedOrders, which the reverting stub echoes.
+  const FORWARDED = "revert:0x87201b41";
+  function finish() {
+    console.log(`compared ${n}, mismatches ${fails}, unexpected ${unexpected}`);
+    if (unexpected > 0) process.exitCode = 1;
   }
   const order = (i) => ({
     parameters: {
@@ -92,7 +123,7 @@ async function main() {
   // 1. Forwarded calldata through the reverting stub.
   let rs = await routers(revertStub);
   const valid = enc(params(revertStub, [group(0), group(5)]));
-  await compare("valid", rs, valid);
+  control("valid", await compare("valid", rs, valid), FORWARDED);
   await compare("valid-zero-recipient", rs, enc({ ...params(revertStub, [group(0)]), recipient: ethers.constants.AddressZero }));
   await compare("empty-groups", rs, enc(params(revertStub, [])));
   // word-level mutations of the valid calldata
@@ -123,7 +154,7 @@ async function main() {
         await compare(`w${w}${d > 0 ? "+" : ""}${d}`, rs, mut(w, nv.toHexString().slice(2).padStart(64, "0")));
       }
     }
-    console.log(`compared ${n}, mismatches ${fails}`);
+    finish();
     return;
   }
   for (let w = 0; w < words; w++) for (const m of muts) await compare(`w${w}=${m.slice(-8)}`, rs, mut(w, m));
@@ -155,8 +186,29 @@ async function main() {
     const r2 = await routers(stub);
     const p = params(stub, [group(0)]);
     p.maximumFulfilled = 2;
-    await compare(`ret${k}`, r2, enc(p));
+    const outcome = await compare(`ret${k}`, r2, enc(p));
+    if (k == 0) control("ret0", outcome, "ok:0x");
   }
-  console.log(`compared ${n}, mismatches ${fails}`);
+
+  // 3. The second group's forwarded calldata, after the first Seaport
+  // returns two available orders or reverts with NoSpecifiedOrdersAvailable().
+  const groupType = iface.getFunction("fulfillAvailableAdvancedOrders").inputs[0].components[1].arrayChildren;
+  const groupWords = (abiCoder.encode([groupType], [group(5)]).length - 2) / 64 - 1;
+  const noOrders = iface.getSighash("NoSpecifiedOrdersAvailable");
+  for (const first of [await deployRaw(returnStub(goodRet)), await deployRaw(returnStub(noOrders, true))]) {
+    const r3 = await routers(first, revertStub);
+    const p = params(revertStub, [group(0), group(5)]);
+    p.seaportContracts = [first, revertStub];
+    const valid2 = enc(p);
+    control("second", await compare("second", r3, valid2), FORWARDED);
+    const words2 = (valid2.length - 10) / 64;
+    // The calldata ends with the second group's tail.
+    for (let w = words2 - groupWords; w < words2; w++) {
+      for (const m of [muts[0], muts[3], muts[4], muts[5], muts[9], muts[13]]) {
+        await compare(`second-w${w}=${m.slice(-8)}`, r3, valid2.slice(0, 10 + w * 64) + m + valid2.slice(10 + (w + 1) * 64));
+      }
+    }
+  }
+  finish();
 }
 main().catch((e) => { console.error(e); process.exit(1); });
