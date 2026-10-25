@@ -17,9 +17,9 @@ use super::types::{CONTRACT, OFFER}
 
 /// `_applyCriteriaResolvers`
 pub fn apply_criteria_resolvers(_ book: mut Book, _ resolvers: Resolvers) {
-    let total_orders = book.orders.len()
+    let total_orders = book.orders.len() as u256
     var i: u256 = 0
-    while i < resolvers.list.len() {
+    while i < resolvers.list.len() as u256 {
         let resolver = resolvers.list[(i) as usize]
         if resolver.order_index >= total_orders {
             revert_error(

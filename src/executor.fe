@@ -4,7 +4,7 @@
 // accumulator.
 use core::ptr::{MemBuffer, MemSpan}
 use std::abi::Bytes32
-use std::evm::{Address, Call, Ctx, RawOps, revert_error}
+use std::evm::{Address, Call, Ctx, RawOps, Wei, revert_error, wei}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -154,7 +154,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         .raw_call(
             addr: to,
             gas: ctx.gas(),
-            value: amount,
+            value: wei(amount),
             args: MemSpan::empty(),
             ret: mut ret,
         )
@@ -306,10 +306,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let conduit = derive_conduit(env, conduit_key)
     var ret = MemBuffer::with_capacity(32)
-    let outcome = call.raw_call(
+    let outcome = call
+        .raw_call(
             addr: conduit,
             gas: ctx.gas(),
-            value: 0,
+            value: Wei::zero(),
             args,
             ret: mut ret,
         )
@@ -366,7 +367,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         .raw_call(
             addr: token,
             gas: ctx.gas(),
-            value: 0,
+            value: Wei::zero(),
             args: args.span(),
             ret: mut ret,
         )
@@ -409,7 +410,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         .raw_call(
             addr: token,
             gas: ctx.gas(),
-            value: 0,
+            value: Wei::zero(),
             args: args.span(),
             ret: mut ret,
         )
@@ -445,7 +446,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         .raw_call(
             addr: token,
             gas: ctx.gas(),
-            value: 0,
+            value: Wei::zero(),
             args: args.span(),
             ret: mut ret,
         )

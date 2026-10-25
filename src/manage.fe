@@ -35,7 +35,7 @@ uses (
 {
     assert_non_reentrant(env)
     var any_invalid = false
-    var i: u256 = 0
+    var i: usize = 0
     while i < orders.len() {
         let order = orders.get(i)
         if order.orderType == CONTRACT
@@ -73,7 +73,7 @@ uses (
 )
 {
     assert_non_reentrant(env)
-    var i: u256 = 0
+    var i: usize = 0
     while i < orders.len() {
         let book = single_order(orders.get(i))
         let order = ref book.orders[(0) as usize]

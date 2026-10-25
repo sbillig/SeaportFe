@@ -2,7 +2,7 @@
 // Conduit and ConduitController (seaport-core/src/conduit).
 use core::ptr::MemBuffer
 use std::abi::{Bytes4, DynArray, sol}
-use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap, revert_error}
+use std::evm::{Address, Call, Ctx, Log, RawOps, StorageMap, Wei, revert_error}
 use super::errors::{InvalidERC721TransferAmount, Invalid1155BatchTransferEncoding}
 use super::buffer::Buffer
 use super::executor::{perform_erc1155_transfer, perform_erc20_transfer, perform_erc721_transfer}
@@ -109,7 +109,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 fn execute_transfers(_ transfers: DynArray<ConduitTransfer>)
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    var i: u256 = 0
+    var i: usize = 0
     while i < transfers.len() {
         transfer_item(transfers.get(i))
         i += 1
@@ -230,7 +230,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             .raw_call(
                 addr: account,
                 gas: ctx.gas(),
-                value: 0,
+                value: Wei::zero(),
                 args: mem.slice(offset: data, len: size),
                 ret: mut ret,
             )

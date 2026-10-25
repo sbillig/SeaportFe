@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
-use std::abi::{Bytes32, DynArray, MemVec}
+use std::abi::{Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
 use super::buffer::Buffer
 use super::amount::apply_fraction
@@ -50,7 +50,8 @@ use super::zone::{
 pub fn verify_time(start_time: u256, end_time: u256, revert_on_invalid: bool) -> bool
 uses (ctx: Ctx)
 {
-    let valid = start_time <= ctx.timestamp() && end_time > ctx.timestamp()
+    let valid = start_time <= ctx.timestamp().as_seconds()
+        && end_time > ctx.timestamp().as_seconds()
     if revert_on_invalid && !valid {
         revert_error(InvalidTime { startTime: start_time, endTime: end_time })
     }
@@ -260,7 +261,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         i += 1
     }
     let _ = trigger_if_armed(acc, mut buf, env)
-    let balance = ctx.selfbalance()
+    let balance = ctx.selfbalance().as_wei()
     if balance != 0 {
         transfer_native_tokens(to: ctx.caller(), amount: balance)
     }
@@ -300,7 +301,7 @@ fn transfer_consideration_item(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     let item = ref items[(order.consideration_start + index) as usize]
-    if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance() {
+    if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance().as_wei() {
         revert_error(InsufficientNativeTokensSupplied {})
     }
     transfer(
@@ -314,42 +315,36 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 }
 
 pub fn spent_items(_ book: Book, start: u256, count: u256) -> DynArray<SpentItem> {
-    var out = MemVec<SpentItem>::zeroed(count)
+    var out = MemArray<SpentItem>::new_zeroed(count as usize)
     var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
-        out.set(
-            index: i,
-            value: SpentItem {
-                itemType: item.item_type.downcast_truncate(),
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-            },
-        )
+        out[i as usize] = SpentItem {
+            itemType: item.item_type.downcast_truncate(),
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+        }
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_slice(out.as_slice())
 }
 
 pub fn received_items(_ book: Book, start: u256, count: u256) -> DynArray<ReceivedItem> {
-    var out = MemVec<ReceivedItem>::zeroed(count)
+    var out = MemArray<ReceivedItem>::new_zeroed(count as usize)
     var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
-        out.set(
-            index: i,
-            value: ReceivedItem {
-                itemType: item.item_type.downcast_truncate(),
-                token: item.token,
-                identifier: item.identifier,
-                amount: item.amount,
-                recipient: item.receiver,
-            },
-        )
+        out[i as usize] = ReceivedItem {
+            itemType: item.item_type.downcast_truncate(),
+            token: item.token,
+            identifier: item.identifier,
+            amount: item.amount,
+            recipient: item.receiver,
+        }
         i += 1
     }
-    out.to_dyn_array()
+    DynArray::from_slice(out.as_slice())
 }
 
 pub fn emit_order_fulfilled(_ order_hash: u256, book: Book, order: OrderState, recipient: Address)

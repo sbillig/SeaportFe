@@ -7,7 +7,7 @@
 // isValidated (bits 0-7), isCancelled (8-15), numerator (16-135) and
 // denominator (136-255). Seaport's tests locate and overwrite these slots.
 use std::abi::Bytes32
-use std::evm::{Address, Create, Ctx, Call, Log, StorageMap, TSlot, revert_error}
+use std::evm::{Address, Create, Ctx, Call, Log, StorageMap, TSlot, Wei, revert_error}
 use core::ptr::{MemArray, MemBuffer, MemSpan}
 use super::errors::{
     CounterIncremented,
@@ -326,18 +326,18 @@ uses (ctx: Ctx, guard_state: u256, transient_guard: TSlot<u256>)
 {
     if env.tstore_initial_support {
         if transient_guard.read() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
-            revert_error(InvalidMsgValue { value: ctx.value() })
+            revert_error(InvalidMsgValue { value: ctx.value().as_wei() })
         }
         return
     }
     let guard = guard_state
     if guard == TSTORE_ENABLED_SSTORE {
         if transient_guard.read() != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_TSTORE {
-            revert_error(InvalidMsgValue { value: ctx.value() })
+            revert_error(InvalidMsgValue { value: ctx.value().as_wei() })
         }
     }
     if guard != 0 && guard != ENTERED_AND_ACCEPTING_NATIVE_TOKENS_SSTORE {
-        revert_error(InvalidMsgValue { value: ctx.value() })
+        revert_error(InvalidMsgValue { value: ctx.value().as_wei() })
     }
 }
 
@@ -350,7 +350,7 @@ pub fn prepare_tload_test() -> Address uses (create: mut Create) {
     var code = MemArray<u256>::new_zeroed(1)
     code[0] = TLOAD_TEST_PAYLOAD
     create.create_raw(
-            value: 0,
+            value: Wei::zero(),
             init_code: code.span().slice(offset: 22, len: 10),
         )
 }

@@ -38,7 +38,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     }
     let domain = domain_separator(env)
     let original_digest = derive_eip712_digest(domain_separator: domain, order_hash)
-    let original_length = signature.len()
+    let original_length = signature.len() as u256
     var digest = original_digest
     var signature_length = original_length
     if is_valid_bulk_order_size(original_length) {
@@ -64,11 +64,11 @@ pub fn is_valid_bulk_order_size(_ length: u256) -> bool {
 /// The bulk order hash proven by the proof appended to `signature`, and the
 /// length of the ECDSA signature in front of it.
 pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) {
-    let full_length = signature.len()
+    let full_length = signature.len() as u256
     let signature_length = 65 - (full_length & 1)
     let height = (full_length - signature_length) >> 5
-    let key = signature.word_at(signature_length) >> 0xe8
-    let first = signature.word_at(signature_length + 3)
+    let key = signature.word_at(signature_length as usize) >> 0xe8
+    let first = signature.word_at((signature_length + 3) as usize)
     var node = if key & 1 == 1 {
         keccak_words([first, leaf])
     } else {
@@ -76,7 +76,7 @@ pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) 
     }
     var i: u256 = 1
     while i < height {
-        let element = signature.word_at(signature_length + 3 + i * 32)
+        let element = signature.word_at((signature_length + 3 + i * 32) as usize)
         node = if (key >> i) & 1 == 1 {
             keccak_words([element, node])
         } else {
@@ -126,7 +126,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         args.write(offset: 0x44, value: original_length)
         args.copy_from(
             offset: 0x64,
-            source: signature.payload_span().slice(offset: 0, len: original_length),
+            source: signature.payload_span().slice(offset: 0, len: original_length as usize),
         )
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.

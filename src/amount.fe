@@ -21,7 +21,7 @@ uses (ctx: Ctx)
     }
     // The order is valid at this point: start_time <= now < end_time.
     let duration = end_time.wrapping_sub(start_time)
-    let elapsed = ctx.timestamp().wrapping_sub(start_time)
+    let elapsed = ctx.timestamp().as_seconds().wrapping_sub(start_time)
     let remaining = duration.wrapping_sub(elapsed)
     let total_before_division = start_amount * remaining + end_amount * elapsed
     if total_before_division == 0 {

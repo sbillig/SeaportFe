@@ -45,12 +45,14 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe master
-[`735827147e606a2d164846759de853faf1053421`](https://github.com/argotorg/fe/commit/735827147e606a2d164846759de853faf1053421),
-which includes mutable value semantics (MVS) and
-[argotorg/fe#1831](https://github.com/argotorg/fe/pull/1831). Before that fix,
-master panicked in runtime lowering on recv arms that return a constant
-`Bytes4` or `Bytes32`, so it built none of the contracts. Its committed Cargo
-dependencies pin Sonatina `6bef907f7e5854d0c77cf18624b7042213526960`.
+[`fa06c6cd5ba19cbf15da718fad80b84d79a569b9`](https://github.com/argotorg/fe/commit/fa06c6cd5ba19cbf15da718fad80b84d79a569b9),
+which includes mutable value semantics (MVS), `usize` collection lengths
+([argotorg/fe#1810](https://github.com/argotorg/fe/pull/1810)) and the `Wei`
+and `Timestamp` units ([argotorg/fe#1719](https://github.com/argotorg/fe/pull/1719)).
+Protocol amounts and times, and the order model's item positions, stay
+`u256`; they are converted where they meet a collection length or an EVM
+call. Its committed Cargo dependencies pin
+Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`.
 `scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
 --release -p fe`, without dependency substitutions or compiler patches.
 The compiler and reference revisions are recorded in `reference_manifest.json`.
@@ -68,8 +70,9 @@ parameters and places, and `ref` keeps a read access. Book, Resolvers, and
 Groups own non-Copy MemArray pools. Order descriptors retain immutable Bytes
 signatures and extra data, and helpers use scoped MVS views or explicit mutable
 parameters. Generated orders replace the item pool
-in place. DynVec builds nested ABI arrays; exact protocol encoders use a
-checked, initialized owning byte buffer. Copyable raw pool and byte handles
+in place. Output arrays are filled in a `MemArray` and encoded with
+`DynArray::from_slice`; exact protocol encoders use a checked, initialized
+owning byte buffer. Copyable raw pool and byte handles
 have been removed. Explicit unsafe blocks fell from 333 to six: three inside
 the checked byte boundary in `buffer.fe`, and three order-pool allocations in
 `model.fe`. Every order record, including its immutable Bytes handles, is

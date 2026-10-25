@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // SeaportRouter (contracts/helpers/SeaportRouter.sol): fulfill available
 // orders across Seaport 1.5 and 1.6 in one call.
-use core::ptr::MemSpan
-use std::abi::{Bytes, Bytes32, DynArray, DynVec, dyn_array_from, sol}
+use core::ptr::{MemArray, MemSpan}
+use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
 use std::abi::sol::decode_output
-use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error}
+use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error, wei}
 use super::hashing::Env
 use super::buffer::return_word
 use super::seaport::SeaportMsg
@@ -110,12 +110,12 @@ uses (
     let seaports = params.seaportContracts
     let order_params = params.advancedOrderParams
     let count = seaports.len()
-    var available_parts = DynVec<DynArray<bool>>::filled(count, value: DynArray<bool>::empty())
-    var execution_parts = DynVec<DynArray<Execution>>::filled(
-        count,
-        value: DynArray<Execution>::empty(),
-    )
-    var i: u256 = 0
+    // Unavailable groups share one empty array of each kind.
+    let no_available = DynArray<bool>::empty()
+    let no_executions = DynArray<Execution>::empty()
+    var available_parts = MemArray<DynArray<bool>>::from_fn(count, |_| no_available)
+    var execution_parts = MemArray<DynArray<Execution>>::from_fn(count, |_| no_executions)
+    var i: usize = 0
     let maximum_fulfilled = params.maximumFulfilled
     var fulfillments_left = maximum_fulfilled
     let recipient = if params.recipient.word() == 0 {
@@ -137,17 +137,22 @@ uses (
             recipient,
             maximumFulfilled: fulfillments_left,
         }
-        let outcome = call.try_call(addr: seaport, gas: ctx.gas(), value: ether_value, message)
+        let outcome = call.try_call(
+                addr: seaport,
+                gas: ctx.gas(),
+                value: wei(ether_value),
+                message,
+            )
         let returned = outcome.returndata()
         if outcome.success() {
             let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(
                 returned,
             )
-            available_parts.set(index: i, value: available)
-            execution_parts.set(index: i, value: executions)
+            available_parts[i] = available
+            execution_parts[i] = executions
             // Upstream only advances `j` for available orders, so an
             // unavailable order loops until the call runs out of gas.
-            var j: u256 = 0
+            var j: usize = 0
             while j < available.len() {
                 if available.get(j) {
                     fulfillments_left = fulfillments_left.wrapping_sub(1)
@@ -172,11 +177,14 @@ uses (
     if fulfillments_left == maximum_fulfilled {
         revert_error(NoSpecifiedOrdersAvailable {})
     }
-    if ctx.selfbalance() > 0 {
+    if ctx.selfbalance().as_wei() > 0 {
         return_excess_ether()
     }
     clear_reentrancy_guard(env.guard)
-    (available_parts.to_dyn_array(), execution_parts.to_dyn_array())
+    (
+        DynArray::from_slice(available_parts.as_slice()),
+        DynArray::from_slice(execution_parts.as_slice()),
+    )
 }
 
 /// `_returnExcessEther`
@@ -192,7 +200,7 @@ fn return_excess_ether() uses (ctx: Ctx, call: mut Call) {
         revert_error(
             EtherReturnTransferFailed {
                 recipient: ctx.caller(),
-                amount: ctx.selfbalance(),
+                amount: ctx.selfbalance().as_wei(),
                 returnData: Bytes::from_payload(source: outcome.returndata()),
             },
         )
