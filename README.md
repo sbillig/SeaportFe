@@ -45,14 +45,14 @@ and write order status slots directly).
 ## Compiler
 
 This branch targets Fe master
-[`fa06c6cd5ba19cbf15da718fad80b84d79a569b9`](https://github.com/argotorg/fe/commit/fa06c6cd5ba19cbf15da718fad80b84d79a569b9),
+[`e8612c21dac623431d2a9a34b89216f9008040b7`](https://github.com/argotorg/fe/commit/e8612c21dac623431d2a9a34b89216f9008040b7),
 which includes mutable value semantics (MVS), `usize` collection lengths
 ([argotorg/fe#1810](https://github.com/argotorg/fe/pull/1810)) and the `Wei`
 and `Timestamp` units ([argotorg/fe#1719](https://github.com/argotorg/fe/pull/1719)).
 Protocol amounts and times, and the order model's item positions, stay
 `u256`; they are converted where they meet a collection length or an EVM
 call. Its committed Cargo dependencies pin
-Sonatina `fcdbdc4d8706f7b93415d605ed8e9aa277179f98`.
+Sonatina `6bd0ce661ea327c149429b00fee3c8608616040f`.
 `scripts/bootstrap.py` builds this exact compiler with `cargo build --locked
 --release -p fe`, without dependency substitutions or compiler patches.
 The compiler and reference revisions are recorded in `reference_manifest.json`.
@@ -126,11 +126,11 @@ starts from a fresh chain. Set `SEAPORT_TRACE_HASHES=1` to count the exact
 transfer, cancellation and acceptance. The test compares full event bytes
 and checks that each event precedes its corresponding storage write.
 
-Fe master fa06c6cd5 builds all eight production contracts at `-O1`, passes all
+Fe master e8612c21d builds all eight production contracts at `-O1`, passes all
 14 Fe tests, all 482 Foundry tests (1,000 cases per fuzz test), and the full
 Hardhat suite (402 passing, one pending). The ABIs are identical to those of
 the previous Fe master 735827147 build. The rooted-storage differential
-passes against pinned Solidity and the 735827147 artifacts in both transient
+passes against pinned Solidity and the fa06c6cd5 artifacts in both transient
 and forced persistent guard modes, including exact storage slots, event
 bytes, map hashes, and log/write ordering.
 
@@ -147,20 +147,20 @@ native-token receive (+9).
 
 | Call | 735827147 build | Current build |
 | --- | ---: | ---: |
-| Cancel one order | 40,962 | 40,378 |
-| Validate one order | 58,340 | 56,589 |
-| Advanced ERC721/native self fulfillment | 128,818 | 128,092 |
+| Cancel one order | 40,962 | 40,223 |
+| Validate one order | 58,340 | 56,227 |
+| Advanced ERC721/native self fulfillment | 128,818 | 127,430 |
 | Name getter | 22,693 | 22,483 |
-| Counter getter | 24,079 | 25,213 |
-| Create conduit | 954,081 | 822,337 |
-| Create zone | 1,607,463 | 1,382,773 |
+| Counter getter | 24,079 | 24,085 |
+| Create conduit | 954,081 | 816,316 |
+| Create zone | 1,607,463 | 1,371,276 |
 
-The counter getter now returns its word from a zeroed heap buffer, which
-lies above Seaport's static memory region; the old build used scratch memory.
-The memory expansion costs about 1,100 gas. Rebuilding this source at each
-compiler isolates the change to
-[argotorg/fe#1868](https://github.com/argotorg/fe/pull/1868) (`095b98408`),
-which stores whole aggregate values into objects.
+The counter getter costs 6 more gas. In between, Fe master fa06c6cd5 made it
+1,134 gas dearer:
+[argotorg/fe#1868](https://github.com/argotorg/fe/pull/1868) moved its return
+buffer from scratch memory to a zeroed heap buffer.
+[fe-lang/sonatina#437](https://github.com/fe-lang/sonatina/pull/437) and
+[argotorg/fe#1873](https://github.com/argotorg/fe/pull/1873) moved it back.
 
 Historical October 11 verification used Fe 093ff36d5 / Sonatina 11722eac at `-O1`.
 All eight production contracts build and their ABIs are unchanged from the
@@ -200,11 +200,13 @@ order entry points and the conduit batch functions use numeric selectors
   high bits in an extra offer item's token or in a recipient the original
   order leaves open gets the truncated address. seaport-core keeps the raw
   word. Returned items that have an original are still compared word for word.
-- Code size: Fe master fa06c6cd5 / committed Sonatina fcdbdc4d at `-O1`
-  produces a 53,579-byte Seaport runtime and a 53,585-byte Consideration
+- Code size: Fe master e8612c21d / committed Sonatina 6bd0ce66 at `-O1`
+  produces a 52,760-byte Seaport runtime and a 52,766-byte Consideration
   runtime, above the 24 KB EIP-170 limit (ISSUES.md #13). Both upstream
-  harnesses lift the size limit. Periphery runtimes range from 3,544 to
-  12,929 bytes. Fe master 735827147 / Sonatina 6bef907f produced
+  harnesses lift the size limit. Periphery runtimes range from 3,514 to
+  12,731 bytes. Fe master fa06c6cd5 / Sonatina fcdbdc4d produced
+  53,579/53,585-byte Seaport/Consideration runtimes and periphery runtimes of
+  3,544 to 12,929 bytes. Fe master 735827147 / Sonatina 6bef907f produced
   57,339/57,345-byte Seaport/Consideration runtimes and periphery runtimes of
   4,200 to 14,554 bytes. Fe master 33ee9be28 / Sonatina cdb34cbb produced
   58,266/58,272-byte Seaport/Consideration runtimes, and periphery runtimes of
