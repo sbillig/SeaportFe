@@ -175,7 +175,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     order_hashes[(index) as usize] = 0
     let (order_hash, numerator, denominator) = validate_order(
         env,
-        book,
         order: book.orders[index as usize],
         revert_on_invalid,
     )
@@ -389,9 +388,9 @@ uses (
         recipient,
         non_match: true,
     )
-    let total_offer = offer_fulfillments.list.len() as u256
+    let total_offer = offer_fulfillments.len()
     var executions = MemArray<ExecutionState>::new_zeroed(
-        offer_fulfillments.list.len() + consideration_fulfillments.list.len(),
+        (offer_fulfillments.len() + consideration_fulfillments.len()) as usize,
     )
     var i: u256 = 0
     while i < total_offer {
@@ -408,7 +407,7 @@ uses (
         i += 1
     }
     i = 0
-    while i < consideration_fulfillments.list.len() as u256 {
+    while i < consideration_fulfillments.len() {
         aggregate_into(
             mut book,
             mut executions,
@@ -483,10 +482,10 @@ uses (
         non_match: false,
     )
     log.emit(OrdersMatched { orderHashes: hash_array(order_hashes) })
-    let total_fulfillments = fulfillments.list.len() / 2
-    var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments)
+    let total_fulfillments = fulfillments.len() / 2
+    var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments as usize)
     var i: u256 = 0
-    while i < total_fulfillments as u256 {
+    while i < total_fulfillments {
         apply_fulfillment_into(mut book, mut executions, groups: fulfillments, index: i)
         i += 1
     }

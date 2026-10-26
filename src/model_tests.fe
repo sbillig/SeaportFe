@@ -1,9 +1,11 @@
 use core::abi::{AbiSize, Encode}
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
-use std::evm::{Address, encode_abi_payload}
+use std::evm::{Address, Evm, Wei, encode_abi_payload}
+use super::abi_view::CalldataView
 use super::applier::aggregate_offer_items
-use super::model::{advanced_orders, nested_components, orders_as_advanced, single_advanced}
+use super::hashing_tests::{call_component_words, deploy_seaport}
+use super::model::{nested_components, orders_book, single_order}
 use super::types::{
     AdvancedOrder,
     ConsiderationItem,
@@ -58,83 +60,372 @@ fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
     }
 }
 
-#[test]
-fn owned_items_mutate_independently_of_order_views() {
-    var book = single_advanced(order(4, amount: 7))
-    let descriptor = ref book.orders[0]
-    book.items[descriptor.offer_start as usize].amount = 11
-    assert(descriptor.offer_len == 1)
-    assert(descriptor.signature.byte_at(0) == 4)
-    assert(descriptor.extra_data.byte_at(0) == 7)
-    assert(book.items[0].amount == 11)
-    assert(book.items[0].start_amount == 7)
+/// The model builders read their call's arguments, so each case runs in a
+/// harness call whose calldata the typed `ModelCalls` encode.
+msg ModelCalls {
+    #[selector = 0x01]
+    Single { order: AdvancedOrder } -> bool,
+    #[selector = 0x02]
+    Advanced { orders: DynArray<AdvancedOrder> } -> bool,
+    #[selector = 0x03]
+    Repeated { order: AdvancedOrder, groups: DynArray<DynArray<FulfillmentComponent>> } -> bool,
+    #[selector = 0x04]
+    Empty { advanced: DynArray<AdvancedOrder>, regular: DynArray<Order> } -> bool,
+    #[selector = 0x05]
+    Regular { orders: DynArray<Order> } -> bool,
+}
+
+msg ModelHarnessMsg {
+    #[selector = 0x01]
+    Single {} -> bool,
+    #[selector = 0x02]
+    Advanced {} -> bool,
+    #[selector = 0x03]
+    Repeated {} -> bool,
+    #[selector = 0x04]
+    Empty {} -> bool,
+    #[selector = 0x05]
+    Regular {} -> bool,
+}
+
+pub contract ModelHarness {
+    recv ModelHarnessMsg {
+        Single {} -> bool {
+            let args = CalldataView::arguments(32)
+            var book = single_order(args.struct_argument(offset: 0, size: 160), advanced: true)
+            let descriptor = ref book.orders[0]
+            book.items[descriptor.offer_start as usize].amount = 11
+            assert(descriptor.offer_len == 1)
+            assert(descriptor.signature.word(32) >> 248 == 4)
+            assert(descriptor.extra_data.word(32) >> 248 == 7)
+            assert(book.items[0].amount == 11)
+            assert(book.items[0].start_amount == 7)
+            true
+        }
+        Advanced {} -> bool {
+            var book = orders_book(
+                CalldataView::arguments(32).array_argument(0),
+                advanced: true,
+            )
+            assert(book.used == 2)
+            assert(book.orders[0].offer_start == 0)
+            assert(book.orders[1].offer_start == 1)
+            let second = ref book.orders[1]
+            book.items[second.offer_start as usize].identifier = 99
+            assert(second.signature.word(32) >> 248 == 5)
+            assert(second.extra_data.word(32) >> 248 == 13)
+            assert(book.items[0].identifier == 4)
+            assert(book.items[1].identifier == 99)
+            true
+        }
+        Repeated {} -> bool {
+            let args = CalldataView::arguments(64)
+            var book = single_order(args.struct_argument(offset: 0, size: 160), advanced: true)
+            let groups = nested_components(args.array_argument(32))
+            let _ = aggregate_offer_items(
+                mut book,
+                group: groups.group(0),
+                recipient: Address::new(0xdef),
+            )
+            true
+        }
+        Empty {} -> bool {
+            let args = CalldataView::arguments(64)
+            let advanced = orders_book(args.array_argument(0), advanced: true)
+            assert(advanced.orders.len() == 0)
+            assert(advanced.items.len() == 0)
+            assert(advanced.used == 0)
+            let regular = orders_book(args.array_argument(32), advanced: false)
+            assert(regular.orders.len() == 0)
+            assert(regular.items.len() == 0)
+            assert(regular.used == 0)
+            true
+        }
+        Regular {} -> bool {
+            let book = orders_book(
+                CalldataView::arguments(32).array_argument(0),
+                advanced: false,
+            )
+            assert(book.used == 2)
+            assert(book.orders[0].offer_start == 0)
+            assert(book.orders[1].offer_start == 1)
+            assert(book.orders[0].signature.word(32) >> 248 == 4)
+            assert(book.orders[1].signature.word(32) >> 248 == 5)
+            assert(book.orders[0].extra_data.len() == 0)
+            assert(book.orders[1].extra_data.len() == 0)
+            assert(book.orders[0].numerator == 1)
+            assert(book.orders[1].denominator == 1)
+            assert(book.items[0].amount == 7)
+            assert(book.items[1].amount == 13)
+            true
+        }
+    }
+}
+
+fn harness() -> Address uses (evm: mut Evm) {
+    evm.create2<ModelHarness>(value: Wei::zero(), args: (), salt: 0)
 }
 
 #[test]
-fn multiple_orders_keep_their_item_and_byte_ranges() {
-    var book = advanced_orders(pair((order(4, amount: 7), order(5, amount: 13))))
-    assert(book.used == 2)
-    assert(book.orders[0].offer_start == 0)
-    assert(book.orders[1].offer_start == 1)
-    let second = ref book.orders[1]
-    book.items[second.offer_start as usize].identifier = 99
-    assert(second.signature.byte_at(0) == 5)
-    assert(second.extra_data.byte_at(0) == 13)
-    assert(book.items[0].identifier == 4)
-    assert(book.items[1].identifier == 99)
+fn owned_items_mutate_independently_of_order_views() uses (evm: mut Evm) {
+    let ok: bool = evm
+        .call(
+            addr: harness(),
+            gas: 10000000,
+            value: Wei::zero(),
+            message: ModelCalls::Single { order: order(4, amount: 7) },
+        )
+    assert(ok)
+}
+
+#[test]
+fn multiple_orders_keep_their_item_and_byte_ranges() uses (evm: mut Evm) {
+    let ok: bool = evm
+        .call(
+            addr: harness(),
+            gas: 10000000,
+            value: Wei::zero(),
+            message: ModelCalls::Advanced {
+                orders: pair((order(4, amount: 7), order(5, amount: 13))),
+            },
+        )
+    assert(ok)
 }
 
 #[test(should_revert, selector = 0x91b3e514)]
-fn repeated_fulfillment_indices_observe_prior_mutation() {
-    var book = single_advanced(order(4, amount: 7))
+fn repeated_fulfillment_indices_observe_prior_mutation() uses (evm: mut Evm) {
     let components = dyn_array_from(
         [
             FulfillmentComponent { orderIndex: 0, itemIndex: 0 },
             FulfillmentComponent { orderIndex: 0, itemIndex: 0 },
         ],
     )
-    let groups = nested_components(dyn_array_from([components]))
-    let _ = aggregate_offer_items(
-        mut book,
-        groups,
-        group: ref groups.list[0],
-        recipient: Address::new(0xdef),
-    )
+    let ok: bool = evm
+        .call(
+            addr: harness(),
+            gas: 10000000,
+            value: Wei::zero(),
+            message: ModelCalls::Repeated {
+                order: order(4, amount: 7),
+                groups: dyn_array_from([components]),
+            },
+        )
+    assert(ok)
 }
 
 #[test]
-fn empty_order_batches_have_initialized_empty_pools() {
-    let advanced = advanced_orders(DynArray<AdvancedOrder>::empty())
-    assert(advanced.orders.len() == 0)
-    assert(advanced.items.len() == 0)
-    assert(advanced.used == 0)
-    let regular = orders_as_advanced(DynArray<Order>::empty())
-    assert(regular.orders.len() == 0)
-    assert(regular.items.len() == 0)
-    assert(regular.used == 0)
+fn empty_order_batches_have_initialized_empty_pools() uses (evm: mut Evm) {
+    let ok: bool = evm
+        .call(
+            addr: harness(),
+            gas: 10000000,
+            value: Wei::zero(),
+            message: ModelCalls::Empty {
+                advanced: DynArray<AdvancedOrder>::empty(),
+                regular: DynArray<Order>::empty(),
+            },
+        )
+    assert(ok)
 }
 
 #[test]
-fn regular_orders_initialize_signature_and_empty_extra_data() {
+fn regular_orders_initialize_signature_and_empty_extra_data()
+uses (evm: mut Evm)
+{
     let first = order(4, amount: 7)
     let second = order(5, amount: 13)
-    let book = orders_as_advanced(
-        pair(
-            (
-                Order { parameters: first.parameters, signature: first.signature },
-                Order { parameters: second.parameters, signature: second.signature },
-            ),
-        ),
+    let ok: bool = evm
+        .call(
+            addr: harness(),
+            gas: 10000000,
+            value: Wei::zero(),
+            message: ModelCalls::Regular {
+                orders: pair(
+                    (
+                        Order { parameters: first.parameters, signature: first.signature },
+                        Order { parameters: second.parameters, signature: second.signature },
+                    ),
+                ),
+            },
+        )
+    assert(ok)
+}
+
+// These raw inputs exercise Seaport's protocol decoder, including words
+// rejected by an ordinary Solidity ABI decoder. Expected outcomes match the
+// pinned optimized Solidity Seaport 1.6 contract.
+#[test]
+fn fulfillment_keeps_raw_hash_words_but_cleans_typed_addresses()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    let words = [
+        64,
+        0,
+        64 + (1 << 32),
+        480,
+        evm.address().word() | (1 << 200),
+        1 << 200,
+        352,
+        384,
+        0,
+        0,
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0,
+        0,
+        0,
+        0,
+        1 << 64,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0xb3a34c4c, words, len: 580)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+}
+
+#[test]
+fn fulfillment_checks_top_heads_and_order_enum_before_time()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    var words = [64, 0, 64, 480, 0, 0, 352, 384, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let missing_head = call_component_words(addr, selector: 0xb3a34c4c, words, len: 131)
+    assert(!missing_head.0 && missing_head.1 == 0)
+    let zero_padded = call_component_words(addr, selector: 0xb3a34c4c, words, len: 132)
+    assert(!zero_padded.0 && zero_padded.1 == 68)
+    words[8] = 5
+    let bad_enum = call_component_words(addr, selector: 0xb3a34c4c, words, len: 580)
+    assert(
+        !bad_enum.0 && bad_enum.1 == 36 && bad_enum.2 >> 224 == 0x4e487b71,
     )
-    assert(book.used == 2)
-    assert(book.orders[0].offer_start == 0)
-    assert(book.orders[1].offer_start == 1)
-    assert(book.orders[0].signature.byte_at(0) == 4)
-    assert(book.orders[1].signature.byte_at(0) == 5)
-    assert(book.orders[0].extra_data.len() == 0)
-    assert(book.orders[1].extra_data.len() == 0)
-    assert(book.orders[0].numerator == 1)
-    assert(book.orders[1].denominator == 1)
-    assert(book.items[0].amount == 7)
-    assert(book.items[1].amount == 13)
+}
+
+#[test]
+fn advanced_order_fractions_mask_high_bits() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    let words = [
+        128,
+        768,
+        0,
+        0,
+        160,
+        1 | (1 << 200),
+        1 | (1 << 200),
+        576,
+        608,
+        evm.address().word(),
+        0,
+        352,
+        384,
+        0,
+        0,
+        0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0xe7acab24, words, len: 804)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+}
+
+#[test]
+fn validate_builds_and_emits_from_raw_calldata() uses (evm: mut Evm) {
+    let addr = deploy_seaport()
+    var words = [
+        32,
+        1,
+        32,
+        64,
+        480,
+        evm.address().word() | (1 << 200),
+        1 << 200,
+        352,
+        384,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]
+    let result = call_component_words(addr, selector: 0x88147732, words, len: 612)
+    assert(result.0 && result.1 == 32 && result.2 == 1)
+    words[9] = 5
+    let bad_enum = call_component_words(addr, selector: 0x88147732, words, len: 612)
+    assert(
+        !bad_enum.0 && bad_enum.1 == 36 && bad_enum.2 >> 224 == 0x4e487b71,
+    )
+}
+
+#[test]
+fn criteria_proofs_preserve_raw_length_and_evm_shift_semantics()
+uses (evm: mut Evm)
+{
+    let addr = deploy_seaport()
+    var words = [
+        128,
+        1120,
+        0,
+        0,
+        160,
+        1,
+        1,
+        928,
+        960,
+        evm.address().word(),
+        0,
+        352,
+        544,
+        0,
+        0,
+        1000000000000,
+        0,
+        0,
+        0,
+        1,
+        1,
+        4,
+        0,
+        0x5569044719a1ec3b04d0afa9e7a5310c7c0473331d13dc9fafe143b2c4e8148a,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        32,
+        0,
+        0,
+        0,
+        123,
+        160,
+        0,
+    ]
+    // A single-leaf root and an empty proof reach the token transfer.
+    let empty = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(!empty.0 && empty.1 == 36 && empty.2 >> 224 == 0x5f15d672)
+    words[42] = 1 << 251
+    let shifted_out = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(
+        !shifted_out.0 && shifted_out.1 == empty.1 && shifted_out.2 == empty.2,
+    )
+    words[42] = 1 << 32
+    let exhausted = call_component_words(addr, selector: 0xe7acab24, words, len: 1380)
+    assert(!exhausted.0 && exhausted.1 == 0)
 }

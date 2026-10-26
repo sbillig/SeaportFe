@@ -3,8 +3,9 @@
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
 use core::ptr::{MemArray, MemBuffer}
-use std::abi::{Bytes, Bytes32, DynArray}
+use std::abi::{Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, Wei, keccak_words, keccak256, revert_error}
+use super::abi_view::CalldataView
 use super::buffer::{Buffer, return_word}
 use super::errors::{
     InsufficientNativeTokensSupplied,
@@ -394,7 +395,8 @@ uses (
             env,
             offerer,
             order_hash,
-            signature: basic_order_signature(),
+            // Read in place with the length masked like seaport-core's decoder.
+            signature: CalldataView::at(cd(SIGNATURE_HEAD) + 0x24),
         )
     }
     if is_restricted_and_caller_not_zone(order_type, cd_address(ZONE)) {
@@ -402,21 +404,6 @@ uses (
     }
     set_basic_order_filled(order_hash)
     order_hash
-}
-
-/// The signature `bytes`, with the length masked to 32 bits like
-/// seaport-core's decoder.
-fn basic_order_signature() -> Bytes uses (ops: mut RawOps) {
-    let at = cd(SIGNATURE_HEAD) + 0x24
-    let len = cd(at) & 0xffffffff
-    var payload = MemBuffer::with_capacity(len as usize)
-    ops.calldatacopy(
-        dest: mut payload,
-        dest_offset: 0,
-        src_offset: at + 32,
-        len,
-    )
-    Bytes::from_payload(source: payload.span())
 }
 
 /// `authorizeOrder` (with no order hashes) or `validateOrder` (with the

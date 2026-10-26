@@ -25,7 +25,7 @@ use super::executor::{
     trigger_if_armed,
 }
 use super::hashing::{Env, derive_order_hash}
-use super::model::{Book, Item, OrderState, Resolvers}
+use super::model::{Book, Item, OrderState, Resolvers, checked_enum}
 use super::signature::verify_signature
 use super::status::{
     OrderStore,
@@ -59,23 +59,23 @@ uses (ctx: Ctx)
 }
 
 /// `_assertConsiderationLengthAndGetOrderHash`
-pub fn consideration_length_checked_order_hash(_ book: Book, order: OrderState) -> u256
+pub fn consideration_length_checked_order_hash(_ order: OrderState) -> u256
 uses (store: OrderStore)
 {
     if order.consideration_len < order.total_original {
         revert_error(MissingOriginalConsiderationItems {})
     }
-    derive_order_hash(book, order, counter: get_counter(order.offerer))
+    derive_order_hash(
+        order.params,
+        consideration_count: order.total_original,
+        counter: get_counter(order.offerer),
+    )
 }
 
 /// `_validateOrder`: the order hash and the fraction that can be filled now,
 /// or a zero fraction for an order that is not fillable (only when
 /// `revert_on_invalid` is false). Contract orders yield `(1, 1, 1)`.
-pub fn validate_order(_ env: Env, book: Book, order: OrderState, revert_on_invalid: bool) -> (
-    u256,
-    u256,
-    u256,
-)
+pub fn validate_order(_ env: Env, order: OrderState, revert_on_invalid: bool) -> (u256, u256, u256)
 uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     if !verify_time(
@@ -87,7 +87,8 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     }
     let numerator = order.numerator
     let denominator = order.denominator
-    if order.order_type == CONTRACT as u256 {
+    let order_type = checked_enum(order.order_type, variants: 5)
+    if order_type == CONTRACT as u256 {
         if numerator * denominator != 1 {
             revert_error(BadFraction {})
         }
@@ -96,10 +97,10 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     if numerator > denominator || numerator == 0 {
         revert_error(BadFraction {})
     }
-    if numerator < denominator && order.order_type & 1 == 0 {
+    if numerator < denominator && order_type & 1 == 0 {
         revert_error(PartialFillsNotEnabledForOrder {})
     }
-    let order_hash = consideration_length_checked_order_hash(book, order)
+    let order_hash = consideration_length_checked_order_hash(order)
     let raw_status = raw_status(order_hash)
     let status = unpack_status(raw_status)
     if !verify_order_status(
@@ -386,7 +387,7 @@ uses (
     log: mut Log,
 )
 {
-    let order_type = book.orders[(0) as usize].order_type
+    let order_type = checked_enum(book.orders[(0) as usize].order_type, variants: 5)
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
     if order_type != CONTRACT as u256 {
         fulfill_single_order(env, mut book, resolvers, fulfiller_conduit_key, recipient)
@@ -453,7 +454,6 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
-        book,
         order: ref book.orders[(0) as usize],
         revert_on_invalid: true,
     )

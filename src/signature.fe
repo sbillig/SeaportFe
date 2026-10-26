@@ -4,9 +4,9 @@
 use core::ptr::MemBuffer
 use core::result::Result
 use core::option::Option
-use std::abi::{Bytes, Bytes32}
 use std::evm::{Address, Call, Ctx, RawOps, keccak_words, revert_error}
 use std::evm::crypto::ecrecover_raw
+use super::abi_view::CalldataView
 use super::errors::{BadContractSignature, BadSignatureV, InvalidSignature, InvalidSigner}
 use super::hashing::{Env, bulk_order_typehash, derive_domain_separator, derive_eip712_digest}
 use super::lowlevel::revert_with_reason_if_one_is_returned
@@ -30,7 +30,7 @@ pub fn domain_separator(_ env: Env) -> u256 uses (ctx: Ctx) {
 
 /// `_verifySignature`: accept the order if the caller is the offerer or the
 /// signature (possibly carrying a bulk order proof) is valid for `offerer`.
-pub fn verify_signature(_ env: Env, offerer: Address, order_hash: u256, signature: Bytes)
+pub fn verify_signature(_ env: Env, offerer: Address, order_hash: u256, signature: CalldataView)
 uses (ctx: Ctx, call: Call, ops: RawOps)
 {
     if offerer == ctx.caller() {
@@ -38,7 +38,7 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
     }
     let domain = domain_separator(env)
     let original_digest = derive_eip712_digest(domain_separator: domain, order_hash)
-    let original_length = signature.len() as u256
+    let original_length = signature.len()
     var digest = original_digest
     var signature_length = original_length
     if is_valid_bulk_order_size(original_length) {
@@ -63,28 +63,28 @@ pub fn is_valid_bulk_order_size(_ length: u256) -> bool {
 
 /// The bulk order hash proven by the proof appended to `signature`, and the
 /// length of the ECDSA signature in front of it.
-pub fn compute_bulk_order_proof(_ signature: Bytes, leaf: u256) -> (u256, u256) {
+pub fn compute_bulk_order_proof(_ signature: CalldataView, leaf: u256) -> (u256, u256) {
     let full_length = signature.len()
     let signature_length = 65 - (full_length & 1)
     let height = (full_length - signature_length) >> 5
-    let key = signature.word_at(signature_length) >> 0xe8
-    let first = signature.word_at(signature_length + 3)
+    let key = signature.word(32 + signature_length) >> 0xe8
+    let first = signature.word(35 + signature_length)
     var node = if key & 1 == 1 {
         keccak_words([first, leaf])
     } else {
         keccak_words([leaf, first])
     }
-    var i: usize = 1
+    var i: u256 = 1
     while i < height {
-        let element = signature.word_at(signature_length + 3 + i * 32)
-        node = if (key >> i as u256) & 1 == 1 {
+        let element = signature.word(35 + signature_length + i * 32)
+        node = if (key >> i) & 1 == 1 {
             keccak_words([element, node])
         } else {
             keccak_words([node, element])
         }
         i += 1
     }
-    (keccak_words([bulk_order_typehash(height as u256), node]), signature_length as u256)
+    (keccak_words([bulk_order_typehash(height), node]), signature_length)
 }
 
 /// `_assertValidSignature`: ECDSA (65 bytes, or 64-byte EIP-2098) recovery
@@ -96,17 +96,17 @@ pub fn assert_valid_signature(
     original_digest: u256,
     original_length: u256,
     signature_length: u256,
-    _ signature: Bytes,
+    _ signature: CalldataView,
 )
 uses (ctx: Ctx, call: Call, ops: RawOps)
 {
     var recovered: u256 = 0
     var v: u256 = 0
     if signature_length == 64 || signature_length == 65 {
-        let r = signature.word_at(0)
-        var s = signature.word_at(32)
+        let r = signature.word(32)
+        var s = signature.word(64)
         if signature_length == 65 {
-            v = signature.byte_at(64) as u256
+            v = signature.word(96) >> 248
         } else {
             v = (s >> 255) + 27
             s = s & ALL_BUT_HIGHEST_BIT
@@ -124,9 +124,10 @@ uses (ctx: Ctx, call: Call, ops: RawOps)
         args.write(offset: 4, value: original_digest)
         args.write(offset: 0x24, value: 0x40)
         args.write(offset: 0x44, value: original_length)
-        args.copy_from(
+        args.copy_calldata(
             offset: 0x64,
-            source: signature.payload_span().slice(offset: 0, len: original_length as usize),
+            source: signature.offset(32),
+            len: original_length,
         )
         // Seaport reads the result from scratch space that still holds the
         // recovered address; short returndata only overwrites its prefix.
