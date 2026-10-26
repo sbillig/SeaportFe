@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
 use std::abi::DynArray
-use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps}
-use super::error_data::{error_selector, revert_custom, revert_with0}
-use super::buffer::Buffer
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
+use super::raw_abi::{error_selector, revert_custom, revert_with0}
+use super::buffer::{Buffer, store_at}
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
 use core::ptr::MemArray
@@ -708,7 +708,10 @@ pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
 /// `OrdersMatched(orderHashes)`, encoded directly into the log data.
 fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
     let count = order_hashes.len() as u256
-    var data = Buffer::new(64 + count * 32)
+    // The offset and length words and the copied hashes fill the buffer.
+    var data = unsafe {
+        Buffer::uninit(64 + count * 32)
+    }
     // The buffer holds the offset and length words.
     unsafe {
         data.put(offset: 0, value: 32)
@@ -721,20 +724,26 @@ fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
 #[arithmetic(unchecked)]
 pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
     let count = executions.len() as u256
-    // The tail holds seven words per execution, so no offset overflows.
-    var out = Buffer::array(count, stride: 224)
+    // The tail holds seven words per execution, all written below, so no
+    // offset overflows.
+    var out = unsafe {
+        Buffer::uninit_array(count, stride: 224)
+    }
+    let base = unsafe {
+        out.at(32)
+    }
     var i: u256 = 0
     while i < count {
         let e = ref executions[i as usize]
-        let at = 32 + i * 224
+        let at = i * 224
         unsafe {
-            out.put(offset: at, value: e.item_type & 0xff)
-            out.put(offset: at + 32, value: e.token.word())
-            out.put(offset: at + 64, value: e.identifier)
-            out.put(offset: at + 96, value: e.amount)
-            out.put(offset: at + 128, value: e.recipient.word())
-            out.put(offset: at + 160, value: e.offerer.word())
-            out.put(offset: at + 192, value: e.conduit_key)
+            store_at(base, offset: at, value: e.item_type & 0xff)
+            store_at(base, offset: at + 32, value: e.token.word())
+            store_at(base, offset: at + 64, value: e.identifier)
+            store_at(base, offset: at + 96, value: e.amount)
+            store_at(base, offset: at + 128, value: e.recipient.word())
+            store_at(base, offset: at + 160, value: e.offerer.word())
+            store_at(base, offset: at + 192, value: e.conduit_key)
         }
         i += 1
     }

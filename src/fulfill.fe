@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
-use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps}
-use super::error_data::{error_selector, revert_with0, revert_with2}
-use super::buffer::Buffer
+use std::abi::{Bytes32, DynArray}
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
+use super::raw_abi::{error_selector, revert_with0, revert_with2}
+use super::buffer::{Buffer, store_at}
 use super::amount::apply_fraction
 use core::ptr::MemArray
 use super::criteria::apply_criteria_resolvers
@@ -258,20 +259,23 @@ fn write_fulfilled_items(
     let stride: u256 = if received { 160 } else { 128 }
     let size = dst.check_array(offset, count, stride)
     // Every word below lies in the checked range, so no offset overflows.
+    let base = unsafe {
+        dst.at(offset)
+    }
     unsafe {
-        dst.put(offset, value: count)
+        store_at(base, offset: 0, value: count)
     }
     var i: u256 = 0
     while i < count {
         let item = ref book.items[(start + i) as usize]
-        let out = offset + 32 + i * stride
+        let out = 32 + i * stride
         unsafe {
-            dst.put(offset: out, value: item.item_type & 0xff)
-            dst.put(offset: out + 32, value: item.token.word())
-            dst.put(offset: out + 64, value: item.identifier)
-            dst.put(offset: out + 96, value: item.amount)
+            store_at(base, offset: out, value: item.item_type & 0xff)
+            store_at(base, offset: out + 32, value: item.token.word())
+            store_at(base, offset: out + 64, value: item.identifier)
+            store_at(base, offset: out + 96, value: item.amount)
             if received {
-                dst.put(offset: out + 128, value: item.receiver.word())
+                store_at(base, offset: out + 128, value: item.receiver.word())
             }
         }
         i += 1
@@ -285,7 +289,10 @@ uses (log: mut Log)
 {
     // Head: orderHash, recipient and the offer and consideration offsets.
     let consideration_at = 0xa0 + order.offer_len * 128
-    var data = Buffer::new(consideration_at + 32 + order.consideration_len * 160)
+    // Every word of the buffer is written below.
+    var data = unsafe {
+        Buffer::uninit(consideration_at + 32 + order.consideration_len * 160)
+    }
     unsafe {
         data.put(offset: 0, value: order_hash)
         data.put(offset: 32, value: recipient.word())

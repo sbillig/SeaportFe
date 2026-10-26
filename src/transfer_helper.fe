@@ -5,13 +5,7 @@ use core::option::Option
 use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, sol}
 use std::evm::{Address, Call, CallOutcome, Ctx, RawOps, Wei, create2_address, revert_error}
-use super::error_data::{
-    error_selector,
-    revert_with0,
-    revert_with1,
-    revert_with2,
-    revert_with_reason,
-}
+use super::raw_abi::{error_selector, revert_with_reason}
 use super::buffer::{Buffer, read_word, return_word}
 
 #[abi]
@@ -164,7 +158,7 @@ uses (ctx: Ctx, call: mut Call)
         )
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != ON_ERC721_RECEIVED_SELECTOR {
-            revert_with1(error_selector<InvalidERC721Recipient>(), recipient.word())
+            revert_error(InvalidERC721Recipient { recipient })
         }
         return
     }
@@ -201,7 +195,9 @@ pub fn bulk_transfer(
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
     if conduit_key == 0 {
-        revert_with2(error_selector<InvalidConduit>(), conduit_key, 0)
+        revert_error(
+            InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit: Address::zero() },
+        )
     }
     let conduit = create2_address(
         deployer: env.conduit_controller,
@@ -228,7 +224,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let transfer = transfers.get(i)
         let recipient = transfer.recipient
         if recipient.word() == 0 {
-            revert_with0(error_selector<RecipientCannotBeZeroAddress>())
+            revert_error(RecipientCannotBeZeroAddress {})
         }
         let call_erc721_receiver = transfer.validateERC721Receiver
             && ctx.extcodesize(recipient) != 0
@@ -241,7 +237,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
                 std::evm::revert(())
             }
             if item.itemType == 1 && item.identifier != 0 {
-                revert_with0(error_selector<InvalidERC20Identifier>())
+                revert_error(InvalidERC20Identifier {})
             }
             if item.itemType == 2 && call_erc721_receiver {
                 check_erc721_receiver(conduit, recipient, token_id: item.identifier)
@@ -269,10 +265,8 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if outcome.success() {
         if decode_bytes4(outcome.returndata()) != CONDUIT_EXECUTE_SELECTOR {
-            revert_with2(
-                error_selector<InvalidConduit>(),
-                conduit_key,
-                conduit.word(),
+            revert_error(
+                InvalidConduit { conduitKey: Bytes32 { val: conduit_key }, conduit },
             )
         }
         return Bytes4 { val: BULK_TRANSFER_SELECTOR }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Custom error revert data for errors whose fields are all static.
+// Hand-encoded custom error revert data, shared by all error types
+// instead of one generic encoder each.
 use core::ErrorVariant
 use core::ptr::{self, MemSpan}
 use std::abi::Sol
