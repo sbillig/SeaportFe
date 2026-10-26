@@ -65,10 +65,16 @@ const ACCUMULATOR_HEAD: u256 = 0x44
 /// accumulator is disarmed its contents are dead, and direct token transfers
 /// write their call data to it.
 pub fn transfer_buffer(_ transfers: u256) -> Buffer {
-    Buffer::new(ACCUMULATOR_HEAD + transfers * 0xc0)
+    // Only written ranges are read: `trigger_if_armed` sends the header it
+    // writes and the transfers `insert` wrote, and `perform_transfer` the
+    // call data it writes.
+    unsafe {
+        Buffer::uninit(ACCUMULATOR_HEAD + transfers * 0xc0)
+    }
 }
 
 /// `_transfer`: move one item from `from` to its recipient.
+#[inline(never)]
 pub fn transfer(
     _ item: Transfer,
     from: Address,
@@ -79,29 +85,58 @@ pub fn transfer(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if item.item_type == NATIVE as u256 {
-        if (item.token.word() | item.identifier) != 0 {
+    transfer_item(
+        item_type: item.item_type,
+        token: item.token,
+        identifier: item.identifier,
+        amount: item.amount,
+        recipient: item.recipient,
+        from,
+        conduit_key,
+        acc,
+        mut buf,
+        env,
+    )
+}
+
+/// `transfer` with the item's fields passed separately.
+pub fn transfer_item(
+    item_type: u256,
+    token: Address,
+    identifier: u256,
+    amount: u256,
+    recipient: Address,
+    from: Address,
+    conduit_key: u256,
+    acc: Accumulator,
+    buf: mut Buffer,
+    env: Env,
+) -> Accumulator
+uses (ctx: Ctx, call: mut Call, ops: RawOps)
+{
+    if item_type == NATIVE as u256 {
+        if (token.word() | identifier) != 0 {
             revert_with0(error_selector<UnusedItemParameters>())
         }
-        transfer_native_tokens(to: item.recipient, amount: item.amount)
+        transfer_native_tokens(to: recipient, amount)
         return acc
     }
-    if item.item_type == ERC20 as u256 && item.identifier != 0 {
+    if item_type == ERC20 as u256 && identifier != 0 {
         revert_with0(error_selector<UnusedItemParameters>())
     }
     // ERC20 and ERC721 keep their numbers as conduit item types; every other
     // item type is transferred as ERC1155.
     transfer_token(
-        kind: if item.item_type < CONDUIT_ERC1155 {
-            item.item_type
+        kind: if item_type < CONDUIT_ERC1155 {
+            item_type
         } else {
             CONDUIT_ERC1155
         },
-        token: item.token,
+        token,
         from,
-        to: item.recipient,
-        identifier: item.identifier,
-        amount: item.amount,
+        to: recipient,
+        identifier,
+        amount,
         conduit_key,
         acc,
         mut buf,
@@ -124,8 +159,10 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     // all forwarded gas, and seaport-core still reverts with the custom error
     // from the remaining 1/64. Encoding it after the call does not fit into
     // that budget.
-    var failure = Buffer::new(0x44)
-    // The buffer was sized for exactly these words.
+    // The three words fill the buffer.
+    var failure = unsafe {
+        Buffer::uninit(0x44)
+    }
     unsafe {
         failure.put(
                 offset: 0,

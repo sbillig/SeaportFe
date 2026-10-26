@@ -76,34 +76,43 @@ pub fn derive_components_hash(_ order: CalldataView) -> u256 {
 }
 
 /// The hash of the first `count` raw items of the offer (or consideration)
-/// array at `items`.
+/// array at `items`. Each item is hashed from frame scratch; only the item
+/// hashes take heap memory.
 #[arithmetic(unchecked)]
+#[inline(always)]
 fn hash_items(_ items: CalldataView, count: u256, consideration: bool) -> u256 {
-    let stride: u256 = if consideration { 192 } else { 160 }
-    // The item hashes, then the typehash and one item to hash.
-    let hashes = ptr::alloc_bytes(count * 32 + 32 + stride)
-    let scratch = ptr::offset_bytes(hashes, count * 32)
-    let typed = unsafe {
-        MemSpan::from_raw_parts(ptr: scratch, len: (32 + stride) as usize)
-    }
-    unsafe {
-        store_word(
-            ptr: scratch,
-            value: if consideration {
-                CONSIDERATION_ITEM_TYPEHASH
-            } else {
-                OFFER_ITEM_TYPEHASH
-            },
-        )
-    }
+    let hashes = ptr::alloc_bytes(count * 32)
     var i: u256 = 0
     while i < count {
-        unsafe {
-            items.element(index: i, stride).copy_to(ptr::offset_bytes(scratch, 32), len: stride)
-            store_word(
-                ptr: ptr::offset_bytes(hashes, i * 32),
-                value: keccak256(typed),
+        let hash = if consideration {
+            let item = items.element(index: i, stride: 192)
+            keccak_words(
+                [
+                    CONSIDERATION_ITEM_TYPEHASH,
+                    item.word(0),
+                    item.word(32),
+                    item.word(64),
+                    item.word(96),
+                    item.word(128),
+                    item.word(160),
+                ],
             )
+        } else {
+            let item = items.element(index: i, stride: 160)
+            keccak_words(
+                [
+                    OFFER_ITEM_TYPEHASH,
+                    item.word(0),
+                    item.word(32),
+                    item.word(64),
+                    item.word(96),
+                    item.word(128),
+                ],
+            )
+        }
+        // Hash `i` of the `count` allocated above.
+        unsafe {
+            store_word(ptr: ptr::offset_bytes(hashes, i * 32), value: hash)
         }
         i += 1
     }

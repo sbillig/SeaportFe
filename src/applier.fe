@@ -10,7 +10,7 @@ use super::errors::{
     MissingItemAmount,
     OfferAndConsiderationRequiredOnFulfillment,
 }
-use super::model::{Book, Group, Groups, elem}
+use super::model::{Book, Group, Groups, element}
 use super::types::OFFER
 
 /// An `Execution`: a `ReceivedItem` plus the source and conduit key.
@@ -82,7 +82,7 @@ pub fn aggregate_items(
         }
         // The order index was checked above.
         let order = unsafe {
-            ref *elem(book.orders.ptr(), component.order_index)
+            ref *element(book.orders.ptr(), component.order_index)
         }
         let (start, len) = if consideration {
             (order.consideration_start, order.consideration_len)
@@ -93,7 +93,7 @@ pub fn aggregate_items(
             // The item index lies in the order's range of the pool.
             let at = start + component.item_index
             let item = unsafe {
-                mut *elem(book.items.ptr(), at)
+                mut *element(book.items.ptr(), at)
             }
             let new_amount = amount + item.amount
             if new_amount < amount {
@@ -112,10 +112,10 @@ pub fn aggregate_items(
             } else {
                 // Both indexes were checked when the first item was used.
                 let first = unsafe {
-                    ref *elem(book.items.ptr(), first_at)
+                    ref *element(book.items.ptr(), first_at)
                 }
                 let first_source = unsafe {
-                    ref *elem(book.orders.ptr(), first_order)
+                    ref *element(book.orders.ptr(), first_order)
                 }
                 let differs = if consideration {
                     item.receiver != first.receiver
@@ -136,10 +136,10 @@ pub fn aggregate_items(
     execution = if found {
         // Both indexes were checked when the first item was used.
         let first = unsafe {
-            ref *elem(book.items.ptr(), first_at)
+            ref *element(book.items.ptr(), first_at)
         }
         let first_source = unsafe {
-            ref *elem(book.orders.ptr(), first_order)
+            ref *element(book.orders.ptr(), first_order)
         }
         ExecutionState {
             item_type: first.item_type,
@@ -230,7 +230,7 @@ pub fn apply_fulfillment(
     }
     // Aggregation checked both indexes of the first used component.
     let order = unsafe {
-        ref *elem(book.orders.ptr(), target.order_index)
+        ref *element(book.orders.ptr(), target.order_index)
     }
     let start = if consideration_left {
         order.consideration_start
@@ -238,7 +238,7 @@ pub fn apply_fulfillment(
         order.offer_start
     }
     let item = unsafe {
-        mut *elem(book.items.ptr(), start + target.item_index)
+        mut *element(book.items.ptr(), start + target.item_index)
     }
     if consideration_left {
         item.amount = consideration_amount - execution.amount
