@@ -61,7 +61,8 @@ def compiler():
 
 def build():
     fe = ROOT / "toolchain" / "fe" / "target" / "release" / "fe"
-    run(fe, "build", ".", "-O", "1", "--out-dir", "build/fe")
+    level = MANIFEST["compiler"].get("optimize", "1")
+    run(fe, "build", ".", "-O", level, "--out-dir", "build/fe")
 
 
 def main():
