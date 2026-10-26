@@ -1,14 +1,26 @@
 // SPDX-License-Identifier: MIT
 // SeaportRouter (contracts/helpers/SeaportRouter.sol): fulfill available
 // orders across Seaport 1.5 and 1.6 in one call.
-use core::abi::AbiSize
+use core::abi::{AbiSize, ByteInput}
 use core::ptr::{self, MemArray, MemSpan}
 use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
-use std::abi::sol::decode_output
-use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error, wei}
+use std::evm::{
+    Address,
+    Call,
+    CallData,
+    Create,
+    Ctx,
+    PANIC_INDEX_OUT_OF_BOUNDS,
+    PANIC_OUT_OF_MEMORY,
+    RawOps,
+    TSlot,
+    revert_empty,
+    revert_error,
+    wei,
+}
+use super::abi_view::CalldataView
 use super::hashing::Env
-use super::buffer::return_word
-use super::seaport::SeaportMsg
+use super::buffer::{Buffer, read_word, return_word, store_at}
 use super::status::{
     REENTRANCY_GUARD_SLOT,
     activate_tstore,
@@ -60,6 +72,13 @@ pub msg SeaportRouterMsg {
     ActivateTstore {},
 }
 
+/// `fulfillAvailableAdvancedOrders`, whose argument is read from calldata.
+msg SeaportRouterCalldataMsg {
+    // fulfillAvailableAdvancedOrders((address[],(((address,address,(uint8,address,uint256,uint256,uint256)[],(uint8,address,uint256,uint256,uint256,address)[],uint8,uint256,uint256,bytes32,uint256,bytes32,uint256),uint120,uint120,bytes,bytes)[],(uint256,uint8,uint256,uint256,bytes32[])[],(uint256,uint256)[][],(uint256,uint256)[][],uint256)[],bytes32,address,uint256))
+    #[selector = 0xfc2a350b]
+    FulfillAvailableAdvancedOrders {} -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>),
+}
+
 /// NoSpecifiedOrdersAvailable()
 const NO_SPECIFIED_ORDERS_AVAILABLE_SELECTOR: u256 = 0xd5da9a1b
 
@@ -95,10 +114,15 @@ fn assert_seaport_allowed(_ env: RouterEnv, seaport: Address) {
 
 /// `fulfillAvailableAdvancedOrders`: forward each group of orders to its
 /// Seaport, skipping groups that revert with `NoSpecifiedOrdersAvailable`.
-pub fn fulfill_available_advanced_orders(
-    _ env: RouterEnv,
-    params: FulfillAvailableAdvancedOrdersParams,
-) -> (DynArray<DynArray<bool>>, DynArray<DynArray<Execution>>)
+///
+/// `params` is read from calldata with solc's checks, in solc's order: the
+/// argument head up front, each calldata access when the code reaches it,
+/// and each group's arrays through the strict decoding of a calldata to
+/// memory copy, which the forwarded call then encodes canonically.
+pub fn fulfill_available_advanced_orders(_ env: RouterEnv) -> (
+    DynArray<DynArray<bool>>,
+    DynArray<DynArray<Execution>>,
+)
 uses (
     guard_state: mut u256,
     transient_guard: mut TSlot<u256>,
@@ -107,54 +131,60 @@ uses (
     ops: mut RawOps,
 )
 {
+    let _ = CalldataView::arguments(32).struct_argument(offset: 0, size: 0xa0)
+    let params = 4 + cd(4)
     set_reentrancy_guard(env.guard, accept_native_tokens: true)
-    let seaports = params.seaportContracts
-    let order_params = params.advancedOrderParams
-    let count = seaports.len()
-    let no_available = DynArray<bool>::empty()
-    let no_executions = DynArray<Execution>::empty()
-    var available_parts = MemArray::from_fn(count, |_| no_available)
-    var execution_parts = MemArray::from_fn(count, |_| no_executions)
-    var i: usize = 0
-    let maximum_fulfilled = params.maximumFulfilled
-    var fulfillments_left = maximum_fulfilled
-    let recipient = if params.recipient.word() == 0 {
+    let (seaports, count) = calldata_array(base: params, head: params, stride: 32)
+    let maximum_fulfilled = cd(params + 0x80)
+    let conduit_key = cd(params + 0x40)
+    let recipient_word = cd(params + 0x60)
+    if dirty_address(recipient_word) {
+        revert_empty()
+    }
+    let recipient = if recipient_word == 0 {
         ctx.caller()
     } else {
-        params.recipient
+        Address::from_word_truncate(recipient_word)
     }
+    let no_available = DynArray<bool>::empty()
+    let no_executions = DynArray<Execution>::empty()
+    var available_parts = MemArray::from_fn(count as usize, |_| no_available)
+    var execution_parts = MemArray::from_fn(count as usize, |_| no_executions)
+    var fulfillments_left = maximum_fulfilled
+    var i: u256 = 0
     while i < count {
-        let seaport = seaports.get(i)
-        assert_seaport_allowed(env, seaport)
-        let group = order_params.get(i)
-        let ether_value = group.etherValue
-        let message = SeaportMsg::FulfillAvailableAdvancedOrders {
-            advancedOrders: group.advancedOrders,
-            criteriaResolvers: group.criteriaResolvers,
-            offerFulfillments: group.offerFulfillments,
-            considerationFulfillments: group.considerationFulfillments,
-            fulfillerConduitKey: params.fulfillerConduitKey,
-            recipient,
-            maximumFulfilled: fulfillments_left,
+        let seaport_word = cd(seaports + i * 32)
+        if dirty_address(seaport_word) {
+            revert_empty()
         }
-        let outcome = call.try_call(
+        let seaport = Address::from_word_truncate(seaport_word)
+        assert_seaport_allowed(env, seaport)
+        let group = group_at(params, index: i)
+        let args = forwarded_calldata(
+            group,
+            conduit_key,
+            recipient,
+            maximum_fulfilled: fulfillments_left,
+        )
+        let outcome = call
+            .try_call_raw(
                 addr: seaport,
                 gas: ctx.gas(),
-                value: wei(ether_value),
-                message,
+                value: wei(cd(group + 0x80)),
+                args: args.span(),
             )
         let returned = outcome.returndata()
         if outcome.success() {
-            let (available, executions): (DynArray<bool>, DynArray<Execution>) = decode_output(
-                returned,
-            )
-            available_parts[i] = available
-            execution_parts[i] = executions
+            let available = decode_result_array(returned, head: 0, stride: 32, executions: false)
+            let executions = decode_result_array(returned, head: 32, stride: 0xe0, executions: true)
+            available_parts[i as usize] = available.into_dyn_array(len: available.word(0))
+            execution_parts[i as usize] = executions.into_dyn_array(len: executions.word(0))
+            let flags = available_parts[i as usize]
             // Upstream only advances `j` for available orders, so an
             // unavailable order loops until the call runs out of gas.
             var j: usize = 0
-            while j < available.len() {
-                if available.get(j) {
+            while j < flags.len() {
+                if flags.get(j) {
                     fulfillments_left = fulfillments_left.wrapping_sub(1)
                     j += 1
                 }
@@ -182,6 +212,440 @@ uses (
     }
     clear_reentrancy_guard(env.guard)
     (nested_array(available_parts), nested_array(execution_parts))
+}
+
+// Raw calldata reads with solc's checks.
+
+const MAX_U64: u256 = 0xffffffffffffffff
+const MAX_U120: u256 = 0xffffffffffffffffffffffffffffff
+const SIGN_BIT: u256 = 0x8000000000000000000000000000000000000000000000000000000000000000
+/// fulfillAvailableAdvancedOrders(AdvancedOrder[],CriteriaResolver[],FulfillmentComponent[][],FulfillmentComponent[][],bytes32,address,uint256)
+const SEAPORT_FULFILL_AVAILABLE_ADVANCED_ORDERS_SELECTOR: u256 = 0x87201b41
+
+// Validation of the elements of an inline struct array.
+const PLAIN: u256 = 0
+const OFFER_ITEM: u256 = 1
+const CONSIDERATION_ITEM: u256 = 2
+
+// The arrays of an `AdvancedOrderParams`.
+const ADVANCED_ORDERS: u256 = 0
+const CRITERIA_RESOLVERS: u256 = 1
+const FULFILLMENTS: u256 = 2
+
+fn cd(_ pos: u256) -> u256 {
+    CalldataView::at(pos).word(0)
+}
+
+fn calldatasize() -> u256 {
+    CallData::new().len()
+}
+
+fn slt(_ a: u256, _ b: u256) -> bool {
+    (a ^ SIGN_BIT) < (b ^ SIGN_BIT)
+}
+
+fn dirty_address(_ word: u256) -> bool {
+    word >> 160 != 0
+}
+
+/// solc's memory allocation for an array of `len` words: Panic(0x41) for a
+/// length above 2**64 - 1 or an allocation past 2**64 - 1 (taking the free
+/// memory pointer at its lowest, 0x80).
+fn check_array_allocation(_ len: u256) {
+    if len > (MAX_U64 - 0xa0) / 32 {
+        core::panic_code(PANIC_OUT_OF_MEMORY)
+    }
+}
+
+/// solc's memory allocation for `bytes` of length `len`, as above.
+fn check_bytes_allocation(_ len: u256) {
+    if len > MAX_U64 - 0xbf {
+        core::panic_code(PANIC_OUT_OF_MEMORY)
+    }
+}
+
+/// solc's `access_calldata_tail` for the dynamic calldata array whose
+/// offset relative to `base` is at `head`: its element start and length.
+#[arithmetic(unchecked)]
+fn calldata_array(base: u256, head: u256, stride: u256) -> (u256, u256) {
+    let rel = cd(head)
+    if !slt(rel, calldatasize() - base - 31) {
+        revert_empty()
+    }
+    let length_at = base + rel
+    let len = cd(length_at)
+    if len > MAX_U64 {
+        revert_empty()
+    }
+    let start = length_at + 32
+    if slt(calldatasize() - len * stride, start) {
+        revert_empty()
+    }
+    (start, len)
+}
+
+/// `params.advancedOrderParams[index]`: the array access, the index check
+/// and the struct element's 160-byte head check.
+#[arithmetic(unchecked)]
+fn group_at(_ params: u256, index: u256) -> u256 {
+    let (groups, len) = calldata_array(base: params, head: params + 32, stride: 32)
+    if index >= len {
+        core::panic_code(PANIC_INDEX_OUT_OF_BOUNDS)
+    }
+    let rel = cd(groups + index * 32)
+    if !slt(rel, calldatasize() - groups - 0x9f) {
+        revert_empty()
+    }
+    groups + rel
+}
+
+/// Seaport's `fulfillAvailableAdvancedOrders` calldata for `group`, after
+/// solc's strict decoding of its four arrays.
+fn forwarded_calldata(
+    _ group: u256,
+    conduit_key: u256,
+    recipient: Address,
+    maximum_fulfilled: u256,
+) -> Buffer {
+    let sizing = ptr::alloc_bytes(0)
+    let size = encode_fulfill_arguments(
+        group,
+        conduit_key,
+        recipient,
+        maximum_fulfilled,
+        out: sizing,
+        write: false,
+    )
+    var data = Buffer::new(size)
+    // The zeroed buffer holds the encoding the sizing pass measured.
+    let out = unsafe {
+        data.at(0)
+    }
+    let _ = encode_fulfill_arguments(
+        group,
+        conduit_key,
+        recipient,
+        maximum_fulfilled,
+        out,
+        write: true,
+    )
+    data
+}
+
+/// The selector and the seven arguments, the four arrays re-encoded
+/// canonically; writes only with `write`. Returns the end.
+#[arithmetic(unchecked)]
+fn encode_fulfill_arguments(
+    _ group: u256,
+    conduit_key: u256,
+    recipient: Address,
+    maximum_fulfilled: u256,
+    out: *u8,
+    write: bool,
+) -> u256 {
+    // The selector word comes first: the head words overwrite its tail.
+    emit(
+        out,
+        write,
+        at: 0,
+        value: SEAPORT_FULFILL_AVAILABLE_ADVANCED_ORDERS_SELECTOR << 224,
+    )
+    var tail: u256 = 0xe4
+    emit(out, write, at: 4, value: tail - 4)
+    tail = encode_group_array(
+        group,
+        field: 0,
+        kind: ADVANCED_ORDERS,
+        out,
+        write,
+        at: tail,
+    )
+    emit(out, write, at: 0x24, value: tail - 4)
+    tail = encode_group_array(
+        group,
+        field: 0x20,
+        kind: CRITERIA_RESOLVERS,
+        out,
+        write,
+        at: tail,
+    )
+    emit(out, write, at: 0x44, value: tail - 4)
+    tail = encode_group_array(
+        group,
+        field: 0x40,
+        kind: FULFILLMENTS,
+        out,
+        write,
+        at: tail,
+    )
+    emit(out, write, at: 0x64, value: tail - 4)
+    tail = encode_group_array(
+        group,
+        field: 0x60,
+        kind: FULFILLMENTS,
+        out,
+        write,
+        at: tail,
+    )
+    emit(out, write, at: 0x84, value: conduit_key)
+    emit(out, write, at: 0xa4, value: recipient.word())
+    emit(out, write, at: 0xc4, value: maximum_fulfilled)
+    tail
+}
+
+fn emit(_ out: *u8, write: bool, at: u256, value: u256) {
+    if write {
+        // The sizing pass measured the buffer for every word written.
+        unsafe {
+            store_at(out, offset: at, value)
+        }
+    }
+}
+
+fn emit_copy(_ out: *u8, write: bool, at: u256, source: u256, len: u256) {
+    if write {
+        // The sizing pass measured the buffer for every copied range.
+        unsafe {
+            CalldataView::at(source).copy_to(ptr::offset_bytes(out, at), len: len)
+        }
+    }
+}
+
+/// `orderParams.<array at field>` copied to memory: `access_calldata_tail`
+/// and `abi_decode_available_length` over the element heads.
+#[arithmetic(unchecked)]
+fn encode_group_array(
+    _ group: u256,
+    field: u256,
+    kind: u256,
+    out: *u8,
+    write: bool,
+    at: u256,
+) -> u256 {
+    let (start, len) = calldata_array(base: group, head: group + field, stride: 32)
+    if start + len * 32 > calldatasize() {
+        revert_empty()
+    }
+    emit(out, write, at, value: len)
+    let heads = at + 32
+    var tail = heads + len * 32
+    var i: u256 = 0
+    while i < len {
+        let rel = cd(start + i * 32)
+        if rel > MAX_U64 {
+            revert_empty()
+        }
+        let element = start + rel
+        emit(out, write, at: heads + i * 32, value: tail - heads)
+        tail = if kind == ADVANCED_ORDERS {
+            encode_advanced_order(element, out, write, at: tail)
+        } else if kind == CRITERIA_RESOLVERS {
+            encode_criteria_resolver(element, out, write, at: tail)
+        } else {
+            encode_inline_array(element, stride: 0x40, kind: PLAIN, out, write, at: tail)
+        }
+        i += 1
+    }
+    tail
+}
+
+/// An `AdvancedOrder` (160-byte head) at `pos`.
+#[arithmetic(unchecked)]
+fn encode_advanced_order(_ pos: u256, out: *u8, write: bool, at: u256) -> u256 {
+    if slt(calldatasize() - pos, 0xa0) {
+        revert_empty()
+    }
+    let parameters = cd(pos)
+    if parameters > MAX_U64 {
+        revert_empty()
+    }
+    emit(out, write, at, value: 0xa0)
+    var tail = encode_order_parameters(pos + parameters, out, write, at: at + 0xa0)
+    let numerator = cd(pos + 0x20)
+    let denominator = cd(pos + 0x40)
+    if numerator > MAX_U120 || denominator > MAX_U120 {
+        revert_empty()
+    }
+    emit(out, write, at: at + 0x20, value: numerator)
+    emit(out, write, at: at + 0x40, value: denominator)
+    let signature = cd(pos + 0x60)
+    if signature > MAX_U64 {
+        revert_empty()
+    }
+    emit(out, write, at: at + 0x60, value: tail - at)
+    tail = encode_bytes(pos + signature, out, write, at: tail)
+    let extra_data = cd(pos + 0x80)
+    if extra_data > MAX_U64 {
+        revert_empty()
+    }
+    emit(out, write, at: at + 0x80, value: tail - at)
+    encode_bytes(pos + extra_data, out, write, at: tail)
+}
+
+/// An `OrderParameters` (352-byte head) at `pos`.
+#[arithmetic(unchecked)]
+fn encode_order_parameters(_ pos: u256, out: *u8, write: bool, at: u256) -> u256 {
+    if slt(calldatasize() - pos, 0x160) {
+        revert_empty()
+    }
+    if dirty_address(cd(pos)) || dirty_address(cd(pos + 0x20)) {
+        revert_empty()
+    }
+    let offer = cd(pos + 0x40)
+    if offer > MAX_U64 {
+        revert_empty()
+    }
+    var tail = at + 0x160
+    emit(out, write, at: at + 0x40, value: tail - at)
+    tail = encode_inline_array(
+        pos + offer,
+        stride: 0xa0,
+        kind: OFFER_ITEM,
+        out,
+        write,
+        at: tail,
+    )
+    let consideration = cd(pos + 0x60)
+    if consideration > MAX_U64 {
+        revert_empty()
+    }
+    emit(out, write, at: at + 0x60, value: tail - at)
+    tail = encode_inline_array(
+        pos + consideration,
+        stride: 0xc0,
+        kind: CONSIDERATION_ITEM,
+        out,
+        write,
+        at: tail,
+    )
+    // OrderType
+    if cd(pos + 0x80) >= 5 {
+        revert_empty()
+    }
+    emit(out, write, at, value: cd(pos))
+    emit(out, write, at: at + 0x20, value: cd(pos + 0x20))
+    emit_copy(out, write, at: at + 0x80, source: pos + 0x80, len: 0xe0)
+    tail
+}
+
+/// A `CriteriaResolver` (160-byte head) at `pos`.
+#[arithmetic(unchecked)]
+fn encode_criteria_resolver(_ pos: u256, out: *u8, write: bool, at: u256) -> u256 {
+    if slt(calldatasize() - pos, 0xa0) {
+        revert_empty()
+    }
+    // Side
+    if cd(pos + 0x20) >= 2 {
+        revert_empty()
+    }
+    let proof = cd(pos + 0x80)
+    if proof > MAX_U64 {
+        revert_empty()
+    }
+    emit_copy(out, write, at, source: pos, len: 0x80)
+    emit(out, write, at: at + 0x80, value: 0xa0)
+    encode_inline_array(
+        pos + proof,
+        stride: 32,
+        kind: PLAIN,
+        out,
+        write,
+        at: at + 0xa0,
+    )
+}
+
+/// A `bytes` value whose length word is at `pos`.
+#[arithmetic(unchecked)]
+fn encode_bytes(_ pos: u256, out: *u8, write: bool, at: u256) -> u256 {
+    if !slt(pos + 31, calldatasize()) {
+        revert_empty()
+    }
+    let len = cd(pos)
+    check_bytes_allocation(len)
+    if pos + 32 + len > calldatasize() {
+        revert_empty()
+    }
+    emit(out, write, at, value: len)
+    emit_copy(out, write, at: at + 32, source: pos + 32, len)
+    at + 32 + ((len + 31) & !(31 as u256))
+}
+
+/// An array of inline `stride`-byte elements whose length word is at `pos`,
+/// with the item type and address checks of `kind`.
+#[arithmetic(unchecked)]
+fn encode_inline_array(
+    _ pos: u256,
+    stride: u256,
+    kind: u256,
+    out: *u8,
+    write: bool,
+    at: u256,
+) -> u256 {
+    if !slt(pos + 31, calldatasize()) {
+        revert_empty()
+    }
+    let len = cd(pos)
+    check_array_allocation(len)
+    let start = pos + 32
+    let end = start + len * stride
+    if end > calldatasize() {
+        revert_empty()
+    }
+    if kind != PLAIN {
+        var element = start
+        while element < end {
+            // ItemType, token and, for consideration items, recipient.
+            if cd(element) >= 6
+                || dirty_address(cd(element + 0x20))
+                || (kind == CONSIDERATION_ITEM && dirty_address(cd(element + 0xa0))) {
+                revert_empty()
+            }
+            element += stride
+        }
+    }
+    emit(out, write, at, value: len)
+    emit_copy(out, write, at: at + 32, source: start, len: len * stride)
+    at + 32 + len * stride
+}
+
+/// Element array `head` of Seaport's `(bool[], Execution[])` returndata
+/// with solc's strict memory decoding: offsets, lengths, booleans, item
+/// types and addresses. Returns a copy of its encoding.
+#[arithmetic(unchecked)]
+fn decode_result_array(_ data: MemSpan, head: u256, stride: u256, executions: bool) -> Buffer {
+    let end = data.len() as u256
+    if end < 64 { revert_empty() }
+    let pos = read_word(data, offset: head)
+    if pos > MAX_U64 || pos + 31 >= end {
+        revert_empty()
+    }
+    let len = read_word(data, offset: pos)
+    check_array_allocation(len)
+    let start = pos + 32
+    let size = len * stride
+    if start + size > end {
+        revert_empty()
+    }
+    var element = start
+    while element < start + size {
+        let first = read_word(data, offset: element)
+        let invalid = if executions {
+            first >= 6
+                || dirty_address(read_word(data, offset: element + 0x20))
+                || dirty_address(read_word(data, offset: element + 0x80))
+                || dirty_address(read_word(data, offset: element + 0xa0))
+        } else {
+            first > 1
+        }
+        if invalid { revert_empty() }
+        element += stride
+    }
+    var copy = Buffer::new(32 + size)
+    copy.copy_from(
+        offset: 0,
+        source: data.slice(offset: pos as usize, len: (32 + size) as usize),
+    )
+    copy
 }
 
 /// `parts` as an ABI array of arrays, in canonical layout.
@@ -253,13 +717,13 @@ pub contract SeaportRouter {
 
     recv {
         #[payable]
-        SeaportRouterMsg::FulfillAvailableAdvancedOrders { params } -> (
+        SeaportRouterCalldataMsg::FulfillAvailableAdvancedOrders {} -> (
             DynArray<DynArray<bool>>,
             DynArray<DynArray<Execution>>,
         )
         uses (mut guard_state, mut transient_guard, env, ctx: Ctx, call: mut Call, ops: mut RawOps)
         {
-            fulfill_available_advanced_orders(env, params)
+            fulfill_available_advanced_orders(env)
         }
         SeaportRouterMsg::GetAllowedSeaportContracts {} -> DynArray<Address>
         uses (env)
