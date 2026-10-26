@@ -23,7 +23,7 @@
 // as Solidity's typed memory reads see them: consumers check enums where
 // Seaport reads them. The order hash reads the raw words from calldata.
 use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION}
-use core::ptr::MemArray
+use core::ptr::{self, MemArray}
 use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
@@ -190,16 +190,19 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
         } else {
             Address::zero()
         }
-        let slot = mut items[start + i]
-        slot.item_type = item.word(0)
-        slot.token = item.address(32)
-        slot.identifier = item.word(64)
-        slot.start_amount = item.word(96)
-        slot.end_amount = item.word(128)
-        slot.recipient = recipient
-        slot.amount = item.word(96)
-        slot.receiver = recipient
-        slot.original = 0
+        // `start + i` lies in the pool, which the caller sized for these items.
+        let slot = ptr::offset(items.ptr(), (start + i) as u256)
+        unsafe {
+            (*slot).item_type = item.word(0)
+            (*slot).token = item.address(32)
+            (*slot).identifier = item.word(64)
+            (*slot).start_amount = item.word(96)
+            (*slot).end_amount = item.word(128)
+            (*slot).recipient = recipient
+            (*slot).amount = item.word(96)
+            (*slot).receiver = recipient
+            (*slot).original = 0
+        }
         i += 1
     }
 }
@@ -239,38 +242,41 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool) -> Book {
             input: consideration,
             consideration: true,
         )
-        // Fields are stored one by one, which keeps few values live.
-        let state = mut states[i]
-        state.offerer = p.address(0)
-        state.zone = p.address(32)
-        state.offer_start = start as u256
-        state.offer_len = offer.len()
-        state.consideration_start = consideration_start as u256
-        state.consideration_len = consideration.len()
-        state.order_type = p.word(128)
-        state.start_time = p.word(160)
-        state.end_time = p.word(192)
-        state.zone_hash = p.word(224)
-        state.salt = p.word(256)
-        state.conduit_key = p.word(288)
-        state.total_original = p.word(320)
-        state.numerator = if advanced {
-            order.word(32) & 0xffffffffffffffffffffffffffffff
-        } else {
-            1
+        // Fields are stored one by one, which keeps few values live, into
+        // order `i` of the `count` the pool holds.
+        let state = ptr::offset(states.ptr(), i as u256)
+        unsafe {
+            (*state).offerer = p.address(0)
+            (*state).zone = p.address(32)
+            (*state).offer_start = start as u256
+            (*state).offer_len = offer.len()
+            (*state).consideration_start = consideration_start as u256
+            (*state).consideration_len = consideration.len()
+            (*state).order_type = p.word(128)
+            (*state).start_time = p.word(160)
+            (*state).end_time = p.word(192)
+            (*state).zone_hash = p.word(224)
+            (*state).salt = p.word(256)
+            (*state).conduit_key = p.word(288)
+            (*state).total_original = p.word(320)
+            (*state).numerator = if advanced {
+                order.word(32) & 0xffffffffffffffffffffffffffffff
+            } else {
+                1
+            }
+            (*state).denominator = if advanced {
+                order.word(64) & 0xffffffffffffffffffffffffffffff
+            } else {
+                1
+            }
+            (*state).signature = order.child(if advanced { 96 } else { 32 })
+            (*state).extra_data = if advanced {
+                order.child(128)
+            } else {
+                CalldataView::empty()
+            }
+            (*state).params = p
         }
-        state.denominator = if advanced {
-            order.word(64) & 0xffffffffffffffffffffffffffffff
-        } else {
-            1
-        }
-        state.signature = order.child(if advanced { 96 } else { 32 })
-        state.extra_data = if advanced {
-            order.child(128)
-        } else {
-            CalldataView::empty()
-        }
-        state.params = p
         start = consideration_start + consideration.len() as usize
         i += 1
     }

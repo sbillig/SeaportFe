@@ -5,7 +5,7 @@ use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
 use super::raw_abi::{error_selector, revert_with0, revert_with2}
 use super::buffer::{Buffer, store_at}
 use super::amount::apply_fraction
-use core::ptr::MemArray
+use core::ptr::{self, MemArray}
 use super::criteria::apply_criteria_resolvers
 use super::errors::{
     BadFraction,
@@ -267,7 +267,9 @@ fn write_fulfilled_items(
     }
     var i: u256 = 0
     while i < count {
-        let item = ref book.items[(start + i) as usize]
+        let item = unsafe {
+            ref *ptr::offset(book.items.ptr(), start + i)
+        }
         let out = 32 + i * stride
         unsafe {
             store_at(base, offset: out, value: item.item_type & 0xff)
@@ -343,7 +345,12 @@ uses (
     log: mut Log,
 )
 {
-    let order_type = checked_enum(book.orders[(0) as usize].order_type, variants: 5)
+    let order_type = checked_enum(
+        unsafe {
+            (*ptr::offset(book.orders.ptr(), 0)).order_type
+        },
+        variants: 5,
+    )
     set_reentrancy_guard(env, accept_native_tokens: order_type == CONTRACT as u256)
     if order_type != CONTRACT as u256 {
         fulfill_single_order(env, mut book, resolvers, fulfiller_conduit_key, recipient)
@@ -405,13 +412,17 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
 {
     let (order_hash, fill_numerator, fill_denominator) = validate_order(
         env,
-        order: ref book.orders[(0) as usize],
+        order: unsafe {
+            ref *ptr::offset(book.orders.ptr(), 0)
+        },
         revert_on_invalid: true,
     )
     apply_criteria_resolvers(mut book, resolvers)
     apply_fractions(
         mut book.items,
-        order: ref book.orders[(0) as usize],
+        order: unsafe {
+            ref *ptr::offset(book.orders.ptr(), 0)
+        },
         numerator: fill_numerator,
         denominator: fill_denominator,
     )
@@ -428,7 +439,9 @@ fn authorize_single_order(
 uses (store: mut OrderStore, ctx: Ctx, call: mut Call, ops: mut RawOps)
 {
     // Only restricted orders consult their zone.
-    let order = ref book.orders[(0) as usize]
+    let order = unsafe {
+        ref *ptr::offset(book.orders.ptr(), 0)
+    }
     if order.order_type > 1 {
         let order_hashes = MemArray<u256>::new_zeroed(1)
         let _ = check_restricted_advanced_order_authorization(
@@ -458,7 +471,9 @@ fn finish_single_order(
 )
 uses (ctx: Ctx, call: mut Call, ops: mut RawOps, log: mut Log)
 {
-    let order = ref book.orders[(0) as usize]
+    let order = unsafe {
+        ref *ptr::offset(book.orders.ptr(), 0)
+    }
     transfer_each(
         env,
         items: book.items,
