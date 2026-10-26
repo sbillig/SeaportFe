@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
-use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, revert_error}
+use std::abi::DynArray
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
 use super::buffer::Buffer
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
@@ -27,7 +27,7 @@ use super::fulfill::{emit_order_fulfilled, validate_order}
 use super::hashing::Env
 use super::model::{Book, Groups, Item, OrderState, Resolvers}
 use super::status::{OrderStore, clear_reentrancy_guard, set_reentrancy_guard, update_status}
-use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER, ReceivedItem}
+use super::types::{CONSIDERATION, CONTRACT, Execution, NATIVE, OFFER}
 use super::zone::{
     assert_restricted_advanced_order_validity,
     check_restricted_advanced_order_authorization,
@@ -481,7 +481,7 @@ uses (
         recipient,
         non_match: false,
     )
-    log.emit(OrdersMatched { orderHashes: hash_array(order_hashes) })
+    emit_orders_matched(order_hashes)
     let total_fulfillments = fulfillments.len() / 2
     var executions = MemArray<ExecutionState>::new_zeroed(total_fulfillments as usize)
     var i: u256 = 0
@@ -740,37 +740,55 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
 }
 
-fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
-    DynArray::from_slice(values.as_slice())
-}
-
-pub fn hash_array(_ values: MemArray<u256>) -> DynArray<Bytes32> {
-    var out = MemArray<Bytes32>::new_zeroed(values.len())
-    var i: usize = 0
-    while i < values.len() {
-        out[i] = Bytes32 { val: values[i] }
-        i += 1
-    }
-    DynArray::from_slice(out.as_slice())
-}
-
-fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
-    var out = MemArray<Execution>::new_zeroed(executions.len())
-    var i: usize = 0
-    while i < executions.len() {
-        let e = executions[i]
-        out[i] = Execution {
-            item: ReceivedItem {
-                itemType: e.item_type.downcast_truncate(),
-                token: e.token,
-                identifier: e.identifier,
-                amount: e.amount,
-                recipient: e.recipient,
-            },
-            offerer: e.offerer,
-            conduitKey: Bytes32 { val: e.conduit_key },
+#[arithmetic(unchecked)]
+pub fn bool_array(_ values: MemArray<bool>) -> DynArray<bool> {
+    let count = values.len() as u256
+    // The tail holds a zeroed word per value, so no offset overflows.
+    var out = Buffer::array(count, stride: 32)
+    var i: u256 = 0
+    while i < count {
+        if values[i as usize] {
+            unsafe {
+                out.put(offset: 32 + i * 32, value: 1)
+            }
         }
         i += 1
     }
-    DynArray::from_slice(out.as_slice())
+    out.into_dyn_array(len: count)
+}
+
+/// `OrdersMatched(orderHashes)`, encoded directly into the log data.
+fn emit_orders_matched(_ order_hashes: MemArray<u256>) uses (log: mut Log) {
+    let count = order_hashes.len() as u256
+    var data = Buffer::new(64 + count * 32)
+    // The buffer holds the offset and length words.
+    unsafe {
+        data.put(offset: 0, value: 32)
+        data.put(offset: 32, value: count)
+    }
+    data.copy_from(offset: 64, source: order_hashes.span())
+    log.log1(data: data.span(), topic0: OrdersMatched::TOPIC0)
+}
+
+#[arithmetic(unchecked)]
+pub fn execution_array(_ executions: MemArray<ExecutionState>) -> DynArray<Execution> {
+    let count = executions.len() as u256
+    // The tail holds seven words per execution, so no offset overflows.
+    var out = Buffer::array(count, stride: 224)
+    var i: u256 = 0
+    while i < count {
+        let e = ref executions[i as usize]
+        let at = 32 + i * 224
+        unsafe {
+            out.put(offset: at, value: e.item_type & 0xff)
+            out.put(offset: at + 32, value: e.token.word())
+            out.put(offset: at + 64, value: e.identifier)
+            out.put(offset: at + 96, value: e.amount)
+            out.put(offset: at + 128, value: e.recipient.word())
+            out.put(offset: at + 160, value: e.offerer.word())
+            out.put(offset: at + 192, value: e.conduit_key)
+        }
+        i += 1
+    }
+    out.into_dyn_array(len: count)
 }

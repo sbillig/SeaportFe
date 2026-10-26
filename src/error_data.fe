@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: MIT
+// Custom error revert data for errors whose fields are all static.
+use core::ErrorVariant
+use core::ptr::{self, MemSpan}
+use std::abi::Sol
+use std::evm::revert_bytes
+use super::buffer::Buffer
+
+/// The selector of the custom error `E`.
+#[inline(always)]
+pub fn error_selector<E>() -> u256 where E: ErrorVariant<Sol> {
+    <E as ErrorVariant<Sol>>::SELECTOR as u256
+}
+
+/// Revert with custom error data: the 4-byte `selector`, then the first
+/// `words` of the argument words `a` to `c`. For an error whose fields are
+/// all static this is exactly what `revert_error` reverts with; the shared
+/// encoding avoids an encoder per error type.
+pub fn revert_custom(_ selector: u256, words: u256, a: u256, b: u256, c: u256) -> ! {
+    let data = ptr::alloc_bytes(0x64)
+    // The allocation holds the selector and all three words.
+    unsafe {
+        *ptr::cast<u8, u256>(data) = selector << 224
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 4)) = a
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x24)) = b
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x44)) = c
+        revert_bytes(
+            MemSpan::from_raw_parts(ptr: data, len: (4 + words * 32) as usize),
+        )
+    }
+}
+
+#[inline(always)]
+pub fn revert_with0(_ selector: u256) -> ! {
+    revert_custom(selector, words: 0, a: 0, b: 0, c: 0)
+}
+
+#[inline(always)]
+pub fn revert_with1(_ selector: u256, _ a: u256) -> ! {
+    revert_custom(selector, words: 1, a, b: 0, c: 0)
+}
+
+#[inline(always)]
+pub fn revert_with2(_ selector: u256, _ a: u256, _ b: u256) -> ! {
+    revert_custom(selector, words: 2, a, b, c: 0)
+}
+
+/// Revert with a custom error whose first field is the `bytes` or `string`
+/// `reason`, followed by `words` static words of `a` to `c`.
+pub fn revert_with_reason(
+    _ selector: u256,
+    reason: MemSpan,
+    words: u256,
+    a: u256,
+    b: u256,
+    c: u256,
+) -> ! {
+    // The reason's offset, behind its own head and the static words.
+    let tail = 32 + words * 32
+    let length = reason.len() as u256
+    var data = Buffer::new(4 + tail + 32 + ((length + 31) & !(31 as u256)))
+    // The zeroed buffer holds the head words and the reason length; a word
+    // past the static fields is the length word, written after them.
+    unsafe {
+        data.put(offset: 0, value: selector << 224)
+        data.put(offset: 4, value: tail)
+        data.put(offset: 0x24, value: a)
+        data.put(offset: 0x44, value: b)
+        data.put(offset: 0x64, value: c)
+        data.put(offset: 4 + tail, value: length)
+    }
+    data.copy_from(offset: 4 + tail + 32, source: reason)
+    revert_bytes(data.span())
+}
