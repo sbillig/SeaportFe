@@ -4,7 +4,7 @@
 use core::ErrorVariant
 use core::ptr::{self, MemSpan}
 use std::abi::Sol
-use std::evm::revert_bytes
+use std::evm::{RawOps, revert_bytes}
 use super::buffer::Buffer
 
 /// The selector of the custom error `E`.
@@ -97,4 +97,19 @@ pub fn revert_with_reason(
     }
     data.copy_from(offset: 4 + tail + 32, source: reason)
     revert_bytes(data.span())
+}
+
+/// Return `name` ABI-encoded as a `string`, as Seaport's `_name()` does: the
+/// offset, length and left-aligned bytes go into one terminal buffer instead
+/// of a `DynString` that is then copied into the return data.
+pub fn return_name<const N: usize>(_ name: String<N>) -> ! uses (ops: RawOps) {
+    let word = (name as u256) << (((32 - N) * 8) as u256)
+    let data = ptr::alloc_bytes(0x60)
+    // The allocation holds the offset, the length and the one data word.
+    unsafe {
+        *ptr::cast<u8, u256>(data) = 0x20
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x20)) = N as u256
+        *ptr::cast<u8, u256>(ptr::offset_bytes(data, 0x40)) = word
+        ops.return_data(data: MemSpan::from_raw_parts(ptr: data, len: 0x60))
+    }
 }

@@ -217,8 +217,10 @@ uses (
 
 /// `_prepareBasicFulfillmentFromCalldata`: validate the parameters, derive
 /// the order hash, emit `OrderFulfilled`, check the status and signature,
-/// authorize with the zone and mark the order filled.
+/// authorize with the zone and mark the order filled. Kept out of line so
+/// its frame does not join `validate_and_fulfill_basic_order`'s.
 #[arithmetic(unchecked)]
+#[inline(never)]
 fn prepare_basic_fulfillment_from_calldata(
     _ env: Env,
     order_type: u256,

@@ -89,6 +89,9 @@ pub fn compute_bulk_order_proof(_ signature: CalldataView, leaf: u256) -> (u256,
 /// `_assertValidSignature`: ECDSA (65 bytes, or 64-byte EIP-2098) recovery
 /// first, then EIP-1271 `isValidSignature` on the signer with the original
 /// digest and the complete original signature.
+/// Kept out of line: inlined, its spills made `verify_signature`'s frame
+/// 19 words.
+#[inline(never)]
 pub fn assert_valid_signature(
     signer: Address,
     digest: u256,

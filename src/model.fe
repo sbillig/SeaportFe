@@ -24,6 +24,7 @@
 // Seaport reads them. The order hash reads the raw words from calldata.
 use std::evm::{Address, Panic, PANIC_ENUM_CONVERSION}
 use core::ptr::{self, MemArray}
+use core::size_of
 use super::raw_abi::{error_selector, revert_with1}
 use super::abi_view::CalldataView
 
@@ -42,6 +43,14 @@ pub struct Item {
 }
 
 impl Copy for Item {}
+
+/// `ptr::offset` for an index the caller keeps inside its pool, where the
+/// byte offset cannot overflow and needs no checked multiplication. With
+/// the check, the offset is an out-of-line call at every pool access.
+#[arithmetic(unchecked)]
+pub fn elem<T>(_ base: *T, _ index: u256) -> *T {
+    ptr::offset_bytes(base, index * size_of<T>())
+}
 
 pub struct OrderState {
     pub offerer: Address,
@@ -191,7 +200,7 @@ fn fill_items(_ items: mut MemArray<Item>, start: usize, input: CalldataView, co
             Address::zero()
         }
         // `start + i` lies in the pool, which the caller sized for these items.
-        let slot = ptr::offset(items.ptr(), (start + i) as u256)
+        let slot = elem(items.ptr(), (start + i) as u256)
         unsafe {
             (*slot).item_type = item.word(0)
             (*slot).token = item.address(32)
@@ -244,7 +253,7 @@ fn build_book(_ input: CalldataView, count: usize, advanced: bool) -> Book {
         )
         // Fields are stored one by one, which keeps few values live, into
         // order `i` of the `count` the pool holds.
-        let state = ptr::offset(states.ptr(), i as u256)
+        let state = elem(states.ptr(), i as u256)
         unsafe {
             (*state).offerer = p.address(0)
             (*state).zone = p.address(32)
