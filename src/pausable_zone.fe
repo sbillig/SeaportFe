@@ -6,7 +6,19 @@
 // and `_pauser` in slots 0 to 2.
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes4, Bytes32, DynArray, DynString, dyn_array_from, sol}
-use std::evm::{Address, Call, Contract, Create, Ctx, Log, RawOps, Wei, create2_address, keccak256}
+use std::evm::{
+    Address,
+    Call,
+    Contract,
+    Create,
+    Ctx,
+    Log,
+    RawOps,
+    Wei,
+    create2_address,
+    keccak256,
+    revert_empty,
+}
 use super::raw_abi::{error_selector, revert_with0, revert_with1}
 use super::abi_view::CalldataView
 use super::buffer::Buffer
@@ -325,6 +337,14 @@ pub msg PausableZoneControllerMsg {
     ZoneCreationCode {} -> Bytes32,
 }
 
+/// Revert without data unless `zone` has code, as Solidity checks before
+/// a call whose result it does not decode.
+fn assert_has_code(_ zone: Address) uses (ctx: Ctx) {
+    if ctx.extcodesize(zone) == 0 {
+        revert_empty()
+    }
+}
+
 fn assert_owner(_ owner: u256) uses (ctx: Ctx) {
     if ctx.caller().word() != owner {
         revert_with0(error_selector<CallerIsNotOwner>())
@@ -384,6 +404,7 @@ pub contract PausableZoneController {
             if ctx.caller().word() != pauser && ctx.caller().word() != owner {
                 revert_with0(error_selector<InvalidPauser>())
             }
+            assert_has_code(zone)
             zone.call(PausableZoneMsg::Pause {})
             true
         }
@@ -488,6 +509,7 @@ pub contract PausableZoneController {
         uses (owner, ctx: Ctx, call: mut Call)
         {
             assert_owner(owner)
+            assert_has_code(pausableZoneAddress)
             pausableZoneAddress.call(PausableZoneMsg::AssignOperator { operatorToAssign })
         }
         Owner {} -> Address uses (owner) {

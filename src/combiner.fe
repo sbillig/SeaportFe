@@ -2,7 +2,7 @@
 // OrderCombiner: fulfillAvailable* and match* over groups of orders.
 use std::abi::DynArray
 use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
-use super::raw_abi::{error_selector, revert_custom, revert_with0}
+use super::raw_abi::{error_selector, revert_with0, revert_with3}
 use super::buffer::{Buffer, store_at}
 use super::amount::{get_fraction, locate_current_amount}
 use super::applier::{ExecutionState, aggregate_available, apply_fulfillment}
@@ -700,12 +700,11 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
             mut *element(book.items.ptr(), order.consideration_start + j)
         }
         if item.amount != 0 {
-            revert_custom(
+            revert_with3(
                 error_selector<ConsiderationNotMet>(),
-                words: 3,
-                a: index,
-                b: j,
-                c: item.amount,
+                index,
+                j,
+                item.amount,
             )
         }
         item.amount = item.original

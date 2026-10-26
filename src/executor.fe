@@ -7,7 +7,14 @@ use core::abi::store_word
 use core::ptr::{self, MemBuffer, MemSpan}
 use std::abi::Bytes32
 use std::evm::{Address, Call, Ctx, Panic, PANIC_INDEX_OUT_OF_BOUNDS, RawOps, Wei, revert_error, wei}
-use super::raw_abi::{error_selector, revert_custom5, revert_with0, revert_with1, revert_with2}
+use super::raw_abi::{
+    error_selector,
+    revert_with0,
+    revert_with1,
+    revert_with2,
+    revert_with4,
+    revert_with5,
+}
 use super::errors::{
     BadReturnValueFromERC20OnTransfer,
     InvalidCallToConduit,
@@ -21,6 +28,7 @@ use super::errors::{
 use super::hashing::{Env, derive_conduit}
 use super::lowlevel::revert_with_reason_if_one_is_returned
 use super::buffer::Buffer
+use super::model::checked_enum
 use super::types::{ERC20, NATIVE}
 
 /// transferFrom(address,address,uint256), shared by ERC20 and ERC721.
@@ -114,7 +122,8 @@ pub fn transfer_item(
 ) -> Accumulator
 uses (ctx: Ctx, call: mut Call, ops: RawOps)
 {
-    if item_type == NATIVE as u256 {
+    // `_transfer` reads the item type as an `ItemType`.
+    if checked_enum(item_type, variants: 6) == NATIVE as u256 {
         if (token.word() | identifier) != 0 {
             revert_with0(error_selector<UnusedItemParameters>())
         }
@@ -401,14 +410,13 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         )
     if !outcome.success() {
         revert_with_reason_if_one_is_returned()
-        revert_custom5(
+        revert_with5(
             error_selector<TokenTransferGenericFailure>(),
-            words: 5,
-            a: token.word(),
-            b: from.word(),
-            c: to.word(),
-            d: if erc20 { 0 } else { identifier },
-            e: amount,
+            token.word(),
+            from.word(),
+            to.word(),
+            if erc20 { 0 } else { identifier },
+            amount,
         )
     }
     if !erc20 { return }
@@ -421,14 +429,12 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     }
     // At least 32 returned bytes fill `ret`'s capacity.
     if size < 32 || unsafe { *ptr::cast<u8, u256>(ret.ptr()) } != 1 {
-        revert_custom5(
+        revert_with4(
             error_selector<BadReturnValueFromERC20OnTransfer>(),
-            words: 4,
-            a: token.word(),
-            b: from.word(),
-            c: to.word(),
-            d: amount,
-            e: 0,
+            token.word(),
+            from.word(),
+            to.word(),
+            amount,
         )
     }
 }

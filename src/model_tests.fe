@@ -1,9 +1,10 @@
 use core::abi::{AbiSize, Encode}
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
-use std::evm::{Address, Evm, Wei, encode_abi_payload}
+use std::evm::{Address, Evm, Wei, encode_abi_payload, keccak_words}
 use super::abi_view::CalldataView
 use super::applier::{aggregate_items, empty_execution}
+use super::hashing::ORDER_TYPEHASH
 use super::hashing_tests::{call_component_words, deploy_seaport}
 use super::model::{nested_components, orders_book, single_order}
 use super::types::{
@@ -256,6 +257,39 @@ uses (evm: mut Evm)
     assert(ok)
 }
 
+/// keccak256 of no bytes: the hash of an empty item array.
+const EMPTY_HASH: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+
+/// The hash of an order by the caller with no items, counter zero and
+/// `end_time`, whose offerer and zone words have bit 200 set. Seaport hashes
+/// the raw words, while its typed reads clean the offerer to the caller.
+fn raw_word_order_hash(_ end_time: u256) -> u256 uses (evm: Evm) {
+    keccak_words(
+        [
+            ORDER_TYPEHASH,
+            evm.address().word() | (1 << 200),
+            1 << 200,
+            EMPTY_HASH,
+            EMPTY_HASH,
+            0,
+            0,
+            end_time,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+}
+
+/// Whether `getOrderStatus` reports `order_hash` as validated.
+fn is_validated(_ addr: Address, _ order_hash: u256) -> bool
+uses (evm: mut Evm)
+{
+    let status = call_component_words(addr, selector: 0x46423aa7, words: [order_hash], len: 36)
+    status.0 && status.1 == 128 && status.2 == 1
+}
+
 // These raw inputs exercise Seaport's protocol decoder, including words
 // rejected by an ordinary Solidity ABI decoder. Expected outcomes match the
 // pinned optimized Solidity Seaport 1.6 contract.
@@ -286,6 +320,8 @@ uses (evm: mut Evm)
     ]
     let result = call_component_words(addr, selector: 0xb3a34c4c, words, len: 580)
     assert(result.0 && result.1 == 32 && result.2 == 1)
+    let max: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    assert(is_validated(addr, raw_word_order_hash(max)))
 }
 
 #[test]
@@ -340,7 +376,7 @@ fn advanced_order_fractions_mask_high_bits() uses (evm: mut Evm) {
 }
 
 #[test]
-fn validate_builds_and_emits_from_raw_calldata() uses (evm: mut Evm) {
+fn validate_builds_and_hashes_from_raw_calldata() uses (evm: mut Evm) {
     let addr = deploy_seaport()
     var words = [
         32,
@@ -365,6 +401,7 @@ fn validate_builds_and_emits_from_raw_calldata() uses (evm: mut Evm) {
     ]
     let result = call_component_words(addr, selector: 0x88147732, words, len: 612)
     assert(result.0 && result.1 == 32 && result.2 == 1)
+    assert(is_validated(addr, raw_word_order_hash(0)))
     words[9] = 5
     let bad_enum = call_component_words(addr, selector: 0x88147732, words, len: 612)
     assert(

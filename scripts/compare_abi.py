@@ -5,9 +5,12 @@
 
 For each Fe contract, lists functions, events and errors whose canonical
 signature (including output types for functions) differs from the Solidity
-contract it replaces. Fe skips recv arms with numeric selectors in the ABI
-(order entry points) and events written with raw log operations, so those
-are reported as missing and listed separately as expected.
+contract it replaces. The README's expected listing differences are marked
+and don't fail the comparison: Fe skips recv arms with numeric selectors
+and events written with raw log operations, lists only the errors raised
+with `revert_error`, doesn't list the PausableZone pair's shared events in
+both, marks `PausableZone.supportsInterface` as `pure`, and marks the
+`name()` of Seaport and Consideration as `view`.
 """
 import json
 import sys
@@ -40,11 +43,26 @@ NUMERIC = {
     "cancel(",
     "validate(",
     "getOrderHash(",
+    "execute(",
     "executeBatch1155(",
     "executeWithBatch1155(",
+    "authorizeOrder(",
+    "validateOrder(",
 }
 # Events written with raw log operations (no `emit` in the Fe ABI walk).
-RAW_LOGS = {"OrderValidated("}
+RAW_LOGS = {"OrderValidated(", "OrderCancelled(", "OrderFulfilled(", "OrdersMatched("}
+# Events Solidity lists for both PausableZone and its controller.
+SHARED_EVENTS = {
+    "PausableZone": {"OwnershipTransferred(", "PauserUpdated(", "PotentialOwnerUpdated(", "ZoneCreated("},
+    "PausableZoneController": {"OperatorUpdated(", "Paused(", "Unpaused("},
+}
+# Listed with a different state mutability on purpose.
+NAME_MUTABILITY = {"function name() -> (string) pure", "function name() -> (string) view"}
+MUTABILITY = {
+    "PausableZone": {"function supportsInterface(bytes4) -> (bool) view", "function supportsInterface(bytes4) -> (bool) pure"},
+    "Seaport": NAME_MUTABILITY,
+    "Consideration": NAME_MUTABILITY,
+}
 
 
 def canon(param):
@@ -84,16 +102,27 @@ def main():
         missing = sorted(sol - fe)
         extra = sorted(fe - sol)
         print(f"== {fe_name}: {len(sol & fe)} match")
+        known_mutability = MUTABILITY.get(fe_name, set())
         for m in missing:
-            sig = m.split(" ", 1)[1]
-            numeric = any(sig.startswith(n) for n in NUMERIC)
-            raw_log = m.startswith("event ") and any(sig.startswith(n) for n in RAW_LOGS)
-            note = " (numeric selector)" if numeric else " (raw log)" if raw_log else ""
-            print(f"  missing{note}: {m}")
-            bad += not (numeric or raw_log)
+            kind, sig = m.split(" ", 1)
+            if kind == "function" and any(sig.startswith(n) for n in NUMERIC):
+                note = "numeric selector"
+            elif kind == "event" and any(sig.startswith(n) for n in RAW_LOGS):
+                note = "raw log"
+            elif kind == "event" and any(sig.startswith(n) for n in SHARED_EVENTS.get(fe_name, ())):
+                note = "shared event"
+            elif kind == "error":
+                note = "not raised with revert_error"
+            elif m in known_mutability:
+                note = "mutability"
+            else:
+                note = None
+            print(f"  missing ({note}): {m}" if note else f"  missing: {m}")
+            bad += note is None
         for x in extra:
-            print(f"  extra:   {x}")
-            bad += 1
+            note = " (mutability)" if x in known_mutability else ""
+            print(f"  extra{note}:   {x}")
+            bad += x not in known_mutability
     return 1 if bad else 0
 
 

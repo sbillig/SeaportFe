@@ -271,8 +271,9 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
 
 /// Write the `count` items from `items` at `dst` as an ABI `SpentItem[]`,
 /// or with `received` as a `ReceivedItem[]`: the words of the typed event
-/// fields, the item type truncated to `uint8`, the current amount and the
-/// receiver. `dst` must have room for the `32 + count * stride` bytes.
+/// fields, with the item type checked as Solidity's encoder checks it, the
+/// current amount and the receiver. `dst` must have room for the
+/// `32 + count * stride` bytes.
 #[arithmetic(unchecked)]
 #[inline(always)]
 unsafe fn write_fulfilled_items(_ dst: *u8, items: *Item, count: u256, received: bool) {
@@ -288,7 +289,11 @@ unsafe fn write_fulfilled_items(_ dst: *u8, items: *Item, count: u256, received:
         }
         let out = 32 + i * stride
         unsafe {
-            store_at(dst, offset: out, value: item.item_type & 0xff)
+            store_at(
+                dst,
+                offset: out,
+                value: checked_enum(item.item_type, variants: 6),
+            )
             store_at(dst, offset: out + 32, value: item.token.word())
             store_at(dst, offset: out + 64, value: item.identifier)
             store_at(dst, offset: out + 96, value: item.amount)

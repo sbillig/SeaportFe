@@ -116,10 +116,16 @@ fn padded(_ len: u256) -> u256 {
     (len + 31) & !(31 as u256)
 }
 
+/// The `bytes` at `bytes` with its calldata padding, which Seaport's memory
+/// copy (`_decodeBytes`) keeps.
 fn write_bytes(_ dst: mut Buffer, offset: u256, _ bytes: CalldataView) -> u256 {
     let len = bytes.len()
     dst.write(offset, value: len)
-    dst.copy_calldata(offset: offset + 32, source: bytes.offset(32), len)
+    dst.copy_calldata(
+        offset: offset + 32,
+        source: bytes.offset(32),
+        len: padded(len),
+    )
     32 + padded(len)
 }
 
