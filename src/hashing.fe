@@ -48,22 +48,21 @@ pub fn derive_order_hash(_ params: CalldataView, consideration_count: u256, coun
         count: consideration_count,
         consideration: true,
     )
-    keccak_words(
-        [
-            ORDER_TYPEHASH,
-            params.word(0),
-            params.word(32),
-            offer_hash,
-            consideration_hash,
-            params.word(128),
-            params.word(160),
-            params.word(192),
-            params.word(224),
-            params.word(256),
-            params.word(288),
-            counter,
-        ],
-    )
+    let preimage = ptr::alloc_bytes(384)
+    // The typehash, the raw offerer and zone, both item hashes, the raw order
+    // type through conduit key, and the counter fill the 384 bytes.
+    unsafe {
+        store_word(ptr: preimage, value: ORDER_TYPEHASH)
+        params.copy_to(ptr::offset_bytes(preimage, 32), len: 64)
+        store_word(ptr: ptr::offset_bytes(preimage, 96), value: offer_hash)
+        store_word(
+            ptr: ptr::offset_bytes(preimage, 128),
+            value: consideration_hash,
+        )
+        params.offset(128).copy_to(ptr::offset_bytes(preimage, 160), len: 192)
+        store_word(ptr: ptr::offset_bytes(preimage, 352), value: counter)
+        keccak256(MemSpan::from_raw_parts(ptr: preimage, len: 384))
+    }
 }
 
 /// The hash of the `OrderComponents` at `order`, whose counter replaces

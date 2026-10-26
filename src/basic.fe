@@ -2,11 +2,10 @@
 // BasicOrderFulfiller: `fulfillBasicOrder` reads its parameters directly
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
-use core::ptr::{MemArray, MemBuffer}
-use std::abi::{Bytes, Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, keccak_words, keccak256, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, keccak_words, keccak256}
+use super::error_data::{error_selector, revert_with0, revert_with1, revert_with2}
 use super::abi_view::CalldataView
-use super::buffer::{Buffer, return_word}
+use super::buffer::Buffer
 use super::errors::{
     InsufficientNativeTokensSupplied,
     InvalidBasicOrderParameterEncoding,
@@ -115,7 +114,7 @@ fn assert_valid_basic_order_parameters() uses (ops: RawOps) {
     let valid_values = cd(BASIC_ORDER_TYPE) < 24
         && (cd(OFFERER) | cd(ZONE) | cd(OFFER_TOKEN) | cd(CONSIDERATION_TOKEN)) < (1 << 160)
     if !(valid_offsets && valid_values) {
-        revert_error(InvalidBasicOrderParameterEncoding {})
+        revert_with0(error_selector<InvalidBasicOrderParameterEncoding>())
     }
 }
 
@@ -138,7 +137,7 @@ uses (
     let additional_recipients_item_type: u256 = if route > 1 { 1 } else { 0 }
     let value_is_zero: u256 = if ctx.value().as_wei() == 0 { 1 } else { 0 }
     if additional_recipients_item_type != value_is_zero {
-        revert_error(InvalidMsgValue { value: ctx.value().as_wei() })
+        revert_with1(error_selector<InvalidMsgValue>(), ctx.value().as_wei())
     }
     let offer_type_is_additional_recipients_type = route > 3
     let additional_recipients_token = if offer_type_is_additional_recipients_type {
@@ -165,7 +164,7 @@ uses (
     }
     if additional_recipients_item_type == 0 {
         if cd(CONSIDERATION_TOKEN) | cd(CONSIDERATION_IDENTIFIER) != 0 {
-            revert_error(UnusedItemParameters {})
+            revert_with0(error_selector<UnusedItemParameters>())
         }
         transfer_individual_721_or_1155_item(env, item_type: offered_item_type, conduit_key)
         transfer_native_tokens_and_finalize()
@@ -241,14 +240,16 @@ uses (
     assert_valid_basic_order_parameters()
     if cd(START_TIME) > ctx.timestamp().as_seconds()
         || cd(END_TIME) <= ctx.timestamp().as_seconds() {
-        revert_error(
-            InvalidTime { startTime: cd(START_TIME), endTime: cd(END_TIME) },
+        revert_with2(
+            error_selector<InvalidTime>(),
+            cd(START_TIME),
+            cd(END_TIME),
         )
     }
     let total_recipients = cd(ADDITIONAL_RECIPIENTS_LENGTH)
     let total_original = cd(TOTAL_ORIGINAL_ADDITIONAL_RECIPIENTS)
     if total_recipients < total_original {
-        revert_error(MissingOriginalConsiderationItems {})
+        revert_with0(error_selector<MissingOriginalConsiderationItems>())
     }
 
     // Consideration item hashes of the primary item and the original
@@ -325,7 +326,7 @@ uses (
         i += 1
     }
     if combined_recipients >= (1 << 160) {
-        revert_error(InvalidBasicOrderParameterEncoding {})
+        revert_with0(error_selector<InvalidBasicOrderParameterEncoding>())
     }
     let received_items_hash = keccak256(consideration_hashes.span())
 
@@ -540,14 +541,14 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         let additional_amount = cd(ADDITIONAL_RECIPIENTS_DATA + i * 0x40)
         let recipient = cd_address(ADDITIONAL_RECIPIENTS_DATA + i * 0x40 + 0x20)
         if additional_amount > remaining {
-            revert_error(InsufficientNativeTokensSupplied {})
+            revert_with0(error_selector<InsufficientNativeTokensSupplied>())
         }
         remaining = remaining - additional_amount
         transfer_native_tokens(to: recipient, amount: additional_amount)
         i += 1
     }
     if amount > remaining {
-        revert_error(InsufficientNativeTokensSupplied {})
+        revert_with0(error_selector<InsufficientNativeTokensSupplied>())
     }
     transfer_native_tokens(to: offerer, amount)
     if remaining > amount {
@@ -578,7 +579,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
         amount = cd(OFFER_AMOUNT)
     }
     if identifier != 0 {
-        revert_error(UnusedItemParameters {})
+        revert_with0(error_selector<UnusedItemParameters>())
     }
     let conduit_key = if from_offerer {
         cd(OFFERER_CONDUIT_KEY)

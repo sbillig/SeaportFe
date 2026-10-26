@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // OrderValidator._validateOrder, OrderFulfiller and the order event helpers.
-use std::abi::{Bytes32, DynArray}
-use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps, revert_error}
+use std::evm::{TSlot, Address, Call, Ctx, Event, Log, RawOps}
+use super::error_data::{error_selector, revert_with0, revert_with2}
 use super::buffer::Buffer
 use super::amount::apply_fraction
 use core::ptr::MemArray
@@ -52,7 +52,7 @@ uses (ctx: Ctx)
     let valid = start_time <= ctx.timestamp().as_seconds()
         && end_time > ctx.timestamp().as_seconds()
     if revert_on_invalid && !valid {
-        revert_error(InvalidTime { startTime: start_time, endTime: end_time })
+        revert_with2(error_selector<InvalidTime>(), start_time, end_time)
     }
     valid
 }
@@ -62,7 +62,7 @@ pub fn consideration_length_checked_order_hash(_ order: OrderState) -> u256
 uses (store: OrderStore)
 {
     if order.consideration_len < order.total_original {
-        revert_error(MissingOriginalConsiderationItems {})
+        revert_with0(error_selector<MissingOriginalConsiderationItems>())
     }
     derive_order_hash(
         order.params,
@@ -90,15 +90,15 @@ uses (store: OrderStore, ctx: Ctx, call: Call, ops: RawOps)
     let order_type = checked_enum(order.order_type, variants: 5)
     if order_type == CONTRACT as u256 {
         if numerator * denominator != 1 {
-            revert_error(BadFraction {})
+            revert_with0(error_selector<BadFraction>())
         }
         return (1, 1, 1)
     }
     if numerator > denominator || numerator == 0 {
-        revert_error(BadFraction {})
+        revert_with0(error_selector<BadFraction>())
     }
     if numerator < denominator && order_type & 1 == 0 {
-        revert_error(PartialFillsNotEnabledForOrder {})
+        revert_with0(error_selector<PartialFillsNotEnabledForOrder>())
     }
     let order_hash = consideration_length_checked_order_hash(order)
     let raw_status = raw_status(order_hash)
@@ -158,7 +158,7 @@ uses (ctx: Ctx)
         i += 1
     }
     if order.order_type < 4 && any_native {
-        revert_error(InvalidNativeOfferItem {})
+        revert_with0(error_selector<InvalidNativeOfferItem>())
     }
     i = 0
     while i < order.consideration_len {
@@ -217,7 +217,7 @@ uses (ctx: Ctx, call: mut Call, ops: RawOps)
     while i < order.consideration_len {
         let item = ref items[(order.consideration_start + i) as usize]
         if item.item_type == NATIVE as u256 && item.amount > ctx.selfbalance().as_wei() {
-            revert_error(InsufficientNativeTokensSupplied {})
+            revert_with0(error_selector<InsufficientNativeTokensSupplied>())
         }
         acc = transfer(
             Transfer {
