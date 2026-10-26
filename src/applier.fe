@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // FulfillmentApplier: aggregate fulfillment components into executions.
+#![arithmetic(unchecked)]
 use std::evm::{Address, Ctx, Panic, PANIC_OVERFLOW, revert_error}
 use std::evm::keccak_words
 use super::errors::{
@@ -46,72 +47,27 @@ fn raise_aggregation_errors(_ error_buffer: u256) {
     }
 }
 
-/// `_aggregateValidFulfillmentOfferItems`: sum the referenced offer items of
-/// available orders, zeroing them. All of them must share type, token,
-/// identifier, offerer and conduit key. Also returns the index of the first
-/// used component, which seaport-core moves to the front of the array.
-pub fn aggregate_offer_items(_ book: mut Book, group: Group, recipient: Address) -> (
-    ExecutionState,
-    u256,
-) {
-    var execution = empty_execution()
-    var first_used: u256 = 0
-    var amount: u256 = 0
-    var error_buffer: u256 = 0
-    var data_hash: u256 = 0
-    var k: u256 = 0
-    while k < group.len() {
-        let component = group.component(k)
-        if component.order_index >= book.orders.len() as u256 {
-            revert_error(InvalidFulfillmentComponentData {})
-        }
-        let order = ref book.orders[(component.order_index) as usize]
-        if component.item_index < order.offer_len && order.numerator != 0 {
-            let item = mut book.items[(order.offer_start + component.item_index) as usize]
-            let new_amount = amount.wrapping_add(item.amount)
-            if new_amount < amount {
-                error_buffer = error_buffer | 2
-            }
-            if item.amount == 0 {
-                error_buffer = error_buffer | 1
-            }
-            amount = new_amount
-            item.amount = 0
-            if data_hash == 0 {
-                execution.item_type = item.item_type
-                execution.token = item.token
-                execution.identifier = item.identifier
-                execution.recipient = recipient
-                execution.offerer = order.offerer
-                execution.conduit_key = order.conduit_key
-                data_hash = keccak_words([item.item_type, item.token.word(), item.identifier])
-                first_used = k
-            } else if order.offerer != execution.offerer
-                || order.conduit_key != execution.conduit_key
-                || data_hash != keccak_words([item.item_type, item.token.word(), item.identifier]) {
-                revert_error(InvalidFulfillmentComponentData {})
-            }
-        }
-        k += 1
-    }
-    execution.amount = amount
-    raise_aggregation_errors(error_buffer)
-    (execution, first_used)
-}
-
-/// `_aggregateValidFulfillmentConsiderationItems`: like the offer side, but
-/// items must also share the recipient; offerer and conduit key are given.
-pub fn aggregate_consideration_items(
+/// `_aggregateValidFulfillmentOfferItems` or, for `consideration`,
+/// `_aggregateValidFulfillmentConsiderationItems`: sum the referenced items of
+/// available orders, zeroing them. All of them must share type, token and
+/// identifier, offer items also offerer and conduit key, and consideration
+/// items also the recipient; the other execution fields are given. Comparing
+/// these fields is equivalent to comparing seaport-core's hashes of them. Also
+/// returns the index of the first used component, which seaport-core moves to
+/// the front of the array.
+pub fn aggregate_items(
     _ book: mut Book,
     group: Group,
+    consideration: bool,
     offerer: Address,
     conduit_key: u256,
+    recipient: Address,
 ) -> (ExecutionState, u256) {
     var execution = empty_execution()
+    var found = false
     var first_used: u256 = 0
     var amount: u256 = 0
     var error_buffer: u256 = 0
-    var data_hash: u256 = 0
     var k: u256 = 0
     while k < group.len() {
         let component = group.component(k)
@@ -119,9 +75,14 @@ pub fn aggregate_consideration_items(
             revert_error(InvalidFulfillmentComponentData {})
         }
         let order = ref book.orders[(component.order_index) as usize]
-        if component.item_index < order.consideration_len && order.numerator != 0 {
-            let item = mut book.items[(order.consideration_start + component.item_index) as usize]
-            let new_amount = amount.wrapping_add(item.amount)
+        let (start, len) = if consideration {
+            (order.consideration_start, order.consideration_len)
+        } else {
+            (order.offer_start, order.offer_len)
+        }
+        if component.item_index < len && order.numerator != 0 {
+            let item = mut book.items[(start + component.item_index) as usize]
+            let new_amount = amount + item.amount
             if new_amount < amount {
                 error_buffer = error_buffer | 2
             }
@@ -130,19 +91,37 @@ pub fn aggregate_consideration_items(
             }
             amount = new_amount
             item.amount = 0
-            let item_hash = keccak_words(
-                [item.item_type, item.token.word(), item.identifier, 0, item.receiver.word()],
-            )
-            if data_hash == 0 {
-                execution.item_type = item.item_type
-                execution.token = item.token
-                execution.identifier = item.identifier
-                execution.recipient = item.receiver
-                execution.offerer = offerer
-                execution.conduit_key = conduit_key
-                data_hash = item_hash
+            let next = ExecutionState {
+                item_type: item.item_type,
+                token: item.token,
+                identifier: item.identifier,
+                amount: 0,
+                recipient: if consideration {
+                    item.receiver
+                } else {
+                    recipient
+                },
+                offerer: if consideration {
+                    offerer
+                } else {
+                    order.offerer
+                },
+                conduit_key: if consideration {
+                    conduit_key
+                } else {
+                    order.conduit_key
+                },
+            }
+            if !found {
+                execution = next
+                found = true
                 first_used = k
-            } else if data_hash != item_hash {
+            } else if next.item_type != execution.item_type
+                || next.token != execution.token
+                || next.identifier != execution.identifier
+                || next.recipient != execution.recipient
+                || next.offerer != execution.offerer
+                || next.conduit_key != execution.conduit_key {
                 revert_error(InvalidFulfillmentComponentData {})
             }
         }
@@ -166,18 +145,23 @@ pub fn apply_fulfillment(
     if offer_group.len() == 0 || consideration_group.len() == 0 {
         revert_error(OfferAndConsiderationRequiredOnFulfillment {})
     }
-    let (consideration, consideration_first) = aggregate_consideration_items(
+    let (consideration, consideration_first) = aggregate_items(
         mut book,
         group: consideration_group,
+        consideration: true,
         offerer: Address::zero(),
         conduit_key: 0,
+        recipient: Address::zero(),
     )
     if consideration.amount == 0 {
         return consideration
     }
-    let (offered, offer_first) = aggregate_offer_items(
+    let (offered, offer_first) = aggregate_items(
         mut book,
         group: offer_group,
+        consideration: false,
+        offerer: Address::zero(),
+        conduit_key: 0,
         recipient: consideration.recipient,
     )
     var execution = offered
@@ -220,15 +204,13 @@ uses (ctx: Ctx)
     if group.len() == 0 {
         revert_error(MissingFulfillmentComponentOnAggregation { side })
     }
-    if side == OFFER {
-        let (execution, _) = aggregate_offer_items(mut book, group, recipient)
-        return execution
-    }
-    let (execution, _) = aggregate_consideration_items(
+    let (execution, _) = aggregate_items(
         mut book,
         group,
+        consideration: side != OFFER,
         offerer: ctx.caller(),
         conduit_key: fulfiller_conduit_key,
+        recipient,
     )
     execution
 }

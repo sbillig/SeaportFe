@@ -27,8 +27,14 @@ uses (ctx: Ctx)
     if total_before_division == 0 {
         return 0
     }
+    // seaport-core rounds and divides without checks; duration is nonzero.
     let extra: u256 = if round_up { 1 } else { 0 }
-    (total_before_division - extra) / duration + extra
+    unchecked_div(total_before_division.wrapping_sub(extra), duration).wrapping_add(extra)
+}
+
+#[arithmetic(unchecked)]
+fn unchecked_div(_ a: u256, _ b: u256) -> u256 {
+    a / b
 }
 
 /// `_getFraction`: `value * numerator / denominator`, which must be exact.
@@ -39,7 +45,8 @@ pub fn get_fraction(numerator: u256, denominator: u256, value: u256) -> u256 {
     if mulmod(value, numerator, denominator) != 0 {
         revert_error(InexactFraction {})
     }
-    value * numerator / denominator
+    // The product is checked like seaport-core's; the denominator is nonzero.
+    unchecked_div(value * numerator, denominator)
 }
 
 /// `_applyFraction`
