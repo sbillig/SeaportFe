@@ -82,12 +82,12 @@ uses (
 )
 {
     set_reentrancy_guard(env, accept_native_tokens: true)
-    let total_orders = book.orders.len()
-    var order_hashes = MemArray<u256>::new_zeroed(total_orders)
+    let total_orders = book.orders.len() as u256
+    var order_hashes = MemArray<u256>::new_zeroed(book.orders.len())
     var contains_non_open = false
     var invalid_native_offer_item = false
     var i: u256 = 0
-    while i < total_orders as u256 {
+    while i < total_orders {
         let (order_is_non_open, order_has_native_offer) = validate_and_prepare_order(
             env,
             mut book,
@@ -389,12 +389,12 @@ uses (
         recipient,
         non_match: true,
     )
-    let total_offer = offer_fulfillments.list.len()
+    let total_offer = offer_fulfillments.list.len() as u256
     var executions = MemArray<ExecutionState>::new_zeroed(
-        total_offer + consideration_fulfillments.list.len(),
+        offer_fulfillments.list.len() + consideration_fulfillments.list.len(),
     )
     var i: u256 = 0
-    while i < total_offer as u256 {
+    while i < total_offer {
         aggregate_into(
             mut book,
             mut executions,
@@ -412,7 +412,7 @@ uses (
         aggregate_into(
             mut book,
             mut executions,
-            slot: total_offer as u256 + i,
+            slot: total_offer + i,
             side: CONSIDERATION,
             groups: consideration_fulfillments,
             index: i,
@@ -531,8 +531,8 @@ uses (
     ops: mut RawOps,
 )
 {
-    let total_orders = book.orders.len()
-    var available = MemArray<bool>::new_zeroed(total_orders)
+    let total_orders = book.orders.len() as u256
+    var available = MemArray<bool>::new_zeroed(book.orders.len())
     // Executions plus unspent offer items bound the number of transfers.
     var buf = transfer_buffer(executions.len() as u256 + book.used)
     var acc = new_accumulator()
@@ -542,7 +542,7 @@ uses (
         i += 1
     }
     i = 0
-    while i < total_orders as u256 {
+    while i < total_orders {
         acc = settle_order(
             env,
             mut book,
@@ -561,7 +561,7 @@ uses (
     }
     if contains_non_open {
         i = 0
-        while i < total_orders as u256 {
+        while i < total_orders {
             validate_available_order(book, available, order_hashes, index: i)
             i += 1
         }

@@ -3,7 +3,7 @@
 // from calldata at fixed offsets, like seaport-core, so that non-canonical
 // encodings are rejected with `InvalidBasicOrderParameterEncoding`.
 use core::ptr::{MemArray, MemBuffer}
-use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from}
+use std::abi::{Bytes, Bytes32, DynArray}
 use std::evm::{TSlot, Address, Call, Ctx, Log, RawOps, Wei, keccak_words, keccak256, revert_error}
 use super::buffer::{Buffer, return_word}
 use super::errors::{
@@ -361,16 +361,14 @@ uses (
         ],
     )
 
-    let offer_items = dyn_array_from(
-        [
-            SpentItem {
-                itemType: offered_item_type.downcast_truncate(),
-                token: cd_address(OFFER_TOKEN),
-                identifier: cd(OFFER_IDENTIFIER),
-                amount: cd(OFFER_AMOUNT),
-            },
-        ],
-    )
+    var spent = MemArray<SpentItem>::new_zeroed(1)
+    spent[0] = SpentItem {
+        itemType: offered_item_type.downcast_truncate(),
+        token: cd_address(OFFER_TOKEN),
+        identifier: cd(OFFER_IDENTIFIER),
+        amount: cd(OFFER_AMOUNT),
+    }
+    let offer_items = DynArray::from_slice(spent.as_slice())
     let consideration_items = DynArray::from_slice(received.as_slice())
     log.emit(
         OrderFulfilled {

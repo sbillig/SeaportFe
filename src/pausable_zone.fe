@@ -68,6 +68,7 @@ pub struct ZoneIsPaused {}
 
 #[abi]
 pub struct Schema { pub id: u256, pub metadata: Bytes }
+
 impl Copy for Schema {}
 
 const ZONE_INTERFACE_ID: u256 = 0x39dd6933
@@ -235,8 +236,7 @@ pub contract PausableZone {
         GetSeaportMetadata {} -> (DynString, DynArray<Schema>) {
             // "PausableZone"
             let name = DynString::from_word_prefix(word: 0x5061757361626c655a6f6e65 << 160, len: 12)
-            let schemas = dyn_array_from([Schema { id: 3003, metadata: Bytes::empty() }])
-            (name, schemas)
+            (name, dyn_array_from([Schema { id: 3003, metadata: Bytes::empty() }]))
         }
         SupportsInterface { interfaceId } -> bool {
             interfaceId.val == ZONE_INTERFACE_ID || interfaceId.val == ERC165_INTERFACE_ID

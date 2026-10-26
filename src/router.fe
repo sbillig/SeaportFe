@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SeaportRouter (contracts/helpers/SeaportRouter.sol): fulfill available
 // orders across Seaport 1.5 and 1.6 in one call.
-use core::ptr::{MemArray, MemSpan}
+use core::ptr::MemSpan
 use std::abi::{Bytes, Bytes32, DynArray, dyn_array_from, sol}
 use std::abi::sol::decode_output
 use std::evm::{Address, Call, Create, Ctx, RawOps, TSlot, revert_error, wei}
@@ -110,11 +110,10 @@ uses (
     let seaports = params.seaportContracts
     let order_params = params.advancedOrderParams
     let count = seaports.len()
-    // Unavailable groups share one empty array of each kind.
     let no_available = DynArray<bool>::empty()
     let no_executions = DynArray<Execution>::empty()
-    var available_parts = MemArray<DynArray<bool>>::from_fn(count, |_| no_available)
-    var execution_parts = MemArray<DynArray<Execution>>::from_fn(count, |_| no_executions)
+    var available_parts = MemArray::from_fn(count, |_| no_available)
+    var execution_parts = MemArray::from_fn(count, |_| no_executions)
     var i: usize = 0
     let maximum_fulfilled = params.maximumFulfilled
     var fulfillments_left = maximum_fulfilled

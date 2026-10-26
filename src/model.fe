@@ -154,7 +154,7 @@ fn fill_items(
 
 fn order_state(
     _ p: OrderParameters,
-    items_start: usize,
+    items_start: u256,
     numerator: u256,
     denominator: u256,
     signature: Bytes,
@@ -163,9 +163,9 @@ fn order_state(
     OrderState {
         offerer: p.offerer,
         zone: p.zone,
-        offer_start: items_start as u256,
+        offer_start: items_start,
         offer_len: p.offer.len() as u256,
-        consideration_start: (items_start + p.offer.len()) as u256,
+        consideration_start: items_start + p.offer.len() as u256,
         consideration_len: p.consideration.len() as u256,
         order_type: p.orderType as u256,
         start_time: p.startTime,
@@ -212,7 +212,7 @@ pub fn advanced_orders(_ orders: DynArray<AdvancedOrder>) -> Book {
         )
         states[i] = order_state(
             orders.get(i).parameters,
-            items_start: start,
+            items_start: start as u256,
             numerator: order.numerator.val as u256,
             denominator: order.denominator.val as u256,
             signature: order.signature,
@@ -251,7 +251,7 @@ pub fn orders_as_advanced(_ orders: DynArray<Order>) -> Book {
         )
         states[i] = order_state(
             orders.get(i).parameters,
-            items_start: start,
+            items_start: start as u256,
             numerator: 1,
             denominator: 1,
             signature: order.signature,

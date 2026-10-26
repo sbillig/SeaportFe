@@ -1,4 +1,4 @@
-use core::abi::{AbiSize, AbiSpan, Decode, Encode}
+use core::abi::{AbiSize, Encode}
 use core::ptr::MemBuffer
 use std::abi::{Bytes, Bytes32, DynArray, Sol, dyn_array_from, sol::Uint120}
 use std::evm::{Address, encode_abi_payload}
@@ -11,6 +11,19 @@ use super::types::{
     OfferItem,
     Order,
     OrderParameters,
+}
+
+/// A two-element ABI array of non-Copy records. The tuple encoding of the
+/// pair is exactly the element section of the array's ABI tail.
+fn pair<T>(_ values: own (T, T)) -> DynArray<T> where T: Encode<Sol> + AbiSize {
+    let elements = encode_abi_payload(values)
+    var data = MemBuffer::alloc(32 + elements.len())
+    data.write_word(offset: 0, value: 2)
+    data.copy_from(dest_offset: 32, elements.span())
+    // A complete ABI tail: the length word followed by the pair's encoding.
+    unsafe {
+        DynArray::from_abi_tail(data: data.ptr(), len: 2, size: data.len() as u256)
+    }
 }
 
 fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
@@ -45,18 +58,6 @@ fn order(_ identifier: u256, amount: u256) -> AdvancedOrder {
     }
 }
 
-/// The ABI array `[first, second]`, decoded from a length word followed by
-/// the encoded tuple of both elements.
-fn pair_array<T>(_ first: own T, _ second: own T) -> DynArray<T>
-where T: Encode<Sol> + AbiSize + AbiSpan<Sol>
-{
-    let elements = encode_abi_payload((first, second))
-    var encoded = MemBuffer::with_capacity(32 + elements.len())
-    encoded.write_word(offset: 0, value: 2)
-    encoded.extend_from(elements.span())
-    <DynArray<T> as Decode<Sol>>::decode_from(encoded.span(), 0)
-}
-
 #[test]
 fn owned_items_mutate_independently_of_order_views() {
     var book = single_advanced(order(4, amount: 7))
@@ -71,7 +72,7 @@ fn owned_items_mutate_independently_of_order_views() {
 
 #[test]
 fn multiple_orders_keep_their_item_and_byte_ranges() {
-    var book = advanced_orders(pair_array(order(4, amount: 7), order(5, amount: 13)))
+    var book = advanced_orders(pair((order(4, amount: 7), order(5, amount: 13))))
     assert(book.used == 2)
     assert(book.orders[0].offer_start == 0)
     assert(book.orders[1].offer_start == 1)
@@ -118,9 +119,11 @@ fn regular_orders_initialize_signature_and_empty_extra_data() {
     let first = order(4, amount: 7)
     let second = order(5, amount: 13)
     let book = orders_as_advanced(
-        pair_array(
-            Order { parameters: first.parameters, signature: first.signature },
-            Order { parameters: second.parameters, signature: second.signature },
+        pair(
+            (
+                Order { parameters: first.parameters, signature: first.signature },
+                Order { parameters: second.parameters, signature: second.signature },
+            ),
         ),
     )
     assert(book.used == 2)
