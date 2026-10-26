@@ -219,7 +219,9 @@ affected too.
 
 ## 13. Runtime code is far above EIP-170
 
-Status: open; reduced from 154 KB to 65 KB by rebasing onto upstream PR #1618
+Status: fixed. On Fe master e8612c21d at `-Os`, `Seaport` is 21,705 bytes and
+`Consideration` 21,711, below solc; see the README's Size and gas section.
+Earlier, rebasing onto upstream PR #1618 had reduced it from 154 KB to 65 KB.
 
 With `-O 1` the Fe `Seaport` runtime is about 154 KB (Solidity: just under
 24 KB), `Consideration` 144 KB, `ConduitController` 9.4 KB. The port cannot
